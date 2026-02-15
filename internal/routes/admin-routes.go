@@ -39,6 +39,8 @@ func AddAdminRoutes(
 	adminGroup.POST("/:contestid/problem", contestController.HandleCreateProblem)
 	adminGroup.PUT("/:contestid/:problemid", contestController.HandleUpdateProblem)
 	adminGroup.DELETE("/:contestid/:problemid", contestController.HandleDeleteProblem)
+	adminGroup.GET("/:contestid/:problemid/testcases", contestController.GetProblemTestcases)
+	adminGroup.GET("/:contestid/:problemid/answers", contestController.GetProblemAnswers)
 
 	//Leaderboard/User Management
 	adminGroup.PUT("/:contestid/leaderboard/:userid", contestController.HandleUpdateLeaderboardUser)

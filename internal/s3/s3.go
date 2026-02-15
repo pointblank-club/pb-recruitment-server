@@ -97,3 +97,48 @@ func (s *S3) DeleteObject(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+func (s *S3) ListObjects(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.Bucket),
+		Prefix: aws.String(prefix),
+	})
+
+	for paginator.HasMorePages() {
+		out, err := paginator.NextPage(ctx)
+		if err != nil {
+			log.Errorf("s3: list objects failed: %v", err)
+			return nil, err
+		}
+		for _, obj := range out.Contents {
+			if obj.Key != nil {
+				keys = append(keys, *obj.Key)
+			}
+		}
+	}
+	return keys, nil
+}
+
+func (s *S3) DeletePrefix(ctx context.Context, prefix string) error {
+	out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.Bucket),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, obj := range out.Contents {
+		_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(s.Bucket),
+			Key:    obj.Key,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}

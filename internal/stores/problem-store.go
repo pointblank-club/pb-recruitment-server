@@ -28,8 +28,8 @@ func (s *ProblemStore) CreateProblem(ctx context.Context, p *models.Problem) err
 	}
 
 	const q = `
-        INSERT INTO problems (id, contest_id, name, score, type, answer, description, has_multiple_answers)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO problems (id, contest_id, name, score, type, answer, description, has_multiple_answers, testcases)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     `
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID,
@@ -40,6 +40,7 @@ func (s *ProblemStore) CreateProblem(ctx context.Context, p *models.Problem) err
 		pq.Array(p.Answer),
 		p.Description,
 		p.HasMultipleAnswers,
+		p.Testcases,
 	)
 
 	if err != nil {
@@ -141,7 +142,7 @@ func (s *ProblemStore) GetProblemList(ctx context.Context, contestID string) ([]
 
 func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contestID string) (*dto.GetProblemStatementResponse, error) {
 	const q = `
-		SELECT id, contest_id, name, description, score, type
+		SELECT id, contest_id, name, description, score, type, testcases
 		FROM problems
 		WHERE id = $1 AND contest_id = $2
 	`
@@ -149,7 +150,7 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 	var p dto.GetProblemStatementResponse
 
 	err := s.db.QueryRowContext(ctx, q, problemID, contestID).Scan(
-		&p.ProblemID, &p.ContestID, &p.Name, &p.Description, &p.Score, &p.Type,
+		&p.ProblemID, &p.ContestID, &p.Name, &p.Description, &p.Score, &p.Type, &p.TestcasesKey,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {

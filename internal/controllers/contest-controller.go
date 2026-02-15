@@ -404,3 +404,60 @@ func (cc *ContestController) GetContestRegistrations(ctx echo.Context) error {
 
 	return ctx.JSON(http.StatusOK, registrations)
 }
+
+func (cc *ContestController) GetProblemTestcases(ctx echo.Context) error {
+	contestID := ctx.Param("contestid")
+	problemID := ctx.Param("problemid")
+	userID := ctx.Get(common.AUTH_USER_ID).(string)
+
+	err := cc.contestService.GetProblemVisibility(ctx.Request().Context(), contestID, userID)
+	if err != nil {
+		if err == common.ContestNotFoundError {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": common.ContestNotFoundError.Error(),
+			})
+		} else if err == common.UserNotRegisteredError ||
+			err == common.ContestNotRunningError {
+			return ctx.JSON(http.StatusForbidden, map[string]string{
+				"error": err.Error(),
+			})
+		}
+
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": common.FetchContestFailedError.Error(),
+		})
+	}
+
+	testcases, err := cc.contestService.GetProblemTestcases(ctx.Request().Context(), contestID, problemID)
+	if err != nil {
+		if err == common.ContestNotFoundError {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": common.ContestNotFoundError.Error(),
+			})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to load problem testcases",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, testcases)
+}
+
+func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
+	contestID := ctx.Param("contestid")
+	problemID := ctx.Param("problemid")
+
+	answers, err := cc.contestService.GetProblemAnswers(ctx.Request().Context(), contestID, problemID)
+	if err != nil {
+		if err == common.ContestNotFoundError {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": common.ContestNotFoundError.Error(),
+			})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to get problem answers",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, answers)
+}

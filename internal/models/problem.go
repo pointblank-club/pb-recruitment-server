@@ -9,4 +9,5 @@ type Problem struct {
 	Type               SubmissionType `json:"type"` // "code" or "mcq"
 	HasMultipleAnswers bool           `json:"has_multiple_answers"`
 	Answer             []int          `json:"answer"`
+	Testcases          string         `json:"testcases"`
 }
