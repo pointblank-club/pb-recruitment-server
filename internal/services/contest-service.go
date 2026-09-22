@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 
 	"fmt"
 
@@ -132,7 +133,12 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		return nil, err
 	}
 
+	// Use existing S3 key if it's valid, otherwise create a new one
 	s3Key := meta.Description
+	if s3Key == "" || !strings.HasPrefix(s3Key, "problems/") {
+		// Create new S3 key for NULL/empty descriptions or legacy direct descriptions
+		s3Key = fmt.Sprintf("problems/%s/%s.json", contestID, problemID)
+	}
 
 	payload := map[string]string{
 		"description": req.Description,
@@ -178,8 +184,10 @@ func (cs *ContestService) DeleteProblem(ctx context.Context, contestID string, p
 		return err
 	}
 
-	if err := cs.s3.DeleteObject(ctx, s3Key); err != nil {
-		log.Errorf("failed to delete S3 file for problem %s: %v", problemID, err)
+	if strings.HasPrefix(s3Key, "problems/") {
+		if err := cs.s3.DeleteObject(ctx, s3Key); err != nil {
+			log.Errorf("failed to delete S3 file for problem %s: %v", problemID, err)
+		}
 	}
 
 	return nil
@@ -213,6 +221,10 @@ func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID 
 	return cs.stores.Problems.GetProblemList(ctx, contestID)
 }
 
+func (cs *ContestService) GetContestProblemsListAdmin(ctx context.Context, contestID string) ([]dto.ProblemOverview, error) {
+	return cs.stores.Problems.GetProblemList(ctx, contestID)
+}
+
 func (cs *ContestService) GetContestProblem(ctx context.Context, contestID string, problemID string) (*dto.GetProblemStatementResponse, error) {
 
 	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
@@ -222,12 +234,32 @@ func (cs *ContestService) GetContestProblem(ctx context.Context, contestID strin
 
 	s3Key := meta.Description
 
-	desc, err := cs.s3.GetObject(ctx, s3Key)
+	if strings.HasPrefix(s3Key, "problems/") {
+		desc, err := cs.s3.GetObject(ctx, s3Key)
+		if err != nil {
+			return nil, err
+		}
+		meta.Description = desc
+	}
+
+	return meta, nil
+}
+
+func (cs *ContestService) GetContestProblemAdmin(ctx context.Context, contestID string, problemID string) (*dto.GetProblemStatementResponse, error) {
+	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
 	if err != nil {
 		return nil, err
 	}
 
-	meta.Description = desc
+	s3Key := meta.Description
+
+	if strings.HasPrefix(s3Key, "problems/") {
+		desc, err := cs.s3.GetObject(ctx, s3Key)
+		if err != nil {
+			return nil, err
+		}
+		meta.Description = desc
+	}
 
 	return meta, nil
 }

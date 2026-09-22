@@ -60,8 +60,9 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
         SET name = $3,
             score = $4,
             type = $5,
+			answer = $6,
 			has_multiple_answers = $7,
-            answer = $6
+			description = $8
         WHERE id = $1 AND contest_id = $2
     `
 
@@ -73,6 +74,7 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 		p.Type,
 		pq.Array(p.Answer),
 		p.HasMultipleAnswers,
+		p.Description,
 	)
 
 	if err != nil {
@@ -147,9 +149,10 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 	`
 
 	var p dto.GetProblemStatementResponse
+	var desc sql.NullString
 
 	err := s.db.QueryRowContext(ctx, q, problemID, contestID).Scan(
-		&p.ProblemID, &p.ContestID, &p.Name, &p.Description, &p.Score, &p.Type,
+		&p.ProblemID, &p.ContestID, &p.Name, &desc, &p.Score, &p.Type,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -158,6 +161,10 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 		}
 		log.Printf("problem-store: query failed: %v", err)
 		return nil, fmt.Errorf("query problem: %w", err)
+	}
+
+	if desc.Valid {
+		p.Description = desc.String
 	}
 
 	return &p, nil

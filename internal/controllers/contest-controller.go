@@ -231,7 +231,7 @@ func (cc *ContestController) HandleDeleteProblem(ctx echo.Context) error {
 
 	contestID := ctx.Param("contestid")
 	problemID := ctx.Param("problemid")
-	if contestID == "" || problemID == "" {
+	if contestID == "" || problemID == "" || problemID == "undefined" {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "contest ID and problem ID are required",
 		})
@@ -239,6 +239,11 @@ func (cc *ContestController) HandleDeleteProblem(ctx echo.Context) error {
 
 	err := cc.contestService.DeleteProblem(ctx.Request().Context(), contestID, problemID)
 	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": "problem not found",
+			})
+		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to delete problem",
 		})
@@ -403,4 +408,46 @@ func (cc *ContestController) GetContestRegistrations(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, registrations)
+}
+
+func (cc *ContestController) HandleListProblemsAdmin(ctx echo.Context) error {
+	contestID := ctx.Param("contestid")
+	if contestID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "contest ID is required",
+		})
+	}
+
+	problems, err := cc.contestService.GetContestProblemsListAdmin(ctx.Request().Context(), contestID)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to list contest problems",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, problems)
+}
+
+func (cc *ContestController) HandleGetProblemAdmin(ctx echo.Context) error {
+	contestID := ctx.Param("contestid")
+	problemID := ctx.Param("problemid")
+	if contestID == "" || problemID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "contest ID and problem ID are required",
+		})
+	}
+
+	problem, err := cc.contestService.GetContestProblemAdmin(ctx.Request().Context(), contestID, problemID)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": "problem not found",
+			})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to get problem",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, problem)
 }
