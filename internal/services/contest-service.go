@@ -105,7 +105,7 @@ func (cs *ContestService) CreateProblem(ctx context.Context, contestID string, r
 		HasMultipleAnswers: req.Type == "mcq" && len(req.Answer) > 1,
 	}
 
-	s3Key := fmt.Sprintf("problems/%s/%s.json", problem.ContestID, problem.ID)
+	s3Key := fmt.Sprintf("problems/%s/%s/description.json", contestID, problem.ID)
 
 	payload := map[string]string{
 		"description": req.Description,
@@ -118,6 +118,37 @@ func (cs *ContestService) CreateProblem(ctx context.Context, contestID string, r
 	}
 
 	problem.Description = s3Key
+
+	if req.Type == "code" {
+
+		testcasesKey := fmt.Sprintf("problems/%s/%s/testcases.json", contestID, problem.ID)
+		answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problem.ID)
+
+		tcArray := []map[string]interface{}{}
+		ansArray := []string{}
+
+		for i, tc := range req.Testcases {
+			tcArray = append(tcArray, map[string]interface{}{
+				"index": i,
+				"input": tc.Input,
+			})
+
+			ansArray = append(ansArray, tc.ExpectedOutput)
+		}
+
+		tcBytes, _ := json.Marshal(tcArray)
+		ansBytes, _ := json.Marshal(ansArray)
+
+		if err := cs.s3.PutObject(ctx, testcasesKey, string(tcBytes)); err != nil {
+			return nil, err
+		}
+
+		if err := cs.s3.PutObject(ctx, answersKey, string(ansBytes)); err != nil {
+			return nil, err
+		}
+
+		problem.Testcases = testcasesKey
+	}
 
 	if err := cs.stores.Problems.CreateProblem(ctx, problem); err != nil {
 		return nil, err
@@ -137,7 +168,7 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 	s3Key := meta.Description
 	if s3Key == "" || !strings.HasPrefix(s3Key, "problems/") {
 		// Create new S3 key for NULL/empty descriptions or legacy direct descriptions
-		s3Key = fmt.Sprintf("problems/%s/%s.json", contestID, problemID)
+		s3Key = fmt.Sprintf("problems/%s/%s/description.json", contestID, problemID)
 	}
 
 	payload := map[string]string{
@@ -152,6 +183,36 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		return nil, err
 	}
 
+	var testcasesKey string = meta.TestcasesKey
+
+	if req.Type == "code" && len(req.Testcases) > 0 {
+
+		testcasesKey = fmt.Sprintf("problems/%s/%s/testcases.json", contestID, problemID)
+		answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+
+		tcArray := []map[string]interface{}{}
+		ansArray := []string{}
+
+		for i, tc := range req.Testcases {
+			tcArray = append(tcArray, map[string]interface{}{
+				"index": i,
+				"input": tc.Input,
+			})
+
+			ansArray = append(ansArray, tc.ExpectedOutput)
+		}
+
+		tcBytes, _ := json.Marshal(tcArray)
+		if err := cs.s3.PutObjectOverwrite(ctx, testcasesKey, string(tcBytes)); err != nil {
+			return nil, err
+		}
+
+		ansBytes, _ := json.Marshal(ansArray)
+		if err := cs.s3.PutObjectOverwrite(ctx, answersKey, string(ansBytes)); err != nil {
+			return nil, err
+		}
+	}
+
 	hasMultiple := req.Type == "mcq" && len(req.Answer) > 1
 
 	problem := &models.Problem{
@@ -163,6 +224,7 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		Type:               req.Type,
 		Answer:             req.Answer,
 		HasMultipleAnswers: hasMultiple,
+		Testcases:          testcasesKey,
 	}
 
 	if err := cs.stores.Problems.UpdateProblem(ctx, problem); err != nil {
@@ -173,21 +235,25 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 
 func (cs *ContestService) DeleteProblem(ctx context.Context, contestID string, problemID string) error {
 
-	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
+	_, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
 	if err != nil {
 		return err
 	}
-
-	s3Key := meta.Description
 
 	if err := cs.stores.Problems.DeleteProblem(ctx, contestID, problemID); err != nil {
 		return err
 	}
 
-	if strings.HasPrefix(s3Key, "problems/") {
-		if err := cs.s3.DeleteObject(ctx, s3Key); err != nil {
-			log.Errorf("failed to delete S3 file for problem %s: %v", problemID, err)
-		}
+	prefix := fmt.Sprintf("problems/%s/%s/", contestID, problemID)
+	if err := cs.s3.DeletePrefix(ctx, prefix); err != nil {
+		log.Errorf("failed to delete S3 folder for problem %s: %v", problemID, err)
+	}
+
+	// Pre-PR#42 rows stored the description at a flat key outside the prefix above.
+	// Still swept for those; removable once no problem row predates the nested layout.
+	objectKey := fmt.Sprintf("problems/%s/%s.json", contestID, problemID)
+	if err := cs.s3.DeleteObject(ctx, objectKey); err != nil {
+		log.Errorf("failed to delete S3 Object for problem %s: %v", problemID, err)
 	}
 
 	return nil
@@ -225,7 +291,7 @@ func (cs *ContestService) GetContestProblemsListAdmin(ctx context.Context, conte
 	return cs.stores.Problems.GetProblemList(ctx, contestID)
 }
 
-func (cs *ContestService) GetContestProblem(ctx context.Context, contestID string, problemID string) (*dto.GetProblemStatementResponse, error) {
+func (cs *ContestService) GetContestProblem(ctx context.Context, contestID string, problemID string, includeTestcases bool) (*dto.GetProblemStatementResponse, error) {
 
 	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
 	if err != nil {
@@ -241,24 +307,19 @@ func (cs *ContestService) GetContestProblem(ctx context.Context, contestID strin
 		}
 		meta.Description = desc
 	}
-
-	return meta, nil
-}
-
-func (cs *ContestService) GetContestProblemAdmin(ctx context.Context, contestID string, problemID string) (*dto.GetProblemStatementResponse, error) {
-	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
-	if err != nil {
-		return nil, err
-	}
-
-	s3Key := meta.Description
-
-	if strings.HasPrefix(s3Key, "problems/") {
-		desc, err := cs.s3.GetObject(ctx, s3Key)
-		if err != nil {
-			return nil, err
+	if includeTestcases && meta.Type == models.Code && meta.TestcasesKey != "" {
+		// ponytail: testcases are secondary data. A missing or corrupt object must not
+		// take the problem statement down with it -- log and serve the statement.
+		if testcase, err := cs.s3.GetObject(ctx, meta.TestcasesKey); err != nil {
+			log.Errorf("failed to load testcases for problem %s: %v", problemID, err)
+		} else {
+			var tcArr []dto.TestCaseResponse
+			if err := json.Unmarshal([]byte(testcase), &tcArr); err != nil {
+				log.Errorf("failed to parse testcases for problem %s: %v", problemID, err)
+			} else {
+				meta.Testcases = tcArr
+			}
 		}
-		meta.Description = desc
 	}
 
 	return meta, nil
@@ -285,4 +346,54 @@ func (cs *ContestService) GetContest(ctx context.Context, contestID string, user
 
 func (cs *ContestService) GetContestRegistrations(ctx context.Context, contestID string) ([]dto.ContestRegistration, error) {
 	return cs.stores.Contests.GetContestRegistrations(ctx, contestID)
+}
+
+func (cs *ContestService) GetProblemTestcases(ctx context.Context, contestID, problemID string) ([]dto.TestCaseResponse, error) {
+
+	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
+	if err != nil {
+		return nil, err
+	}
+
+	if meta.Type != models.Code || meta.TestcasesKey == "" {
+		return []dto.TestCaseResponse{}, nil
+	}
+
+	raw, err := cs.s3.GetObject(ctx, meta.TestcasesKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var arr []dto.TestCaseResponse
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		return nil, err
+	}
+
+	return arr, nil
+}
+
+func (cs *ContestService) GetProblemAnswers(ctx context.Context, contestID, problemID string) ([]string, error) {
+
+	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
+	if err != nil {
+		return nil, err
+	}
+
+	if meta.Type != models.Code || meta.TestcasesKey == "" {
+		return []string{}, nil
+	}
+
+	answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+
+	raw, err := cs.s3.GetObject(ctx, answersKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var arr []string
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		return nil, err
+	}
+
+	return arr, nil
 }

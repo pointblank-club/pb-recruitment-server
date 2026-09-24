@@ -171,20 +171,9 @@ func (cc *ContestController) HandleCreateProblem(ctx echo.Context) error {
 		})
 	}
 
-	var req dto.CreateProblemRequest
-	if err := ctx.Bind(&req); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{
-			"error": "invalid request body",
-		})
-	}
+	req := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.CreateProblemRequest)
 
-	if req.Name == "" || req.Score <= 0 || req.Type == "" {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{
-			"error": "name, score, and type are required fields",
-		})
-	}
-
-	createdProblem, err := cc.contestService.CreateProblem(ctx.Request().Context(), contestID, &req)
+	createdProblem, err := cc.contestService.CreateProblem(ctx.Request().Context(), contestID, req)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to create problem",
@@ -204,20 +193,9 @@ func (cc *ContestController) HandleUpdateProblem(ctx echo.Context) error {
 		})
 	}
 
-	var req dto.CreateProblemRequest
-	if err := ctx.Bind(&req); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{
-			"error": "invalid request body",
-		})
-	}
+	req := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.CreateProblemRequest)
 
-	if req.Name == "" || req.Score <= 0 || req.Type == "" {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{
-			"error": "name, score, and type are required fields",
-		})
-	}
-
-	updatedProblem, err := cc.contestService.UpdateProblem(ctx.Request().Context(), contestID, problemID, &req)
+	updatedProblem, err := cc.contestService.UpdateProblem(ctx.Request().Context(), contestID, problemID, req)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to update problem",
@@ -377,7 +355,7 @@ func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
 		})
 	}
 
-	problem, err := cc.contestService.GetContestProblem(ctx.Request().Context(), contestID, problemID)
+	problem, err := cc.contestService.GetContestProblem(ctx.Request().Context(), contestID, problemID, false)
 	if err != nil {
 		if err == common.ContestNotFoundError {
 			return ctx.JSON(http.StatusNotFound, map[string]string{
@@ -437,7 +415,7 @@ func (cc *ContestController) HandleGetProblemAdmin(ctx echo.Context) error {
 		})
 	}
 
-	problem, err := cc.contestService.GetContestProblemAdmin(ctx.Request().Context(), contestID, problemID)
+	problem, err := cc.contestService.GetContestProblem(ctx.Request().Context(), contestID, problemID, true)
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{
@@ -450,4 +428,42 @@ func (cc *ContestController) HandleGetProblemAdmin(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, problem)
+}
+
+func (cc *ContestController) GetProblemTestcases(ctx echo.Context) error {
+	contestID := ctx.Param("contestid")
+	problemID := ctx.Param("problemid")
+
+	testcases, err := cc.contestService.GetProblemTestcases(ctx.Request().Context(), contestID, problemID)
+	if err != nil {
+		if err == common.ContestNotFoundError {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": common.ContestNotFoundError.Error(),
+			})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to load problem testcases",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, testcases)
+}
+
+func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
+	contestID := ctx.Param("contestid")
+	problemID := ctx.Param("problemid")
+
+	answers, err := cc.contestService.GetProblemAnswers(ctx.Request().Context(), contestID, problemID)
+	if err != nil {
+		if err == common.ContestNotFoundError {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": common.ContestNotFoundError.Error(),
+			})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to get problem answers",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, answers)
 }

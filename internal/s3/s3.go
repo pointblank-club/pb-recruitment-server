@@ -97,3 +97,25 @@ func (s *S3) DeleteObject(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+func (s *S3) DeletePrefix(ctx context.Context, prefix string) error {
+	out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.Bucket),
+		Prefix: aws.String(prefix),
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, obj := range out.Contents {
+		_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+			Bucket: aws.String(s.Bucket),
+			Key:    obj.Key,
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
