@@ -5,7 +5,6 @@ import (
 	"app/internal/models/dto"
 	"app/internal/services"
 	"errors"
-	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -114,7 +113,6 @@ func (uc *UserController) Signup(ctx echo.Context) error {
 		if errors.Is(err, common.UserAlreadyExistsError) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		}
-		log.Printf("Signup failed: %v", err)
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to sign up user"})
 	}
 
