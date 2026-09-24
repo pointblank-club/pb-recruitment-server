@@ -8,7 +8,7 @@ import (
 )
 
 func LoadEnv() error {
-	// Load environment variables. If STAGE is prod, do not load .env file
+	// Load environment variables. If STAGE is production, do not load .env file
 	if os.Getenv("STAGE") != "production" {
 		err := godotenv.Load()
 		if err != nil {

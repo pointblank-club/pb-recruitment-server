@@ -23,8 +23,8 @@ func NewUserController(userService *services.UserService) *UserController {
 }
 
 func validateUserInput(usn string, mobile string, currentYear int) error {
-	usnPattern := `^1DS2[3-5](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
-	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 25UGDS1234
+	usnPattern := `^1DS2[4-5](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
+	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 26UGDS1234
 	phonePattern := `^[0-9]{10}$`                                                                    // Example: 9234567890
 
 	usnUpper := strings.ToUpper(usn)
