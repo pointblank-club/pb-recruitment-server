@@ -5,6 +5,7 @@ import (
 	"app/internal/models/dto"
 	"app/internal/services"
 	"errors"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -23,8 +24,8 @@ func NewUserController(userService *services.UserService) *UserController {
 }
 
 func validateUserInput(usn string, mobile string, currentYear int) error {
-	usnPattern := `^1DS2[3-4](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
-	appNumberPattern := `^25UGDS[0-9]{4}$`                                                           // Example: 25UGDS1234
+	usnPattern := `^1DS2[3-5](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
+	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 25UGDS1234
 	phonePattern := `^[0-9]{10}$`                                                                    // Example: 9234567890
 
 	usnUpper := strings.ToUpper(usn)
@@ -113,6 +114,7 @@ func (uc *UserController) Signup(ctx echo.Context) error {
 		if errors.Is(err, common.UserAlreadyExistsError) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		}
+		log.Printf("Signup failed: %v", err)
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to sign up user"})
 	}
 
