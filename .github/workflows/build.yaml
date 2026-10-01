@@ -2,6 +2,8 @@ name: CI Check - Build Docker image
 
 on:
   push:
+    branches: [main]
+  pull_request:
 
 env:
   AWS_REGION: "ap-south-1"
