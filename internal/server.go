@@ -4,6 +4,9 @@ import (
 	"app/internal/controllers"
 	"context"
 
+	_ "app/docs"
+	echoSwagger "github.com/swaggo/echo-swagger"
+
 	"firebase.google.com/go/v4/auth"
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
@@ -45,6 +48,9 @@ func NewEchoServer(
 		},
 		AllowCredentials: true,
 	}))
+
+	// Swagger UI
+	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
 	// Health check endpoint
 	// This can be used by Kubernetes or any load balancer

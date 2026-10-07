@@ -4,12 +4,17 @@ ifneq (,$(wildcard .env))
     export
 endif
 
-ifeq ($(DB_ADDR),)
-    $(error DB_ADDR environment variable is not set. Please add DB_ADDR to your .env file)
+ifneq ($(filter migrate% migration,$(MAKECMDGOALS)),)
+    ifeq ($(DB_ADDR),)
+        $(error DB_ADDR environment variable is not set. Please add DB_ADDR to your .env file)
+    endif
 endif
 
 MIGRATIONS_PATH = ./internal/migrations
 
+.PHONY: swagger
+swagger:
+	@PATH="$$PATH:/usr/local/go/bin:$$HOME/go/bin" swag init -g cmd/app/main.go -o docs --parseDependency --parseInternal
 
 .PHONY: migrate-create
 migration:

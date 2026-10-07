@@ -7,9 +7,10 @@ import (
 	"app/internal/services"
 	"context"
 	"errors"
-	"github.com/labstack/echo/v4"
 	"net/http"
 	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 type SubmissionController struct {
@@ -24,6 +25,19 @@ func NewSubmissionController(submissionService *services.SubmissionService, cont
 	}
 }
 
+// GetSubmissionStatus godoc
+// @Summary      Get submission status
+// @Description  Get current status of a specific submission (e.g. pending, accepted, wrong_answer)
+// @Tags         Submissions
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Submission ID"
+// @Success      200 {object} map[string]string "Submission status"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden"
+// @Failure      404 {object} map[string]string "Submission not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /submission/{id}/status [get]
 func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 	id := ctx.Param("id")
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
@@ -48,6 +62,19 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 	})
 }
 
+// GetSubmissionDetails godoc
+// @Summary      Get submission details
+// @Description  Get full execution details of a specific submission including test cases, runtime, memory, and code
+// @Tags         Submissions
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Submission ID"
+// @Success      200 {object} dto.GetSubmissionDetailsResponse
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden"
+// @Failure      404 {object} map[string]string "Submission not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /submission/{id}/details [get]
 func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 	id := ctx.Param("id")
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
@@ -69,6 +96,19 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, sub)
 }
 
+// ListUserSubmissions godoc
+// @Summary      List user submissions for a problem
+// @Description  Get paginated submissions of the authenticated user for a specific problem
+// @Tags         Submissions
+// @Produce      json
+// @Security     BearerAuth
+// @Param        problem_id query string true "Problem ID"
+// @Param        page query int false "Page number (defaults to 0)"
+// @Success      200 {object} dto.ListProblemSubmissionsResponse
+// @Failure      400 {object} map[string]string "Invalid query parameters"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /submission/list [get]
 func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
@@ -91,6 +131,22 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 	})
 }
 
+// SubmitSolution godoc
+// @Summary      Submit a solution
+// @Description  Submit code or MCQ answer for a problem in a contest (user must be registered)
+// @Tags         Submissions
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        request body dto.SubmitSubmissionRequest true "Submission details"
+// @Success      201 {object} dto.SubmitSubmissionResponse
+// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden (not registered for contest)"
+// @Failure      404 {object} map[string]string "Contest or problem not found"
+// @Failure      409 {object} map[string]string "Submission already exists"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /submission/submit [post]
 func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 	reqCtx, cancelPreparation := context.WithTimeout(ctx.Request().Context(), 5*time.Second)
 	defer cancelPreparation()

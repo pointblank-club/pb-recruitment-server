@@ -2,6 +2,16 @@
 - Install [air](https://github.com/air-verse/air?tab=readme-ov-file#installation)
 - Run `air` command in the terminal
 - Server is running on `http://localhost:8080`
+- API documentation (Swagger UI): `http://localhost:8080/swagger/index.html`
+- Raw JSON Spec: `http://localhost:8080/swagger/doc.json`
+
+## API Documentation (Swagger)
+
+To regenerate Swagger documentation after modifying route annotations or DTOs:
+
+```bash
+make swagger
+```
 
 ## DB Migrations
 

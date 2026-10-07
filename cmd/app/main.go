@@ -15,6 +15,21 @@ import (
 	"go.uber.org/fx"
 )
 
+// @title                      Point Blank Recruitment API
+// @version                    1.0
+// @description                Backend API documentation for Point Blank recruitment portal, contests, submissions, and admin services.
+// @termsOfService            https://recruitment.pointblank.club
+
+// @contact.name              Point Blank Tech Team
+// @contact.url               https://pointblank.club
+
+// @BasePath                   /
+
+// @securityDefinitions.apikey BearerAuth
+// @in                         header
+// @name                       Authorization
+// @description                Type "Bearer " followed by your Firebase ID token.
+
 func main() {
 	if err := boot.LoadEnv(); err != nil {
 		log.Fatal(err)
