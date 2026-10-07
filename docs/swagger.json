@@ -1,0 +1,2827 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Backend API documentation for Point Blank recruitment portal, contests, submissions, and admin services.",
+        "title": "Point Blank Recruitment API",
+        "termsOfService": "https://recruitment.pointblank.club",
+        "contact": {
+            "name": "Point Blank Tech Team",
+            "url": "https://pointblank.club"
+        },
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/admin/contest": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new contest with registration and contest timelines",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Create contest (Admin)",
+                "parameters": [
+                    {
+                        "description": "Contest details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.UpsertContestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models.Contest"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/contest/{id}": {
+            "get": {
+                "description": "Get details of a contest. If user is authenticated, returns registration status as well.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get contest details",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.GetContestResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found"
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update details of an existing contest",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Update contest (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Contest payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.UpsertContestRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models.Contest"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found"
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete an existing contest and its associated data",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Delete contest (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Contest deleted successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Contest ID required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/contests/list": {
+            "get": {
+                "description": "Get a paginated list of all contests",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "List all contests",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (defaults to 0)",
+                        "name": "page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models.Contest"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/contests/{contestId}/registrations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get list of all registered participants for a contest",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Get contest registrations (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models_dto.ContestRegistration"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Contest ID required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/{contestid}/leaderboard/{userid}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Hide or disqualify a user from the contest leaderboard",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Leaderboard"
+                ],
+                "summary": "Update user status on leaderboard (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "userid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Update payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.UpdateLeaderboardUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Leaderboard user updated",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/{contestid}/problem": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new MCQ or Code problem in a contest",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "Create problem in contest (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Problem details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.CreateProblemRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models.Problem"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/{contestid}/problem/{problemid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get full problem statement and answer/test cases for admin",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "Get problem details (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problemid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.GetProblemStatementResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid parameters",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update details of a problem within a contest",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "Update problem in contest (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problemid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Problem details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.CreateProblemRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models.Problem"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Delete a problem from a contest",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "Delete problem from contest (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problemid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Problem deleted successfully",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid IDs",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/{contestid}/problems": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get all problems of a contest including unreleased items",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "List problems in contest (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models_dto.ProblemOverview"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Contest ID required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/{contestid}/{problemid}/answers": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get answers for a problem",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "Get problem answers (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problemid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/{contestid}/{problemid}/testcases": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get all testcases for a code problem",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Problems"
+                ],
+                "summary": "Get problem testcases (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problemid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models_dto.TestCaseResponse"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/signup": {
+            "post": {
+                "description": "Register a new user account with credentials and profile details",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Sign up user",
+                "parameters": [
+                    {
+                        "description": "Signup payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.SignupRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.SignupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "User already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/list": {
+            "get": {
+                "description": "Get a paginated list of all contests",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "List all contests",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number (defaults to 0)",
+                        "name": "page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models.Contest"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{id}": {
+            "get": {
+                "description": "Get details of a contest. If user is authenticated, returns registration status as well.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get contest details",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.GetContestResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found"
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{id}/leaderboard": {
+            "get": {
+                "description": "Get ranked participants and scores for a contest with pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get contest leaderboard",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (defaults to 0)",
+                        "name": "page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models_dto.LeaderboardEntry"
+                            }
+                        },
+                        "headers": {
+                            "X-Current-Page": {
+                                "type": "string",
+                                "description": "Current page"
+                            },
+                            "X-Total-Count": {
+                                "type": "string",
+                                "description": "Total count of leaderboard entries"
+                            },
+                            "X-Total-Pages": {
+                                "type": "string",
+                                "description": "Total pages"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{id}/problems": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get problems overview (names, score, type) for authenticated and registered user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get list of problems in contest",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models_dto.ProblemOverview"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Not registered or contest not running",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{id}/problems/{problem_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get detailed problem statement and options/sample testcases for authenticated and registered user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get problem statement",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problem_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.GetProblemStatementResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Not registered or contest not running",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest or problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{id}/registration": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Register or unregister the authenticated user for a specific contest",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Register or unregister for a contest",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Action (register or unregister)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.ModifyRegistrationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Registration status modified"
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Registration closed or invalid student year",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest or user not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "User already registered",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Check if the server is healthy",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System"
+                ],
+                "summary": "Health check",
+                "responses": {
+                    "200": {
+                        "description": "Server health status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/submission/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get paginated submissions of the authenticated user for a specific problem",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Submissions"
+                ],
+                "summary": "List user submissions for a problem",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Problem ID",
+                        "name": "problem_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (defaults to 0)",
+                        "name": "page",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.ListProblemSubmissionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/submission/submit": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Submit code or MCQ answer for a problem in a contest (user must be registered)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Submissions"
+                ],
+                "summary": "Submit a solution",
+                "parameters": [
+                    {
+                        "description": "Submission details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.SubmitSubmissionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.SubmitSubmissionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden (not registered for contest)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest or problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Submission already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/submission/{id}/details": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get full execution details of a specific submission including test cases, runtime, memory, and code",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Submissions"
+                ],
+                "summary": "Get submission details",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Submission ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.GetSubmissionDetailsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Submission not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/submission/{id}/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get current status of a specific submission (e.g. pending, accepted, wrong_answer)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Submissions"
+                ],
+                "summary": "Get submission status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Submission ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Submission status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Submission not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/users/create": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Create a new user profile after Firebase registration",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Create user profile",
+                "parameters": [
+                    {
+                        "description": "User details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.CreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "User created successfully"
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "User already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/users/profile": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Retrieve the profile of the authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Get current user profile",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models.User"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Update the profile details of the authenticated user",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Users"
+                ],
+                "summary": "Update user profile",
+                "parameters": [
+                    {
+                        "description": "Updated user details",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.UpdateUserProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "User profile updated successfully"
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "app_internal_models.Contest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "base64 encoded",
+                    "type": "string"
+                },
+                "eligible_to": {
+                    "description": "Student year restriction",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "end_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "id": {
+                    "description": "UUID as string",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registration_end_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "registration_start_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "start_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                }
+            }
+        },
+        "app_internal_models.Problem": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "contest_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "has_multiple_answers": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "description": "UUID as string",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "type": {
+                    "description": "\"code\" or \"mcq\"",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/app_internal_models.SubmissionType"
+                        }
+                    ]
+                }
+            }
+        },
+        "app_internal_models.Submission": {
+            "type": "object",
+            "properties": {
+                "contest_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "language": {
+                    "description": "For code submissions",
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "integer"
+                },
+                "option": {
+                    "description": "Selected option(s) for MCQ submissions",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "e.g., \"Pending\", \"Accepted\", \"Wrong Answer\", etc.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                        }
+                    ]
+                },
+                "test_case_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models.TestCaseResult"
+                    }
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models.SubmissionStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "accepted",
+                "wrong_answer",
+                "tle",
+                "mle",
+                "rte",
+                "failed_to_process"
+            ],
+            "x-enum-varnames": [
+                "Pending",
+                "Accepted",
+                "WrongAnswer",
+                "TimeLimitExceed",
+                "MemoryLimitExceed",
+                "RuntimeError",
+                "CompilationError"
+            ]
+        },
+        "app_internal_models.SubmissionType": {
+            "type": "string",
+            "enum": [
+                "mcq",
+                "code"
+            ],
+            "x-enum-varnames": [
+                "MCQ",
+                "Code"
+            ]
+        },
+        "app_internal_models.TestCaseResult": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "integer"
+                },
+                "runtime": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "submission_id": {
+                    "type": "string"
+                },
+                "test_case_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models.User": {
+            "type": "object",
+            "properties": {
+                "current_year": {
+                    "type": "integer"
+                },
+                "department": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "mobile_number": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "usn": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.ContestRegistration": {
+            "type": "object",
+            "properties": {
+                "current_year": {
+                    "type": "integer"
+                },
+                "department": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registered_at": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "usn": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.CreateProblemRequest": {
+            "type": "object",
+            "required": [
+                "description",
+                "name",
+                "options",
+                "score",
+                "type"
+            ],
+            "properties": {
+                "answer": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "testcases": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models_dto.CreateTestCaseRequest"
+                    }
+                },
+                "type": {
+                    "enum": [
+                        "mcq",
+                        "code"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/app_internal_models.SubmissionType"
+                        }
+                    ]
+                }
+            }
+        },
+        "app_internal_models_dto.CreateTestCaseRequest": {
+            "type": "object",
+            "required": [
+                "expected_output",
+                "input"
+            ],
+            "properties": {
+                "expected_output": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "string"
+                },
+                "is_sample": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "app_internal_models_dto.CreateUserRequest": {
+            "type": "object",
+            "required": [
+                "current_year",
+                "department",
+                "mobile_number",
+                "name",
+                "usn"
+            ],
+            "properties": {
+                "current_year": {
+                    "type": "integer",
+                    "maximum": 3,
+                    "minimum": 1
+                },
+                "department": {
+                    "type": "string"
+                },
+                "mobile_number": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "usn": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.GetContestResponse": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "description": "base64 encoded",
+                    "type": "string"
+                },
+                "eligible_to": {
+                    "description": "Student year restriction",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "end_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "id": {
+                    "description": "UUID as string",
+                    "type": "string"
+                },
+                "is_registered": {
+                    "description": "Whether the user is registered for the contest",
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registration_end_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "registration_start_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "start_time": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                }
+            }
+        },
+        "app_internal_models_dto.GetProblemStatementResponse": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "contest_id": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "testcases": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models_dto.TestCaseResponse"
+                    }
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                }
+            }
+        },
+        "app_internal_models_dto.GetSubmissionDetailsResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "contest_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Unix timestamp",
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "language": {
+                    "description": "For code submissions",
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "integer"
+                },
+                "option": {
+                    "description": "Selected option(s) for MCQ submissions",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "e.g., \"Pending\", \"Accepted\", \"Wrong Answer\", etc.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                        }
+                    ]
+                },
+                "test_case_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models.TestCaseResult"
+                    }
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.LeaderboardEntry": {
+            "type": "object",
+            "properties": {
+                "last_submission_time": {
+                    "type": "integer"
+                },
+                "problem_scores": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models_dto.ProblemScore"
+                    }
+                },
+                "problems_solved": {
+                    "type": "integer"
+                },
+                "rank": {
+                    "type": "integer"
+                },
+                "total_score": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "usn": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.ListProblemSubmissionsResponse": {
+            "type": "object",
+            "properties": {
+                "submissions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models.Submission"
+                    }
+                }
+            }
+        },
+        "app_internal_models_dto.ModifyRegistrationRequest": {
+            "type": "object",
+            "required": [
+                "action"
+            ],
+            "properties": {
+                "action": {
+                    "enum": [
+                        "register",
+                        "unregister"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/app_internal_models_dto.RegisterationAction"
+                        }
+                    ]
+                }
+            }
+        },
+        "app_internal_models_dto.ProblemOverview": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                }
+            }
+        },
+        "app_internal_models_dto.ProblemScore": {
+            "type": "object",
+            "properties": {
+                "attempts": {
+                    "type": "integer"
+                },
+                "max_score": {
+                    "type": "integer"
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "problem_name": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "solved_at": {
+                    "type": "integer"
+                }
+            }
+        },
+        "app_internal_models_dto.RegisterationAction": {
+            "type": "string",
+            "enum": [
+                "register",
+                "unregister"
+            ],
+            "x-enum-varnames": [
+                "RegisterAction",
+                "UnregisterAction"
+            ]
+        },
+        "app_internal_models_dto.SignupRequest": {
+            "type": "object",
+            "required": [
+                "current_year",
+                "department",
+                "email",
+                "mobile_number",
+                "name",
+                "password",
+                "usn"
+            ],
+            "properties": {
+                "current_year": {
+                    "type": "integer",
+                    "maximum": 3,
+                    "minimum": 1
+                },
+                "department": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "mobile_number": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string",
+                    "minLength": 6
+                },
+                "usn": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.SignupResponse": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.SubmitSubmissionRequest": {
+            "type": "object",
+            "required": [
+                "contest_id",
+                "problem_id",
+                "type"
+            ],
+            "properties": {
+                "code": {
+                    "description": "Base64 encoded code",
+                    "type": "string"
+                },
+                "contest_id": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "option": {
+                    "description": "For MCQ type questions",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                }
+            }
+        },
+        "app_internal_models_dto.SubmitSubmissionResponse": {
+            "type": "object",
+            "properties": {
+                "submission_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.TestCaseResponse": {
+            "type": "object",
+            "properties": {
+                "expected_output": {
+                    "type": "string"
+                },
+                "index": {
+                    "type": "integer"
+                },
+                "input": {
+                    "type": "string"
+                },
+                "is_sample": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "app_internal_models_dto.UpdateLeaderboardUserRequest": {
+            "type": "object",
+            "properties": {
+                "disqualified": {
+                    "type": "boolean"
+                },
+                "hidden": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "app_internal_models_dto.UpdateUserProfileRequest": {
+            "type": "object",
+            "required": [
+                "department",
+                "mobile_number",
+                "name"
+            ],
+            "properties": {
+                "department": {
+                    "type": "string"
+                },
+                "mobile_number": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.UpsertContestRequest": {
+            "type": "object",
+            "required": [
+                "description",
+                "eligible_to",
+                "end_time",
+                "name",
+                "registration_end_time",
+                "registration_start_time",
+                "start_time"
+            ],
+            "properties": {
+                "description": {
+                    "description": "base64 encoded",
+                    "type": "string"
+                },
+                "eligible_to": {
+                    "description": "Student year restriction",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "end_time": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "registration_end_time": {
+                    "type": "integer"
+                },
+                "registration_start_time": {
+                    "type": "integer"
+                },
+                "start_time": {
+                    "type": "integer"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "Type \"Bearer \" followed by your Firebase ID token.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        }
+    }
+}

@@ -1,0 +1,1867 @@
+basePath: /
+definitions:
+  app_internal_models.Contest:
+    properties:
+      description:
+        description: base64 encoded
+        type: string
+      eligible_to:
+        description: Student year restriction
+        items:
+          type: integer
+        type: array
+      end_time:
+        description: Unix timestamp
+        type: integer
+      id:
+        description: UUID as string
+        type: string
+      name:
+        type: string
+      registration_end_time:
+        description: Unix timestamp
+        type: integer
+      registration_start_time:
+        description: Unix timestamp
+        type: integer
+      start_time:
+        description: Unix timestamp
+        type: integer
+    type: object
+  app_internal_models.Problem:
+    properties:
+      answer:
+        items:
+          type: integer
+        type: array
+      contest_id:
+        type: string
+      description:
+        type: string
+      has_multiple_answers:
+        type: boolean
+      id:
+        description: UUID as string
+        type: string
+      name:
+        type: string
+      options:
+        items:
+          type: string
+        type: array
+      score:
+        type: integer
+      type:
+        allOf:
+        - $ref: '#/definitions/app_internal_models.SubmissionType'
+        description: '"code" or "mcq"'
+    type: object
+  app_internal_models.Submission:
+    properties:
+      contest_id:
+        type: string
+      created_at:
+        description: Unix timestamp
+        type: integer
+      id:
+        type: string
+      language:
+        description: For code submissions
+        type: string
+      memory:
+        type: integer
+      option:
+        description: Selected option(s) for MCQ submissions
+        items:
+          type: integer
+        type: array
+      problem_id:
+        type: string
+      runtime:
+        type: integer
+      status:
+        allOf:
+        - $ref: '#/definitions/app_internal_models.SubmissionStatus'
+        description: e.g., "Pending", "Accepted", "Wrong Answer", etc.
+      test_case_results:
+        items:
+          $ref: '#/definitions/app_internal_models.TestCaseResult'
+        type: array
+      type:
+        $ref: '#/definitions/app_internal_models.SubmissionType'
+      user_id:
+        type: string
+    type: object
+  app_internal_models.SubmissionStatus:
+    enum:
+    - pending
+    - accepted
+    - wrong_answer
+    - tle
+    - mle
+    - rte
+    - failed_to_process
+    type: string
+    x-enum-varnames:
+    - Pending
+    - Accepted
+    - WrongAnswer
+    - TimeLimitExceed
+    - MemoryLimitExceed
+    - RuntimeError
+    - CompilationError
+  app_internal_models.SubmissionType:
+    enum:
+    - mcq
+    - code
+    type: string
+    x-enum-varnames:
+    - MCQ
+    - Code
+  app_internal_models.TestCaseResult:
+    properties:
+      created_at:
+        type: integer
+      id:
+        type: string
+      memory:
+        type: integer
+      runtime:
+        type: integer
+      status:
+        type: string
+      submission_id:
+        type: string
+      test_case_id:
+        type: string
+    type: object
+  app_internal_models.User:
+    properties:
+      current_year:
+        type: integer
+      department:
+        type: string
+      email:
+        type: string
+      mobile_number:
+        type: string
+      name:
+        type: string
+      usn:
+        type: string
+    type: object
+  app_internal_models_dto.ContestRegistration:
+    properties:
+      current_year:
+        type: integer
+      department:
+        type: string
+      email:
+        type: string
+      name:
+        type: string
+      registered_at:
+        type: integer
+      user_id:
+        type: string
+      usn:
+        type: string
+    type: object
+  app_internal_models_dto.CreateProblemRequest:
+    properties:
+      answer:
+        items:
+          type: integer
+        type: array
+      description:
+        type: string
+      name:
+        type: string
+      options:
+        items:
+          type: string
+        minItems: 2
+        type: array
+      score:
+        type: integer
+      testcases:
+        items:
+          $ref: '#/definitions/app_internal_models_dto.CreateTestCaseRequest'
+        type: array
+      type:
+        allOf:
+        - $ref: '#/definitions/app_internal_models.SubmissionType'
+        enum:
+        - mcq
+        - code
+    required:
+    - description
+    - name
+    - options
+    - score
+    - type
+    type: object
+  app_internal_models_dto.CreateTestCaseRequest:
+    properties:
+      expected_output:
+        type: string
+      input:
+        type: string
+      is_sample:
+        type: boolean
+    required:
+    - expected_output
+    - input
+    type: object
+  app_internal_models_dto.CreateUserRequest:
+    properties:
+      current_year:
+        maximum: 3
+        minimum: 1
+        type: integer
+      department:
+        type: string
+      mobile_number:
+        type: string
+      name:
+        type: string
+      usn:
+        type: string
+    required:
+    - current_year
+    - department
+    - mobile_number
+    - name
+    - usn
+    type: object
+  app_internal_models_dto.GetContestResponse:
+    properties:
+      description:
+        description: base64 encoded
+        type: string
+      eligible_to:
+        description: Student year restriction
+        items:
+          type: integer
+        type: array
+      end_time:
+        description: Unix timestamp
+        type: integer
+      id:
+        description: UUID as string
+        type: string
+      is_registered:
+        description: Whether the user is registered for the contest
+        type: boolean
+      name:
+        type: string
+      registration_end_time:
+        description: Unix timestamp
+        type: integer
+      registration_start_time:
+        description: Unix timestamp
+        type: integer
+      start_time:
+        description: Unix timestamp
+        type: integer
+    type: object
+  app_internal_models_dto.GetProblemStatementResponse:
+    properties:
+      answer:
+        items:
+          type: integer
+        type: array
+      contest_id:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+      options:
+        items:
+          type: string
+        type: array
+      problem_id:
+        type: string
+      score:
+        type: integer
+      testcases:
+        items:
+          $ref: '#/definitions/app_internal_models_dto.TestCaseResponse'
+        type: array
+      type:
+        $ref: '#/definitions/app_internal_models.SubmissionType'
+    type: object
+  app_internal_models_dto.GetSubmissionDetailsResponse:
+    properties:
+      code:
+        type: string
+      contest_id:
+        type: string
+      created_at:
+        description: Unix timestamp
+        type: integer
+      id:
+        type: string
+      language:
+        description: For code submissions
+        type: string
+      memory:
+        type: integer
+      option:
+        description: Selected option(s) for MCQ submissions
+        items:
+          type: integer
+        type: array
+      problem_id:
+        type: string
+      runtime:
+        type: integer
+      status:
+        allOf:
+        - $ref: '#/definitions/app_internal_models.SubmissionStatus'
+        description: e.g., "Pending", "Accepted", "Wrong Answer", etc.
+      test_case_results:
+        items:
+          $ref: '#/definitions/app_internal_models.TestCaseResult'
+        type: array
+      type:
+        $ref: '#/definitions/app_internal_models.SubmissionType'
+      user_id:
+        type: string
+    type: object
+  app_internal_models_dto.LeaderboardEntry:
+    properties:
+      last_submission_time:
+        type: integer
+      problem_scores:
+        items:
+          $ref: '#/definitions/app_internal_models_dto.ProblemScore'
+        type: array
+      problems_solved:
+        type: integer
+      rank:
+        type: integer
+      total_score:
+        type: integer
+      user_id:
+        type: string
+      username:
+        type: string
+      usn:
+        type: string
+    type: object
+  app_internal_models_dto.ListProblemSubmissionsResponse:
+    properties:
+      submissions:
+        items:
+          $ref: '#/definitions/app_internal_models.Submission'
+        type: array
+    type: object
+  app_internal_models_dto.ModifyRegistrationRequest:
+    properties:
+      action:
+        allOf:
+        - $ref: '#/definitions/app_internal_models_dto.RegisterationAction'
+        enum:
+        - register
+        - unregister
+    required:
+    - action
+    type: object
+  app_internal_models_dto.ProblemOverview:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      score:
+        type: integer
+      type:
+        $ref: '#/definitions/app_internal_models.SubmissionType'
+    type: object
+  app_internal_models_dto.ProblemScore:
+    properties:
+      attempts:
+        type: integer
+      max_score:
+        type: integer
+      problem_id:
+        type: string
+      problem_name:
+        type: string
+      score:
+        type: integer
+      solved_at:
+        type: integer
+    type: object
+  app_internal_models_dto.RegisterationAction:
+    enum:
+    - register
+    - unregister
+    type: string
+    x-enum-varnames:
+    - RegisterAction
+    - UnregisterAction
+  app_internal_models_dto.SignupRequest:
+    properties:
+      current_year:
+        maximum: 3
+        minimum: 1
+        type: integer
+      department:
+        type: string
+      email:
+        type: string
+      mobile_number:
+        type: string
+      name:
+        type: string
+      password:
+        minLength: 6
+        type: string
+      usn:
+        type: string
+    required:
+    - current_year
+    - department
+    - email
+    - mobile_number
+    - name
+    - password
+    - usn
+    type: object
+  app_internal_models_dto.SignupResponse:
+    properties:
+      user_id:
+        type: string
+    type: object
+  app_internal_models_dto.SubmitSubmissionRequest:
+    properties:
+      code:
+        description: Base64 encoded code
+        type: string
+      contest_id:
+        type: string
+      language:
+        type: string
+      option:
+        description: For MCQ type questions
+        items:
+          type: integer
+        type: array
+      problem_id:
+        type: string
+      type:
+        $ref: '#/definitions/app_internal_models.SubmissionType'
+    required:
+    - contest_id
+    - problem_id
+    - type
+    type: object
+  app_internal_models_dto.SubmitSubmissionResponse:
+    properties:
+      submission_id:
+        type: string
+    type: object
+  app_internal_models_dto.TestCaseResponse:
+    properties:
+      expected_output:
+        type: string
+      index:
+        type: integer
+      input:
+        type: string
+      is_sample:
+        type: boolean
+    type: object
+  app_internal_models_dto.UpdateLeaderboardUserRequest:
+    properties:
+      disqualified:
+        type: boolean
+      hidden:
+        type: boolean
+    type: object
+  app_internal_models_dto.UpdateUserProfileRequest:
+    properties:
+      department:
+        type: string
+      mobile_number:
+        type: string
+      name:
+        type: string
+    required:
+    - department
+    - mobile_number
+    - name
+    type: object
+  app_internal_models_dto.UpsertContestRequest:
+    properties:
+      description:
+        description: base64 encoded
+        type: string
+      eligible_to:
+        description: Student year restriction
+        items:
+          type: integer
+        type: array
+      end_time:
+        type: integer
+      name:
+        type: string
+      registration_end_time:
+        type: integer
+      registration_start_time:
+        type: integer
+      start_time:
+        type: integer
+    required:
+    - description
+    - eligible_to
+    - end_time
+    - name
+    - registration_end_time
+    - registration_start_time
+    - start_time
+    type: object
+info:
+  contact:
+    name: Point Blank Tech Team
+    url: https://pointblank.club
+  description: Backend API documentation for Point Blank recruitment portal, contests,
+    submissions, and admin services.
+  termsOfService: https://recruitment.pointblank.club
+  title: Point Blank Recruitment API
+  version: "1.0"
+paths:
+  /admin/{contestid}/{problemid}/answers:
+    get:
+      description: Get answers for a problem
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: Problem ID
+        in: path
+        name: problemid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get problem answers (Admin)
+      tags:
+      - Admin - Problems
+  /admin/{contestid}/{problemid}/testcases:
+    get:
+      description: Get all testcases for a code problem
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: Problem ID
+        in: path
+        name: problemid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models_dto.TestCaseResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get problem testcases (Admin)
+      tags:
+      - Admin - Problems
+  /admin/{contestid}/leaderboard/{userid}:
+    put:
+      consumes:
+      - application/json
+      description: Hide or disqualify a user from the contest leaderboard
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: User ID
+        in: path
+        name: userid
+        required: true
+        type: string
+      - description: Update payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.UpdateLeaderboardUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Leaderboard user updated
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid input
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user status on leaderboard (Admin)
+      tags:
+      - Admin - Leaderboard
+  /admin/{contestid}/problem:
+    post:
+      consumes:
+      - application/json
+      description: Create a new MCQ or Code problem in a contest
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: Problem details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.CreateProblemRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/app_internal_models.Problem'
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create problem in contest (Admin)
+      tags:
+      - Admin - Problems
+  /admin/{contestid}/problem/{problemid}:
+    delete:
+      description: Delete a problem from a contest
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: Problem ID
+        in: path
+        name: problemid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Problem deleted successfully
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid IDs
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Problem not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete problem from contest (Admin)
+      tags:
+      - Admin - Problems
+    get:
+      description: Get full problem statement and answer/test cases for admin
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: Problem ID
+        in: path
+        name: problemid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.GetProblemStatementResponse'
+        "400":
+          description: Invalid parameters
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Problem not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get problem details (Admin)
+      tags:
+      - Admin - Problems
+    put:
+      consumes:
+      - application/json
+      description: Update details of a problem within a contest
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      - description: Problem ID
+        in: path
+        name: problemid
+        required: true
+        type: string
+      - description: Problem details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.CreateProblemRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models.Problem'
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update problem in contest (Admin)
+      tags:
+      - Admin - Problems
+  /admin/{contestid}/problems:
+    get:
+      description: Get all problems of a contest including unreleased items
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models_dto.ProblemOverview'
+            type: array
+        "400":
+          description: Contest ID required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List problems in contest (Admin)
+      tags:
+      - Admin - Problems
+  /admin/contest:
+    post:
+      consumes:
+      - application/json
+      description: Create a new contest with registration and contest timelines
+      parameters:
+      - description: Contest details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.UpsertContestRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/app_internal_models.Contest'
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create contest (Admin)
+      tags:
+      - Admin - Contests
+  /admin/contest/{id}:
+    delete:
+      description: Delete an existing contest and its associated data
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Contest deleted successfully
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Contest ID required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete contest (Admin)
+      tags:
+      - Admin - Contests
+    get:
+      description: Get details of a contest. If user is authenticated, returns registration
+        status as well.
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.GetContestResponse'
+        "404":
+          description: Contest not found
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get contest details
+      tags:
+      - Contests
+    put:
+      consumes:
+      - application/json
+      description: Update details of an existing contest
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Contest payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.UpsertContestRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models.Contest'
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest not found
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update contest (Admin)
+      tags:
+      - Admin - Contests
+  /admin/contests/{contestId}/registrations:
+    get:
+      description: Get list of all registered participants for a contest
+      parameters:
+      - description: Contest ID
+        in: path
+        name: contestId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models_dto.ContestRegistration'
+            type: array
+        "400":
+          description: Contest ID required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden - Admin access required
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get contest registrations (Admin)
+      tags:
+      - Admin - Contests
+  /admin/contests/list:
+    get:
+      description: Get a paginated list of all contests
+      parameters:
+      - description: Page number (defaults to 0)
+        in: query
+        name: page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models.Contest'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all contests
+      tags:
+      - Contests
+  /auth/signup:
+    post:
+      consumes:
+      - application/json
+      description: Register a new user account with credentials and profile details
+      parameters:
+      - description: Signup payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.SignupRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.SignupResponse'
+        "400":
+          description: Invalid input
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: User already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Sign up user
+      tags:
+      - Auth
+  /contests/{id}:
+    get:
+      description: Get details of a contest. If user is authenticated, returns registration
+        status as well.
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.GetContestResponse'
+        "404":
+          description: Contest not found
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get contest details
+      tags:
+      - Contests
+  /contests/{id}/leaderboard:
+    get:
+      description: Get ranked participants and scores for a contest with pagination
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Page number (defaults to 0)
+        in: query
+        name: page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Current-Page:
+              description: Current page
+              type: string
+            X-Total-Count:
+              description: Total count of leaderboard entries
+              type: string
+            X-Total-Pages:
+              description: Total pages
+              type: string
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models_dto.LeaderboardEntry'
+            type: array
+        "404":
+          description: Contest not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get contest leaderboard
+      tags:
+      - Contests
+  /contests/{id}/problems:
+    get:
+      description: Get problems overview (names, score, type) for authenticated and
+        registered user
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models_dto.ProblemOverview'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Not registered or contest not running
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get list of problems in contest
+      tags:
+      - Contests
+  /contests/{id}/problems/{problem_id}:
+    get:
+      description: Get detailed problem statement and options/sample testcases for
+        authenticated and registered user
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Problem ID
+        in: path
+        name: problem_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.GetProblemStatementResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Not registered or contest not running
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest or problem not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get problem statement
+      tags:
+      - Contests
+  /contests/{id}/registration:
+    post:
+      consumes:
+      - application/json
+      description: Register or unregister the authenticated user for a specific contest
+      parameters:
+      - description: Contest ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Action (register or unregister)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.ModifyRegistrationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Registration status modified
+        "400":
+          description: Invalid input
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Registration closed or invalid student year
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest or user not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: User already registered
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Register or unregister for a contest
+      tags:
+      - Contests
+  /contests/list:
+    get:
+      description: Get a paginated list of all contests
+      parameters:
+      - description: Page number (defaults to 0)
+        in: query
+        name: page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/app_internal_models.Contest'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List all contests
+      tags:
+      - Contests
+  /health:
+    get:
+      description: Check if the server is healthy
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Server health status
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - System
+  /submission/{id}/details:
+    get:
+      description: Get full execution details of a specific submission including test
+        cases, runtime, memory, and code
+      parameters:
+      - description: Submission ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.GetSubmissionDetailsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Submission not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get submission details
+      tags:
+      - Submissions
+  /submission/{id}/status:
+    get:
+      description: Get current status of a specific submission (e.g. pending, accepted,
+        wrong_answer)
+      parameters:
+      - description: Submission ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Submission status
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Submission not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get submission status
+      tags:
+      - Submissions
+  /submission/list:
+    get:
+      description: Get paginated submissions of the authenticated user for a specific
+        problem
+      parameters:
+      - description: Problem ID
+        in: query
+        name: problem_id
+        required: true
+        type: string
+      - description: Page number (defaults to 0)
+        in: query
+        name: page
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.ListProblemSubmissionsResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List user submissions for a problem
+      tags:
+      - Submissions
+  /submission/submit:
+    post:
+      consumes:
+      - application/json
+      description: Submit code or MCQ answer for a problem in a contest (user must
+        be registered)
+      parameters:
+      - description: Submission details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.SubmitSubmissionRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/app_internal_models_dto.SubmitSubmissionResponse'
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "403":
+          description: Forbidden (not registered for contest)
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Contest or problem not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Submission already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Submit a solution
+      tags:
+      - Submissions
+  /users/create:
+    post:
+      consumes:
+      - application/json
+      description: Create a new user profile after Firebase registration
+      parameters:
+      - description: User details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: User created successfully
+        "400":
+          description: Validation error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: User already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create user profile
+      tags:
+      - Users
+  /users/profile:
+    get:
+      description: Retrieve the profile of the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/app_internal_models.User'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get current user profile
+      tags:
+      - Users
+    post:
+      consumes:
+      - application/json
+      description: Update the profile details of the authenticated user
+      parameters:
+      - description: Updated user details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/app_internal_models_dto.UpdateUserProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: User profile updated successfully
+        "400":
+          description: Invalid input
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: User not found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update user profile
+      tags:
+      - Users
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer " followed by your Firebase ID token.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
