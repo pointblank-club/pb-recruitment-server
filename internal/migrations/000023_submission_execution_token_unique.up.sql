@@ -1,0 +1,4 @@
+ALTER TABLE submission_executions
+ADD CONSTRAINT submission_executions_judge0_token_unique UNIQUE (judge0_token);
+
+DROP INDEX submission_executions_judge0_token_idx;
