@@ -2146,6 +2146,9 @@ const docTemplate = `{
                     "description": "UUID as string",
                     "type": "string"
                 },
+                "memory_limit": {
+                    "type": "integer"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -2156,6 +2159,9 @@ const docTemplate = `{
                     }
                 },
                 "score": {
+                    "type": "integer"
+                },
+                "time_limit": {
                     "type": "integer"
                 },
                 "type": {
@@ -2232,7 +2238,8 @@ const docTemplate = `{
                 "tle",
                 "mle",
                 "rte",
-                "failed_to_process"
+                "failed_to_process",
+                "judge_error"
             ],
             "x-enum-varnames": [
                 "Pending",
@@ -2241,7 +2248,8 @@ const docTemplate = `{
                 "TimeLimitExceed",
                 "MemoryLimitExceed",
                 "RuntimeError",
-                "CompilationError"
+                "CompilationError",
+                "JudgeError"
             ]
         },
         "app_internal_models.SubmissionType": {
@@ -2349,6 +2357,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "memory_limit": {
+                    "type": "integer"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -2367,6 +2378,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/app_internal_models_dto.CreateTestCaseRequest"
                     }
+                },
+                "time_limit": {
+                    "type": "integer"
                 },
                 "type": {
                     "enum": [
@@ -2486,6 +2500,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "memory_limit": {
+                    "type": "integer"
+                },
                 "name": {
                     "type": "string"
                 },
@@ -2506,6 +2523,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/app_internal_models_dto.TestCaseResponse"
                     }
+                },
+                "time_limit": {
+                    "type": "integer"
                 },
                 "type": {
                     "$ref": "#/definitions/app_internal_models.SubmissionType"
@@ -2738,7 +2758,6 @@ const docTemplate = `{
             ],
             "properties": {
                 "code": {
-                    "description": "Base64 encoded code",
                     "type": "string"
                 },
                 "contest_id": {
