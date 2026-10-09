@@ -1,6 +1,7 @@
 package services
 
 import (
+	"app/internal/common"
 	"app/internal/judge0"
 	"app/internal/models"
 	"app/internal/models/dto"
@@ -18,11 +19,15 @@ import (
 
 type submissionTestStore struct {
 	*stores.SubmissionStore
-	markFailed func(context.Context, string) error
-	judgeMCQ   func(context.Context, string) error
+	markFailed       func(context.Context, string) error
+	judgeMCQ         func(context.Context, string) error
+	createSubmission func(context.Context, *models.Submission) (string, error)
 }
 
-func (submissionTestStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
+func (s submissionTestStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
+	if s.createSubmission != nil {
+		return s.createSubmission(ctx, sub)
+	}
 	return "submission", nil
 }
 
@@ -37,10 +42,16 @@ func (s submissionTestStore) JudgeMCQ(ctx context.Context, id string) error {
 	return s.judgeMCQ(ctx, id)
 }
 
-type problemTestStore struct{ *stores.ProblemStore }
+type problemTestStore struct {
+	*stores.ProblemStore
+	getProblem func(context.Context, string, string) (*dto.GetProblemStatementResponse, error)
+}
 
-func (problemTestStore) GetProblem(context.Context, string, string) (*dto.GetProblemStatementResponse, error) {
-	return &dto.GetProblemStatementResponse{TimeLimit: 1000, MemoryLimit: 256}, nil
+func (s problemTestStore) GetProblem(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
+	if s.getProblem != nil {
+		return s.getProblem(ctx, problemID, contestID)
+	}
+	return &dto.GetProblemStatementResponse{Type: models.Code, TimeLimit: 1000, MemoryLimit: 256}, nil
 }
 
 type executionTestStore struct {
@@ -206,6 +217,104 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 			}
 			if err == nil && id != "submission" {
 				t.Errorf("submission ID = %q", id)
+			}
+		})
+	}
+}
+
+func TestJudgeMCQFailureBookkeeping(t *testing.T) {
+	dbErr := errors.New("database unavailable")
+	writeErr := errors.New("failure status write failed")
+	for _, tc := range []struct {
+		name              string
+		judgeErr, markErr error
+	}{
+		{name: "success"},
+		{name: "expired judge context", judgeErr: context.DeadlineExceeded},
+		{name: "database error", judgeErr: dbErr},
+		{name: "cleanup error", judgeErr: dbErr, markErr: writeErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tc.judgeErr == context.DeadlineExceeded {
+				expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+				ctx = expired
+			}
+			marked := false
+			storage := &stores.Storage{Submissions: submissionTestStore{
+				judgeMCQ: func(_ context.Context, id string) error {
+					if id != "submission" {
+						t.Errorf("judge ID = %q", id)
+					}
+					return tc.judgeErr
+				},
+				markFailed: func(ctx context.Context, id string) error {
+					marked = true
+					if id != "submission" || ctx.Err() != nil {
+						t.Errorf("invalid cleanup: ID=%q error=%v", id, ctx.Err())
+					}
+					if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+						t.Error("cleanup needs a fresh bounded context")
+					}
+					return tc.markErr
+				},
+			}}
+			err := NewSubmissionService(storage, nil, nil).JudgeMCQ(ctx, "submission")
+			if !errors.Is(err, tc.judgeErr) || tc.markErr != nil && !errors.Is(err, tc.markErr) {
+				t.Errorf("lost judge/cleanup errors: %v", err)
+			}
+			if marked != (tc.judgeErr != nil) {
+				t.Errorf("marked=%v, judge error=%v", marked, tc.judgeErr)
+			}
+		})
+	}
+}
+
+func TestCreateSubmissionValidatesProblemBeforeInsert(t *testing.T) {
+	dbErr := errors.New("database unavailable")
+	for _, tc := range []struct {
+		name               string
+		problemType        models.SubmissionType
+		submissionType     models.SubmissionType
+		lookupErr, wantErr error
+	}{
+		{name: "valid MCQ", problemType: models.MCQ},
+		{name: "code problem", problemType: models.Code, wantErr: common.ErrNotFound},
+		{name: "code request against MCQ", problemType: models.MCQ, submissionType: models.Code, wantErr: common.ErrNotFound},
+		{name: "other contest or missing problem", lookupErr: common.ContestNotFoundError, wantErr: common.ErrNotFound},
+		{name: "database failure", lookupErr: dbErr, wantErr: dbErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inserted := false
+			kind := tc.submissionType
+			if kind == "" {
+				kind = models.MCQ
+			}
+			storage := &stores.Storage{
+				Problems: problemTestStore{getProblem: func(_ context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
+					if problemID != "problem" || contestID != "contest" {
+						t.Fatalf("unscoped lookup: %q %q", problemID, contestID)
+					}
+					return &dto.GetProblemStatementResponse{Type: tc.problemType}, tc.lookupErr
+				}},
+				Submissions: submissionTestStore{createSubmission: func(_ context.Context, sub *models.Submission) (string, error) {
+					inserted = true
+					if sub.Type != kind || sub.UserID != "user" {
+						t.Errorf("wrong submission: %+v", sub)
+					}
+					return "submission", nil
+				}},
+			}
+			id, err := NewSubmissionService(storage, nil, nil).CreateSubmission(context.Background(), "user", kind, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: kind, Option: []int{1}})
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("error=%v, want %v", err, tc.wantErr)
+			}
+			if inserted != (tc.wantErr == nil) {
+				t.Errorf("inserted=%v for error=%v", inserted, tc.wantErr)
+			}
+			if tc.wantErr == nil && id != "submission" {
+				t.Errorf("ID=%q", id)
 			}
 		})
 	}

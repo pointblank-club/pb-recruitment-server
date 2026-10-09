@@ -3,12 +3,12 @@ package dto
 import "app/internal/models"
 
 type SubmitSubmissionRequest struct {
-	ContestID string         		`json:"contest_id" validate:"required"`
-	ProblemID string         		`json:"problem_id" validate:"required"`
-	Language string `json:"language" validate:"required_if=Type code"`
-	Code     string `json:"code" validate:"required_if=Type code"`
-	Option    []int          		`json:"option"` // For MCQ type questions
-	Type      models.SubmissionType `json:"type" validate:"required"`
+	ContestID string                `json:"contest_id" validate:"required"`
+	ProblemID string                `json:"problem_id" validate:"required"`
+	Language  string                `json:"language" validate:"required_if=Type code"`
+	Code      string                `json:"code" validate:"required_if=Type code"`
+	Option    []int                 `json:"option"` // For MCQ type questions
+	Type      models.SubmissionType `json:"type" validate:"required,oneof=mcq code"`
 }
 
 type SubmitSubmissionResponse struct {

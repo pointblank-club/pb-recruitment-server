@@ -9,6 +9,8 @@ func TestMCQAnswersMatch(t *testing.T) {
 		answer  []int64
 		want    bool
 	}{
+		{name: "nil answer key", choices: nil, answer: nil, want: false},
+		{name: "empty answer key", choices: []int64{}, answer: []int64{}, want: false},
 		{name: "same order", choices: []int64{1, 3}, answer: []int64{1, 3}, want: true},
 		{name: "different order", choices: []int64{3, 1}, answer: []int64{1, 3}, want: true},
 		{name: "wrong choice", choices: []int64{1, 2}, answer: []int64{1, 3}, want: false},

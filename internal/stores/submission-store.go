@@ -389,7 +389,7 @@ func (s *SubmissionStore) JudgeMCQ(ctx context.Context, submissionID string) (er
 }
 
 func mcqAnswersMatch(choices, answer []int64) bool {
-	if len(choices) != len(answer) {
+	if len(answer) == 0 || len(choices) != len(answer) {
 		return false
 	}
 

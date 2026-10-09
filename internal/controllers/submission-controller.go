@@ -112,6 +112,9 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 	if !*contest_response.IsRegistered {
 		return ctx.NoContent(http.StatusForbidden)
 	}
+	if contest_response.GetRunningStatus() != models.ContestRunningOpen {
+		return ctx.JSON(http.StatusForbidden, map[string]string{"error": common.ContestNotRunningError.Error()})
+	}
 
 	submissionType := req.Type
 
