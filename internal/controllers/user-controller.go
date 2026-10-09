@@ -115,7 +115,7 @@ func (uc *UserController) GetUserProfile(ctx echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request body dto.UpdateUserProfileRequest true "Updated user details"
-// @Success      201 "User profile updated successfully"
+// @Success      204 "User profile updated successfully"
 // @Failure      400 {object} map[string]string "Invalid input"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      404 {object} map[string]string "User not found"
@@ -138,7 +138,7 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.UpdateUserFailedError.Error()})
 	}
 
-	return ctx.NoContent(http.StatusCreated)
+	return ctx.NoContent(http.StatusNoContent)
 }
 
 // Signup godoc

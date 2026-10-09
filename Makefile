@@ -12,9 +12,13 @@ endif
 
 MIGRATIONS_PATH = ./internal/migrations
 
+export PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
+
+SWAG := go run github.com/swaggo/swag/cmd/swag@v1.16.2
+
 .PHONY: swagger
 swagger:
-	@PATH="$$PATH:/usr/local/go/bin:$$HOME/go/bin" swag init -g cmd/app/main.go -o docs --parseDependency --parseInternal
+	@$(SWAG) init -g cmd/app/main.go -o docs --parseDependency --parseInternal --outputTypes go
 
 .PHONY: migrate-create
 migration:

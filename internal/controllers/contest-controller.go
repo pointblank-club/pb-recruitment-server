@@ -79,7 +79,6 @@ func (cc *ContestController) ModifyRegistration(ctx echo.Context) error {
 // @Success      200 {array} models.Contest
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/list [get]
-// @Router       /admin/contests/list [get]
 func (cc *ContestController) ListContests(ctx echo.Context) error {
 	pageStr := ctx.QueryParam("page")
 
@@ -96,6 +95,39 @@ func (cc *ContestController) ListContests(ctx echo.Context) error {
 }
 
 // Admin Handlers
+
+// HandleListContestsAdmin godoc
+// @Summary      List all contests (Admin)
+// @Description  Get a paginated list of all contests for admin
+// @Tags         Admin - Contests
+// @Produce      json
+// @Security     BearerAuth
+// @Param        page query int false "Page number (defaults to 0)"
+// @Success      200 {array} models.Contest
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/contests/list [get]
+func (cc *ContestController) HandleListContestsAdmin(ctx echo.Context) error {
+	return cc.ListContests(ctx)
+}
+
+// HandleGetContestAdmin godoc
+// @Summary      Get contest details (Admin)
+// @Description  Get details of a contest for admin
+// @Tags         Admin - Contests
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Contest ID"
+// @Success      200 {object} dto.GetContestResponse
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/contest/{id} [get]
+func (cc *ContestController) HandleGetContestAdmin(ctx echo.Context) error {
+	return cc.GetContest(ctx)
+}
 
 // HandleCreateContest godoc
 // @Summary      Create contest (Admin)
@@ -428,10 +460,9 @@ func (cc *ContestController) HandleUpdateLeaderboardUser(ctx echo.Context) error
 // @Produce      json
 // @Param        id path string true "Contest ID"
 // @Success      200 {object} dto.GetContestResponse
-// @Failure      404 "Contest not found"
+// @Failure      404 {object} map[string]string "Contest not found"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id} [get]
-// @Router       /admin/contest/{id} [get]
 func (cc *ContestController) GetContest(ctx echo.Context) error {
 	contestID := ctx.Param("id")
 
@@ -443,7 +474,9 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 	contest, err := cc.contestService.GetContest(ctx.Request().Context(), contestID, userID)
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
-			return ctx.NoContent(http.StatusNotFound)
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": common.ContestNotFoundError.Error(),
+			})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": common.FetchContestFailedError.Error(),

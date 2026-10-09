@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
+	"os"
 )
 
 func NewEchoServer(
@@ -49,8 +50,10 @@ func NewEchoServer(
 		AllowCredentials: true,
 	}))
 
-	// Swagger UI
-	e.GET("/swagger/*", echoSwagger.WrapHandler)
+	// Swagger UI - only exposed in non-production environments or when explicitly enabled
+	if os.Getenv("STAGE") != "production" || os.Getenv("ENABLE_SWAGGER") == "true" {
+		e.GET("/swagger/*", echoSwagger.WrapHandler)
+	}
 
 	// Health check endpoint
 	// This can be used by Kubernetes or any load balancer
