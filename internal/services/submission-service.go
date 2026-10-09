@@ -58,6 +58,10 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 	return sub, nil
 }
 
+func (ss *SubmissionService) JudgeMCQ(ctx context.Context, submissionID string) error {
+	return ss.stores.Submissions.JudgeMCQ(ctx, submissionID)
+}
+
 func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string, submissionType models.SubmissionType, req *dto.SubmitSubmissionRequest) (string, error) {
 	ctx, cancelPreparation := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelPreparation()

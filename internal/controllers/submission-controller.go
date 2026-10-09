@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"app/internal/common"
+	"app/internal/models"
 	"app/internal/models/dto"
 	"app/internal/services"
 	"context"
@@ -23,15 +24,15 @@ func NewSubmissionController(submissionService *services.SubmissionService, cont
 	}
 }
 
-func(sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
+func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 	id := ctx.Param("id")
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
 	sub, err := sc.submissionService.GetSubmissionStatusByID(ctx.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
-            return ctx.NoContent(http.StatusNotFound)
-        }
+			return ctx.NoContent(http.StatusNotFound)
+		}
 
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to get submission status",
@@ -68,7 +69,7 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, sub)
 }
 
-func(sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
+func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
 	req, ok := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.ListProblemSubmissionsRequest)
@@ -88,7 +89,7 @@ func(sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, dto.ListProblemSubmissionsResponse{
 		Submissions: submissions,
 	})
-}	
+}
 
 func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 	reqCtx, cancelPreparation := context.WithTimeout(ctx.Request().Context(), 5*time.Second)
@@ -126,6 +127,16 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		return ctx.NoContent(http.StatusInternalServerError)
+	}
+
+	if submissionType == models.MCQ {
+		judgeCtx, cancelJudge := context.WithTimeout(context.WithoutCancel(ctx.Request().Context()), 5*time.Second)
+		defer cancelJudge()
+		if err := sc.submissionService.JudgeMCQ(judgeCtx, submissionID); err != nil {
+			return ctx.JSON(http.StatusInternalServerError, map[string]string{
+				"error": "failed to judge MCQ submission",
+			})
+		}
 	}
 
 	return ctx.JSON(http.StatusCreated, dto.SubmitSubmissionResponse{

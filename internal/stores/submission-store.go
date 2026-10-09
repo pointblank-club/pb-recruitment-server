@@ -6,13 +6,16 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type SubmissionStore struct {
@@ -254,6 +257,147 @@ func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Subm
 	}
 
 	return submissionID, nil
+}
+
+// JudgeMCQ compares the stored choices with the problem answer and records the
+// result and any score change in one transaction. The first accepted
+// submission for a problem earns its score; later accepted submissions remain
+// accepted but do not add to the ranking again.
+func (s *SubmissionStore) JudgeMCQ(ctx context.Context, submissionID string) (err error) {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("submission store: db is not initialized")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin MCQ judging transaction: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	const submissionQ = `
+		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.choices,
+		       sub.type, sub.status, p.answer, p.type, p.score
+		FROM submissions sub
+		INNER JOIN problems p
+			ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
+		WHERE sub.id = $1
+		FOR UPDATE OF sub
+	`
+
+	var (
+		userID, contestID, problemID string
+		submissionType, problemType  models.SubmissionType
+		status                       models.SubmissionStatus
+		choices, answer              pq.Int64Array
+		problemScore                 int
+	)
+	if err = tx.QueryRowContext(ctx, submissionQ, submissionID).Scan(
+		&userID,
+		&contestID,
+		&problemID,
+		&choices,
+		&submissionType,
+		&status,
+		&answer,
+		&problemType,
+		&problemScore,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return common.ErrNotFound
+		}
+		return fmt.Errorf("load MCQ submission: %w", err)
+	}
+
+	if submissionType != models.MCQ || problemType != models.MCQ {
+		return fmt.Errorf("submission %s is not for an MCQ problem", submissionID)
+	}
+	if status != models.Pending {
+		return tx.Commit()
+	}
+
+	result := models.WrongAnswer
+	if mcqAnswersMatch(choices, answer) {
+		result = models.Accepted
+	}
+
+	// The ranking row is also the per-contest/user lock. Taking this lock before
+	// checking earlier accepts makes concurrent correct attempts idempotent.
+	const ensureRankingQ = `
+		INSERT INTO rankings (contest_id, user_id)
+		VALUES ($1, $2)
+		ON CONFLICT (contest_id, user_id) DO NOTHING
+	`
+	if _, err = tx.ExecContext(ctx, ensureRankingQ, contestID, userID); err != nil {
+		return fmt.Errorf("ensure ranking: %w", err)
+	}
+	var currentScore int
+	if err = tx.QueryRowContext(ctx, `
+		SELECT score
+		FROM rankings
+		WHERE contest_id = $1 AND user_id = $2
+		FOR UPDATE
+	`, contestID, userID).Scan(&currentScore); err != nil {
+		return fmt.Errorf("lock ranking: %w", err)
+	}
+
+	awardScore := false
+	if result == models.Accepted {
+		const alreadySolvedQ = `
+			SELECT EXISTS (
+				SELECT 1
+				FROM submissions
+				WHERE user_id = $1
+				  AND contest_id = $2
+				  AND problem_id = $3
+				  AND status = 'accepted'
+				  AND id <> $4
+			)
+		`
+		var alreadySolved bool
+		if err = tx.QueryRowContext(ctx, alreadySolvedQ, userID, contestID, problemID, submissionID).Scan(&alreadySolved); err != nil {
+			return fmt.Errorf("check prior accepted MCQ submission: %w", err)
+		}
+		awardScore = !alreadySolved
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE submissions
+		SET status = $2
+		WHERE id = $1 AND status = 'pending'
+	`, submissionID, result); err != nil {
+		return fmt.Errorf("update MCQ submission status: %w", err)
+	}
+
+	if awardScore {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE rankings
+			SET score = score + $3
+			WHERE contest_id = $1 AND user_id = $2
+		`, contestID, userID, problemScore); err != nil {
+			return fmt.Errorf("award MCQ score: %w", err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit MCQ judging transaction: %w", err)
+	}
+	return nil
+}
+
+func mcqAnswersMatch(choices, answer []int64) bool {
+	if len(choices) != len(answer) {
+		return false
+	}
+
+	sortedChoices := slices.Clone(choices)
+	sortedAnswer := slices.Clone(answer)
+	slices.Sort(sortedChoices)
+	slices.Sort(sortedAnswer)
+	return slices.Equal(sortedChoices, sortedAnswer)
 }
 
 func (s *SubmissionStore) MarkFailed(ctx context.Context, submissionID string) error {

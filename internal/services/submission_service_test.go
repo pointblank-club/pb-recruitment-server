@@ -19,6 +19,7 @@ import (
 type submissionTestStore struct {
 	*stores.SubmissionStore
 	markFailed func(context.Context, string) error
+	judgeMCQ   func(context.Context, string) error
 }
 
 func (submissionTestStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
@@ -27,6 +28,13 @@ func (submissionTestStore) CreateSubmission(context.Context, *models.Submission)
 
 func (s submissionTestStore) MarkFailed(ctx context.Context, id string) error {
 	return s.markFailed(ctx, id)
+}
+
+func (s submissionTestStore) JudgeMCQ(ctx context.Context, id string) error {
+	if s.judgeMCQ == nil {
+		return nil
+	}
+	return s.judgeMCQ(ctx, id)
 }
 
 type problemTestStore struct{ *stores.ProblemStore }
