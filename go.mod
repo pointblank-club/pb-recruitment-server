@@ -6,6 +6,8 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.39.6
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/matoous/go-nanoid/v2 v2.1.0
+	github.com/swaggo/echo-swagger v1.5.2
+	github.com/swaggo/swag v1.16.2
 )
 
 require (
@@ -37,12 +39,9 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/matoous/go-nanoid/v2 v2.1.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sv-tools/openapi v0.2.1 // indirect
-	github.com/swaggo/echo-swagger v1.5.2 // indirect
 	github.com/swaggo/files/v2 v2.0.0 // indirect
-	github.com/swaggo/swag v1.16.2 // indirect
 	github.com/swaggo/swag/v2 v2.0.0-rc4 // indirect
 	golang.org/x/tools v0.36.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

@@ -96,14 +96,19 @@ const docTemplate = `{
         },
         "/admin/contest/{id}": {
             "get": {
-                "description": "Get details of a contest. If user is authenticated, returns registration status as well.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get details of a contest for admin",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "Contests"
+                    "Admin - Contests"
                 ],
-                "summary": "Get contest details",
+                "summary": "Get contest details (Admin)",
                 "parameters": [
                     {
                         "type": "string",
@@ -120,8 +125,32 @@ const docTemplate = `{
                             "$ref": "#/definitions/app_internal_models_dto.GetContestResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
-                        "description": "Contest not found"
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     },
                     "500": {
                         "description": "Internal server error",
@@ -291,14 +320,19 @@ const docTemplate = `{
         },
         "/admin/contests/list": {
             "get": {
-                "description": "Get a paginated list of all contests",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get a paginated list of all contests for admin",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "Contests"
+                    "Admin - Contests"
                 ],
-                "summary": "List all contests",
+                "summary": "List all contests (Admin)",
                 "parameters": [
                     {
                         "type": "integer",
@@ -314,6 +348,24 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/app_internal_models.Contest"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     },
@@ -1197,7 +1249,13 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Contest not found"
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     },
                     "500": {
                         "description": "Internal server error",
@@ -1518,29 +1576,6 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/health": {
-            "get": {
-                "description": "Check if the server is healthy",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "System"
-                ],
-                "summary": "Health check",
-                "responses": {
-                    "200": {
-                        "description": "Server health status",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2006,7 +2041,7 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {
-                    "201": {
+                    "204": {
                         "description": "User profile updated successfully"
                     },
                     "400": {

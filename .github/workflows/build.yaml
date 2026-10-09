@@ -22,12 +22,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
       - name: Test
         run: go test ./...
+
+      - name: Verify Swagger Docs
+        run: |
+          make swagger
+          git diff --exit-code docs/
 
       - name: Build Docker image
         id: build-image
