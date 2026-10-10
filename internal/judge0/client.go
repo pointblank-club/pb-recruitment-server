@@ -3,6 +3,9 @@ package judge0
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,19 +13,29 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/labstack/gommon/log"
 )
 
+var ErrDispatchRejected = fmt.Errorf("Judge0 explicitly rejected dispatch")
+
 type Client struct {
-	baseURL      string
-	authToken    string
-	callbackBase string
-	httpClient   *http.Client
+	baseURL        string
+	authToken      string
+	callbackBase   string
+	callbackSecret string
+	httpClient     *http.Client
 }
 
 // Dispatch leaves ten seconds for DB bookkeeping within the browser's thirty-second timeout.
 const maxDispatchTimeout = 10 * time.Second
 
 func NewClient() *Client {
+	callbackBase, callbackSecret := os.Getenv("JUDGE0_CALLBACK_BASE_URL"), os.Getenv("JUDGE0_CALLBACK_SECRET")
+	if (callbackBase == "") != (callbackSecret == "") {
+		log.Errorf("Judge0 callbacks are misconfigured: JUDGE0_CALLBACK_BASE_URL and JUDGE0_CALLBACK_SECRET must be set together")
+	}
 	timeout := maxDispatchTimeout
 	if raw := os.Getenv("JUDGE0_TIMEOUT_MS"); raw != "" {
 		if ms, err := time.ParseDuration(raw + "ms"); err == nil && ms > 0 {
@@ -31,9 +44,10 @@ func NewClient() *Client {
 	}
 
 	return &Client{
-		baseURL:      os.Getenv("JUDGE0_URL"),
-		authToken:    os.Getenv("JUDGE0_AUTH_TOKEN"),
-		callbackBase: os.Getenv("JUDGE0_CALLBACK_BASE_URL"),
+		baseURL:        os.Getenv("JUDGE0_URL"),
+		authToken:      os.Getenv("JUDGE0_AUTH_TOKEN"),
+		callbackBase:   callbackBase,
+		callbackSecret: callbackSecret,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -48,10 +62,31 @@ func (c *Client) Timeout() time.Duration {
 }
 
 func (c *Client) CallbackURL(executionID string) string {
-	if c.callbackBase == "" {
+	if c.callbackBase == "" || c.callbackSecret == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/internal/judge0/callback/%s", c.callbackBase, executionID)
+	sig := c.CallbackSignature(executionID)
+	return fmt.Sprintf("%s/internal/judge0/callback/%s?sig=%s", c.callbackBase, executionID, sig)
+}
+
+func (c *Client) CallbacksEnabled() bool {
+	return c != nil && c.callbackBase != "" && c.callbackSecret != ""
+}
+func (c *Client) CallbackSignature(id string) string {
+	if parsed, err := uuid.Parse(id); err == nil {
+		id = parsed.String()
+	}
+	m := hmac.New(sha256.New, []byte(c.callbackSecret))
+	_, _ = m.Write([]byte(id))
+	return hex.EncodeToString(m.Sum(nil))
+}
+func (c *Client) VerifyCallback(id, signature string) bool {
+	if c == nil || c.callbackSecret == "" {
+		return false
+	}
+	want, err := hex.DecodeString(c.CallbackSignature(id))
+	got, gotErr := hex.DecodeString(signature)
+	return err == nil && gotErr == nil && hmac.Equal(want, got)
 }
 
 func (c *Client) batchSize() int {
@@ -101,6 +136,35 @@ func (c *Client) CreateBatch(ctx context.Context, jobs []SubmissionRequest) ([]S
 	return results, nil
 }
 
+func (c *Client) GetSubmission(ctx context.Context, token string) (*SubmissionStatusResponse, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("%w: JUDGE0_URL is not set", ErrUnavailable)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/submissions/"+token+"?base64_encoded=false&fields=token,time,memory,status", nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.authToken != "" {
+		req.Header.Set("X-Auth-Token", c.authToken)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, ErrSubmissionNotFound
+		}
+		return nil, fmt.Errorf("%w: status %d", ErrUnavailable, resp.StatusCode)
+	}
+	var out SubmissionStatusResponse
+	if err = json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+	return &out, nil
+}
+
 func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]SubmissionResult, error) {
 	payload, err := json.Marshal(map[string][]SubmissionRequest{
 		"submissions": jobs,
@@ -130,7 +194,7 @@ func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]Sub
 	}
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: status %d: %s", ErrUnavailable, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("%w: status %d: %s", ErrDispatchRejected, resp.StatusCode, string(body))
 	}
 
 	var tokens []batchTokenResponse

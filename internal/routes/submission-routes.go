@@ -3,9 +3,9 @@ package routes
 import (
 	"app/internal/controllers"
 	"app/internal/middleware"
+	"app/internal/models/dto"
 	"firebase.google.com/go/v4/auth"
 	"github.com/labstack/echo/v4"
-	"app/internal/models/dto"
 )
 
 func AddSubmissionRoutes(
@@ -13,6 +13,7 @@ func AddSubmissionRoutes(
 	authClient *auth.Client,
 	submissionController *controllers.SubmissionController,
 ) {
+	e.PUT("/internal/judge0/callback/:execution_id", submissionController.Judge0Callback)
 	// // Get the status of a specific submission
 	// // The authenticated user can only get the status of their own submissions
 	e.GET("/submission/:id/status",

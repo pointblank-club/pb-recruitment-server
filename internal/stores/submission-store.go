@@ -126,7 +126,7 @@ func (s *SubmissionStore) GetTestCaseResultsBySubmissionID(ctx context.Context, 
 		SELECT id, submission_id, test_case_id, status, runtime, memory, created_at
 		FROM test_case_results
 		WHERE submission_id = $1
-		ORDER BY created_at ASC
+		ORDER BY CASE WHEN test_case_id ~ '^[0-9]+$' THEN test_case_id::bigint ELSE 9223372036854775807 END ASC, created_at ASC, id ASC
 	`
 	rows, err := s.db.QueryContext(ctx, q, submissionID)
 	if err != nil {
@@ -413,4 +413,21 @@ func (s *SubmissionStore) MarkFailed(ctx context.Context, submissionID string) e
 		return fmt.Errorf("mark submission failed: %w", err)
 	}
 	return nil
+}
+
+func (s *SubmissionStore) PendingCodeWithoutExecutions(ctx context.Context, cutoff int64, limit int) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id::text FROM submissions s WHERE s.type='code' AND s.status='pending' AND s.created_at <= $1 AND NOT EXISTS (SELECT 1 FROM submission_executions e WHERE e.submission_id=s.id) ORDER BY s.created_at,s.id LIMIT $2`, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

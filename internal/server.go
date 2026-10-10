@@ -20,7 +20,7 @@ func NewEchoServer(
 ) *echo.Echo {
 	e := echo.New()
 	e.Use(mdw.Recover())
-	e.Use(mdw.Logger())
+	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: []string{
 			"https://recruitment.pointblank.club",

@@ -54,6 +54,7 @@ func main() {
 		fx.Invoke(routes.AddUserRoutes),
 		fx.Invoke(routes.AddContestRoutes),
 		fx.Invoke(routes.AddSubmissionRoutes),
+		fx.Invoke(services.NewJudge0Recovery),
 		fx.Invoke(routes.AddAdminRoutes),
 		fx.Invoke(internal.StartEchoServer),
 	).Run()

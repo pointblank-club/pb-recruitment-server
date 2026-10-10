@@ -34,11 +34,17 @@ type Storage struct {
 		CreateSubmission(context.Context, *models.Submission) (string, error)
 		JudgeMCQ(context.Context, string) error
 		MarkFailed(context.Context, string) error
+		PendingCodeWithoutExecutions(context.Context, int64, int) ([]string, error)
 	}
 	Executions interface {
 		InsertBatch(ctx context.Context, submissionID string, indexes []int) ([]models.Execution, error)
 		SaveTokens(ctx context.Context, tokens map[string]string) error
 		MarkFailed(ctx context.Context, ids []string) error
+		ProcessFinal(ctx context.Context, result FinalExecutionResult) error
+		PendingWithTokens(ctx context.Context, limit int, cursorTime int64, cursorID string) ([]models.Execution, error)
+		BindToken(ctx context.Context, executionID, token string) error
+		TerminalPendingParents(ctx context.Context, limit int) ([]FinalExecutionResult, error)
+		StaleTokenlessExecutions(ctx context.Context, olderThanSeconds int64, limit int) ([]string, error)
 	}
 	Rankings interface {
 		UpdateLeaderboardUser(ctx context.Context, contestID string, userID string, req *dto.UpdateLeaderboardUserRequest) error

@@ -28,7 +28,7 @@ func (s submissionContestStore) GetContest(context.Context, string) (*dto.GetCon
 
 func TestSubmitSolutionMissingContest(t *testing.T) {
 	storage := &stores.Storage{Contests: submissionContestStore{err: common.ContestNotFoundError}}
-	controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil))
+	controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil), nil)
 	recorder := httptest.NewRecorder()
 	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/submit", nil), recorder)
 	ctx.Set(common.AUTH_USER_ID, "user")
@@ -83,7 +83,7 @@ func TestSubmitSolutionContestWindow(t *testing.T) {
 				Contests: submissionContestStore{contest: models.Contest{StartTime: tc.start, EndTime: tc.end}, registered: tc.registered},
 				Problems: submissionProblemStore{}, Submissions: submissions,
 			}
-			controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil))
+			controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil), nil)
 			recorder := httptest.NewRecorder()
 			ctx := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/submit", nil), recorder)
 			ctx.Set(common.AUTH_USER_ID, "user")

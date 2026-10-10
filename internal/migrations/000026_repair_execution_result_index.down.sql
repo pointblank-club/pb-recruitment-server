@@ -1,0 +1,1 @@
+-- Keep the corrected index: migration 000025 requires the same non-partial index.

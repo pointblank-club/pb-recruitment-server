@@ -7,44 +7,20 @@ import (
 	"app/internal/services"
 	"app/internal/stores"
 	"context"
-	"database/sql"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func TestJudgeMCQPostgres(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set TEST_DATABASE_URL to a disposable database migrated through 000024")
-	}
-	db, err := sql.Open("pgx", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { db.Close() })
-	db.SetMaxOpenConns(25)
+	db := postgresTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		t.Fatal(err)
-	}
+	var err error
 	user, contest, problem := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	t.Cleanup(func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM contests WHERE id=$1`, contest); err != nil {
-			t.Error(err)
-		}
-		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM users WHERE id=$1`, user); err != nil {
-			t.Error(err)
-		}
-	})
 	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'MCQ test',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
