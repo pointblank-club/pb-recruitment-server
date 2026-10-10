@@ -7,7 +7,7 @@ type SubmitSubmissionRequest struct {
 	ProblemID string                `json:"problem_id" validate:"required"`
 	Language  string                `json:"language" validate:"required_if=Type code"`
 	Code      string                `json:"code" validate:"required_if=Type code"`
-	Option    []int                 `json:"option"` // For MCQ type questions
+	Option    []int                 `json:"option" validate:"required_if=Type mcq,omitempty,min=1,dive,gte=0,lte=2147483647"`
 	Type      models.SubmissionType `json:"type" validate:"required,oneof=mcq code"`
 }
 

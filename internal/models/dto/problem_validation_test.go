@@ -43,6 +43,14 @@ func TestCreateProblemRequestTestcaseValidation(t *testing.T) {
 			Name: "p", Description: "d", Score: 10, Type: "mcq",
 			Answer: []int{}, Options: []string{"a", "b"},
 		}, true},
+		{"mcq rejects duplicate answers", CreateProblemRequest{
+			Name: "p", Description: "d", Score: 10, Type: "mcq",
+			Answer: []int{1, 1}, Options: []string{"a", "b"},
+		}, true},
+		{"mcq accepts distinct answers", CreateProblemRequest{
+			Name: "p", Description: "d", Score: 10, Type: "mcq",
+			Answer: []int{1, 0}, Options: []string{"a", "b"},
+		}, false},
 		{"mcq needs options", CreateProblemRequest{
 			Name: "p", Description: "d", Score: 10, Type: "mcq", Answer: []int{0},
 		}, true},

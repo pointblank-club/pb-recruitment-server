@@ -23,3 +23,19 @@ make migrate-down 1
 # NOT AVAILABLE ON PROD - Force migration version (use with caution)
 make migrate-force 1
 ```
+
+## Problem authoring
+
+Finish problem edits and deletion before the contest starts. New update and delete
+requests return 409 once the contest starts, including after it ends, to preserve
+verdicts and leaderboard scores. Finish any in-flight edits before opening the round.
+Correcting a started contest requires controlled regrading and score reconciliation.
+
+## PostgreSQL tests
+
+Use a disposable database with migrations through `000024` applied. The test creates
+and cleans up its own rows. It skips when `TEST_DATABASE_URL` is unset.
+
+```bash
+TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test ./internal/stores -run TestJudgeMCQPostgres -count=1
+```

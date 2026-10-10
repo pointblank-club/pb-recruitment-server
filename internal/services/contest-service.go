@@ -94,6 +94,9 @@ func (cs *ContestService) ListContests(ctx context.Context, page int) ([]models.
 //Problem Reated Services
 
 func (cs *ContestService) CreateProblem(ctx context.Context, contestID string, req *dto.CreateProblemRequest) (*models.Problem, error) {
+	if err := validateMCQAnswerRange(req); err != nil {
+		return nil, err
+	}
 
 	problem := &models.Problem{
 		ID:                 uuid.NewString(),
@@ -166,6 +169,12 @@ func (cs *ContestService) CreateProblem(ctx context.Context, contestID string, r
 }
 
 func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, problemID string, req *dto.CreateProblemRequest) (*models.Problem, error) {
+	if err := validateMCQAnswerRange(req); err != nil {
+		return nil, err
+	}
+	if err := cs.checkProblemEditable(ctx, contestID); err != nil {
+		return nil, err
+	}
 
 	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
 	if err != nil {
@@ -251,6 +260,9 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 }
 
 func (cs *ContestService) DeleteProblem(ctx context.Context, contestID string, problemID string) error {
+	if err := cs.checkProblemEditable(ctx, contestID); err != nil {
+		return err
+	}
 
 	_, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)
 	if err != nil {
@@ -459,4 +471,27 @@ func preserveProblemLimits(problem *models.Problem, meta *dto.GetProblemStatemen
 	if problem.MemoryLimit <= 0 {
 		problem.MemoryLimit = meta.MemoryLimit
 	}
+}
+
+func validateMCQAnswerRange(req *dto.CreateProblemRequest) error {
+	if req.Type == models.MCQ {
+		for _, answer := range req.Answer {
+			if answer < 0 || answer >= len(req.Options) {
+				return common.ErrInvalidAnswer
+			}
+		}
+	}
+	return nil
+}
+
+func (cs *ContestService) checkProblemEditable(ctx context.Context, contestID string) error {
+	// shortcut: finish in-flight edits before opening; use transactional authoring if edits must overlap the start.
+	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
+	if err != nil {
+		return err
+	}
+	if contest.GetRunningStatus() != models.ContestRunningUpcoming {
+		return common.ErrProblemsLocked
+	}
+	return nil
 }

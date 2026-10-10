@@ -105,6 +105,9 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 
 	contest_response, err := sc.contestService.GetContest(reqCtx, req.ContestID, userID)
 	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.NoContent(http.StatusNotFound)
+		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to check contest registration",
 		})

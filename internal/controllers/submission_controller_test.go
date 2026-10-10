@@ -19,10 +19,26 @@ type submissionContestStore struct {
 	*stores.ContestStore
 	contest    models.Contest
 	registered bool
+	err        error
 }
 
 func (s submissionContestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
-	return &dto.GetContestResponse{Contest: s.contest}, nil
+	return &dto.GetContestResponse{Contest: s.contest}, s.err
+}
+
+func TestSubmitSolutionMissingContest(t *testing.T) {
+	storage := &stores.Storage{Contests: submissionContestStore{err: common.ContestNotFoundError}}
+	controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil))
+	recorder := httptest.NewRecorder()
+	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/submit", nil), recorder)
+	ctx.Set(common.AUTH_USER_ID, "user")
+	ctx.Set(common.VALIDATED_REQUEST_BODY, &dto.SubmitSubmissionRequest{ContestID: "missing", ProblemID: "problem", Type: models.MCQ, Option: []int{0}})
+	if err := controller.SubmitSolution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("HTTP %d, want 404", recorder.Code)
+	}
 }
 func (s submissionContestStore) IsRegistered(context.Context, string, string) (bool, error) {
 	return s.registered, nil

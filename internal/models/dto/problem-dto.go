@@ -29,7 +29,7 @@ type CreateProblemRequest struct {
 	Description string                  `json:"description" validate:"required"`
 	Score       int                     `json:"score" validate:"required,gt=0"`
 	Type        models.SubmissionType   `json:"type" validate:"required,oneof=mcq code"`
-	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,dive,gte=0"`
+	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,unique,dive,gte=0"`
 	Options     []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,dive,required"`
 	Testcases   []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,dive"`
 	TimeLimit   int                     `json:"time_limit,omitempty"`
