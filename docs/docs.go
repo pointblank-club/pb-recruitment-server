@@ -56,7 +56,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -203,7 +203,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -593,7 +593,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error or invalid answer",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -763,7 +763,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error or invalid answer",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -1168,7 +1168,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -1552,7 +1552,7 @@ const docTemplate = `{
                         "description": "Registration status modified"
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -1643,7 +1643,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -1706,7 +1706,7 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -1721,7 +1721,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden (not registered for contest or contest not running)"
+                        "description": "Forbidden: empty body if not registered; JSON object with an error string if contest is not running"
                     },
                     "404": {
                         "description": "Contest or problem not found"
@@ -1906,7 +1906,7 @@ const docTemplate = `{
                         "description": "User created successfully"
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
@@ -2025,7 +2025,7 @@ const docTemplate = `{
                         "description": "User profile updated successfully"
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)",
                         "schema": {
                             "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }

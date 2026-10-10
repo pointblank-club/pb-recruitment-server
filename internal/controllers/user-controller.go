@@ -56,7 +56,7 @@ func validateUserInput(usn string, mobile string, currentYear int) error {
 // @Security     BearerAuth
 // @Param        request body dto.CreateUserRequest true "User details"
 // @Success      201 "User created successfully"
-// @Failure      400 {object} middleware.ValidationErrors "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      409 {object} map[string]string "User already exists"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -117,7 +117,7 @@ func (uc *UserController) GetUserProfile(ctx echo.Context) error {
 // @Security     BearerAuth
 // @Param        request body dto.UpdateUserProfileRequest true "Updated user details"
 // @Success      204 "User profile updated successfully"
-// @Failure      400 {object} middleware.ValidationErrors "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      404 {object} map[string]string "User not found"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -150,7 +150,7 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 // @Produce      json
 // @Param        request body dto.SignupRequest true "Signup payload"
 // @Success      201 {object} dto.SignupResponse
-// @Failure      400 {object} middleware.ValidationErrors "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)"
 // @Failure      409 {object} map[string]string "User already exists"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /auth/signup [post]

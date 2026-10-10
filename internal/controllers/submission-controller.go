@@ -106,7 +106,7 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 // @Param        problem_id query string true "Problem ID"
 // @Param        page query int false "Page number (defaults to 0)"
 // @Success      200 {object} dto.ListProblemSubmissionsResponse
-// @Failure      400 {object} middleware.ValidationErrors "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /submission/list [get]
@@ -141,9 +141,9 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 // @Security     BearerAuth
 // @Param        request body dto.SubmitSubmissionRequest true "Submission details"
 // @Success      201 {object} dto.SubmitSubmissionResponse
-// @Failure      400 {object} middleware.ValidationErrors "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)"
 // @Failure      401 {object} map[string]string "Unauthorized"
-// @Failure      403 "Forbidden (not registered for contest or contest not running)"
+// @Failure      403 "Forbidden: empty body if not registered; JSON object with an error string if contest is not running"
 // @Failure      404 "Contest or problem not found"
 // @Failure      409 {object} map[string]string "Submission already exists"
 // @Failure      500 "Internal server error"

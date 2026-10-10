@@ -4,6 +4,7 @@
 - Server is running on `http://localhost:8080`
 - API documentation (Swagger UI): `http://localhost:8080/swagger/index.html`
 - Raw JSON Spec: `http://localhost:8080/swagger/doc.json`
+- Enable Swagger with `STAGE=dev` or `ENABLE_SWAGGER=true`; otherwise these URLs return 404.
 
 ## API Documentation (Swagger)
 
