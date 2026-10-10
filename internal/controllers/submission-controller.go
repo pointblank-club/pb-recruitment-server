@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"app/internal/common"
+	_ "app/internal/middleware"
 	"app/internal/models"
 	"app/internal/models/dto"
 	"app/internal/services"
@@ -34,8 +35,8 @@ func NewSubmissionController(submissionService *services.SubmissionService, cont
 // @Param        id path string true "Submission ID"
 // @Success      200 {object} map[string]string "Submission status"
 // @Failure      401 {object} map[string]string "Unauthorized"
-// @Failure      403 {object} map[string]string "Forbidden"
-// @Failure      404 {object} map[string]string "Submission not found"
+// @Failure      403 "Forbidden"
+// @Failure      404 "Submission not found"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /submission/{id}/status [get]
 func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
@@ -105,7 +106,7 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 // @Param        problem_id query string true "Problem ID"
 // @Param        page query int false "Page number (defaults to 0)"
 // @Success      200 {object} dto.ListProblemSubmissionsResponse
-// @Failure      400 {object} map[string]string "Invalid query parameters"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /submission/list [get]
@@ -140,12 +141,12 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 // @Security     BearerAuth
 // @Param        request body dto.SubmitSubmissionRequest true "Submission details"
 // @Success      201 {object} dto.SubmitSubmissionResponse
-// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
-// @Failure      403 {object} map[string]string "Forbidden (not registered for contest)"
-// @Failure      404 {object} map[string]string "Contest or problem not found"
+// @Failure      403 "Forbidden (not registered for contest or contest not running)"
+// @Failure      404 "Contest or problem not found"
 // @Failure      409 {object} map[string]string "Submission already exists"
-// @Failure      500 {object} map[string]string "Internal server error"
+// @Failure      500 "Internal server error"
 // @Router       /submission/submit [post]
 func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 	reqCtx, cancelPreparation := context.WithTimeout(ctx.Request().Context(), 5*time.Second)

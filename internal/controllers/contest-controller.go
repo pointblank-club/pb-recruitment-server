@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"app/internal/common"
+	_ "app/internal/middleware"
 	"app/internal/models"
 	"app/internal/models/dto"
 	"app/internal/services"
@@ -34,7 +35,7 @@ func NewContestController(contestService *services.ContestService) *ContestContr
 // @Param        id path string true "Contest ID"
 // @Param        request body dto.ModifyRegistrationRequest true "Action (register or unregister)"
 // @Success      200 "Registration status modified"
-// @Failure      400 {object} map[string]string "Invalid input"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Registration closed or invalid student year"
 // @Failure      404 {object} map[string]string "Contest or user not found"
@@ -75,6 +76,7 @@ func (cc *ContestController) ModifyRegistration(ctx echo.Context) error {
 // @Description  Get a paginated list of all contests
 // @Tags         Contests
 // @Produce      json
+// @Security     BearerAuth
 // @Param        page query int false "Page number (defaults to 0)"
 // @Success      200 {array} models.Contest
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -138,7 +140,7 @@ func (cc *ContestController) HandleGetContestAdmin(ctx echo.Context) error {
 // @Security     BearerAuth
 // @Param        request body dto.UpsertContestRequest true "Contest details"
 // @Success      201 {object} models.Contest
-// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Forbidden - Admin access required"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -186,10 +188,11 @@ func (cc *ContestController) HandleCreateContest(ctx echo.Context) error {
 // @Param        id path string true "Contest ID"
 // @Param        request body dto.UpsertContestRequest true "Contest payload"
 // @Success      200 {object} models.Contest
-// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Forbidden - Admin access required"
 // @Failure      404 "Contest not found"
+// @Failure      409 {object} map[string]string "Start time cannot be changed after the contest starts"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /admin/contest/{id} [put]
 func (cc *ContestController) HandleUpdateContest(ctx echo.Context) error {
@@ -280,7 +283,7 @@ func (cc *ContestController) HandleDeleteContest(ctx echo.Context) error {
 // @Param        contestid path string true "Contest ID"
 // @Param        request body dto.CreateProblemRequest true "Problem details"
 // @Success      201 {object} models.Problem
-// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error or invalid answer"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Forbidden - Admin access required"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -320,9 +323,10 @@ func (cc *ContestController) HandleCreateProblem(ctx echo.Context) error {
 // @Param        problemid path string true "Problem ID"
 // @Param        request body dto.CreateProblemRequest true "Problem details"
 // @Success      200 {object} models.Problem
-// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error or invalid answer"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      409 {object} map[string]string "Problems are locked"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /admin/{contestid}/problem/{problemid} [put]
 func (cc *ContestController) HandleUpdateProblem(ctx echo.Context) error {
@@ -366,6 +370,7 @@ func (cc *ContestController) HandleUpdateProblem(ctx echo.Context) error {
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Forbidden - Admin access required"
 // @Failure      404 {object} map[string]string "Problem not found"
+// @Failure      409 {object} map[string]string "Problems are locked"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /admin/{contestid}/problem/{problemid} [delete]
 func (cc *ContestController) HandleDeleteProblem(ctx echo.Context) error {
@@ -458,6 +463,7 @@ func (cc *ContestController) HandleUpdateLeaderboardUser(ctx echo.Context) error
 // @Description  Get details of a contest. If user is authenticated, returns registration status as well.
 // @Tags         Contests
 // @Produce      json
+// @Security     BearerAuth
 // @Param        id path string true "Contest ID"
 // @Success      200 {object} dto.GetContestResponse
 // @Failure      404 {object} map[string]string "Contest not found"

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"app/internal/common"
+	_ "app/internal/middleware"
 	_ "app/internal/models"
 	"app/internal/models/dto"
 	"app/internal/services"
@@ -55,7 +56,7 @@ func validateUserInput(usn string, mobile string, currentYear int) error {
 // @Security     BearerAuth
 // @Param        request body dto.CreateUserRequest true "User details"
 // @Success      201 "User created successfully"
-// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      409 {object} map[string]string "User already exists"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -116,7 +117,7 @@ func (uc *UserController) GetUserProfile(ctx echo.Context) error {
 // @Security     BearerAuth
 // @Param        request body dto.UpdateUserProfileRequest true "Updated user details"
 // @Success      204 "User profile updated successfully"
-// @Failure      400 {object} map[string]string "Invalid input"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      404 {object} map[string]string "User not found"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -149,7 +150,7 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 // @Produce      json
 // @Param        request body dto.SignupRequest true "Signup payload"
 // @Success      201 {object} dto.SignupResponse
-// @Failure      400 {object} map[string]string "Invalid input"
+// @Failure      400 {object} middleware.ValidationErrors "Validation error"
 // @Failure      409 {object} map[string]string "User already exists"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /auth/signup [post]
