@@ -58,10 +58,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -208,10 +205,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -234,6 +228,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Contest not found"
+                    },
+                    "409": {
+                        "description": "Start time cannot be changed after the contest starts",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
                     },
                     "500": {
                         "description": "Internal server error",
@@ -590,12 +593,9 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Validation error or invalid answer",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -763,12 +763,9 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Validation error",
+                        "description": "Validation error or invalid answer",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -782,6 +779,15 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Problems are locked",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -869,6 +875,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Problems are locked",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1153,12 +1168,9 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Invalid input",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "409": {
@@ -1184,6 +1196,11 @@ const docTemplate = `{
         },
         "/contests/list": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get a paginated list of all contests",
                 "produces": [
                     "application/json"
@@ -1224,6 +1241,11 @@ const docTemplate = `{
         },
         "/contests/{id}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Get details of a contest. If user is authenticated, returns registration status as well.",
                 "produces": [
                     "application/json"
@@ -1530,12 +1552,9 @@ const docTemplate = `{
                         "description": "Registration status modified"
                     },
                     "400": {
-                        "description": "Invalid input",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -1624,12 +1643,9 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Invalid query parameters",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -1692,10 +1708,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -1708,22 +1721,10 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden (not registered for contest)",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                        "description": "Forbidden (not registered for contest or contest not running)"
                     },
                     "404": {
-                        "description": "Contest or problem not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                        "description": "Contest or problem not found"
                     },
                     "409": {
                         "description": "Submission already exists",
@@ -1735,13 +1736,7 @@ const docTemplate = `{
                         }
                     },
                     "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                        "description": "Internal server error"
                     }
                 }
             }
@@ -1860,22 +1855,10 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                        "description": "Forbidden"
                     },
                     "404": {
-                        "description": "Submission not found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
+                        "description": "Submission not found"
                     },
                     "500": {
                         "description": "Internal server error",
@@ -1925,10 +1908,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -2045,12 +2025,9 @@ const docTemplate = `{
                         "description": "User profile updated successfully"
                     },
                     "400": {
-                        "description": "Invalid input",
+                        "description": "Validation error",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_middleware.ValidationErrors"
                         }
                     },
                     "401": {
@@ -2085,6 +2062,28 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "app_internal_middleware.ValidationError": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_middleware.ValidationErrors": {
+            "type": "object",
+            "properties": {
+                "errors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_middleware.ValidationError"
+                    }
+                }
+            }
+        },
         "app_internal_models.Contest": {
             "type": "object",
             "properties": {
@@ -2350,6 +2349,8 @@ const docTemplate = `{
             "properties": {
                 "answer": {
                     "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
                     "items": {
                         "type": "integer"
                     }
@@ -2767,8 +2768,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "option": {
-                    "description": "For MCQ type questions",
                     "type": "array",
+                    "minItems": 1,
                     "items": {
                         "type": "integer"
                     }
@@ -2777,7 +2778,15 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                    "enum": [
+                        "mcq",
+                        "code"
+                    ],
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/app_internal_models.SubmissionType"
+                        }
+                    ]
                 }
             }
         },

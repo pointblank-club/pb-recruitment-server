@@ -50,8 +50,8 @@ func NewEchoServer(
 		AllowCredentials: true,
 	}))
 
-	// Swagger UI - only exposed in non-production environments or when explicitly enabled
-	if os.Getenv("STAGE") != "production" || os.Getenv("ENABLE_SWAGGER") == "true" {
+	// Swagger UI - only exposed in development environment or when explicitly enabled
+	if os.Getenv("STAGE") == "dev" || os.Getenv("ENABLE_SWAGGER") == "true" {
 		e.GET("/swagger/*", echoSwagger.WrapHandler)
 	}
 
