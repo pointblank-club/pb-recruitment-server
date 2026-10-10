@@ -29,6 +29,7 @@ make migrate-force 1
 Finish problem edits and deletion before the contest starts. New update and delete
 requests return 409 once the contest starts, including after it ends, to preserve
 verdicts and leaderboard scores. Finish any in-flight edits before opening the round.
+The start time cannot be changed once the contest starts; end-time extensions remain allowed.
 Correcting a started contest requires controlled regrading and score reconciliation.
 
 ## PostgreSQL tests

@@ -112,12 +112,17 @@ func (cc *ContestController) HandleUpdateContest(ctx echo.Context) error {
 
 	// Verify contest exists
 	id := ctx.Param("id")
-	_, err := cc.contestService.GetContest(ctx.Request().Context(), id, "")
+	contest, err := cc.contestService.GetContest(ctx.Request().Context(), id, "")
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.NoContent(http.StatusNotFound)
 		}
 		return ctx.NoContent(http.StatusInternalServerError)
+	}
+	if contest.GetRunningStatus() != models.ContestRunningUpcoming && req.StartTime != contest.StartTime {
+		return ctx.JSON(http.StatusConflict, map[string]string{
+			"error": "start time cannot be changed after the contest starts",
+		})
 	}
 
 	contestToUpdate := models.Contest{
