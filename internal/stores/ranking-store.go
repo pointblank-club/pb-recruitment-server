@@ -291,6 +291,7 @@ func summarizeSolves(scores []dto.ProblemScore) (solved int, lastSolve int64) {
 	return solved, lastSolve
 }
 
+// Attempts counts all submissions for display; the final-ranking penalty excludes judge errors.
 func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string) (map[string][]dto.ProblemScore, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
@@ -365,7 +366,7 @@ type participantSummary struct {
 	TotalScore         int
 	ProblemsSolved     int
 	LastSubmissionTime int64
-	TotalAttempts      int
+	TotalAttempts      int // Ranking penalty, excluding judge errors.
 	Rank               int
 	Hidden             bool
 	Disqualified       bool
@@ -678,7 +679,9 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 			userStats[uid] = data
 			participantSet[uid] = true
 		}
-		data.totalAttempts++
+		if status != string(models.JudgeError) {
+			data.totalAttempts++
+		}
 		if status == string(models.Accepted) {
 			if prev, exists := data.earliestAccepted[pid]; !exists || createdAt < prev {
 				data.earliestAccepted[pid] = createdAt

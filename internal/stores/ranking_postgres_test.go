@@ -224,6 +224,90 @@ func TestConsolidatedLeaderboardTieOrderPostgres(t *testing.T) {
 	}
 }
 
+func TestConsolidationAttemptPenaltyPostgres(t *testing.T) {
+	for _, tc := range []struct {
+		status   string
+		wantRank int
+	}{
+		{"judge_error", 1},
+		{"wrong_answer", 2},
+		{"failed_to_process", 2},
+		{"tle", 2},
+		{"rte", 2},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			db := postgresTestDB(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			user, contest, problem, submission, executions := executionFixture(t, db, 1)
+			other := user + "-other"
+			if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Other',$2,$1,1,'CS')`, other, other+"@example.test"); err != nil {
+				t.Fatal(err)
+			}
+			otherSubmission, otherExecutions := executionSubmission(t, db, other, contest, problem, 1)
+			if _, err := db.ExecContext(ctx, `UPDATE submissions SET created_at=100 WHERE id IN ($1,$2)`, submission, otherSubmission); err != nil {
+				t.Fatal(err)
+			}
+			executionStore := stores.NewExecutionStore(db)
+			for _, execution := range []models.Execution{executions[0], otherExecutions[0]} {
+				if err := executionStore.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: execution.ID, Status: "accepted"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Repeat solves count as attempts but must not change points or finish time.
+			for _, userID := range []string{user, other} {
+				repeat, repeatExecutions := executionSubmission(t, db, userID, contest, problem, 1)
+				if _, err := db.ExecContext(ctx, `UPDATE submissions SET created_at=200 WHERE id=$1`, repeat); err != nil {
+					t.Fatal(err)
+				}
+				if err := executionStore.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: repeatExecutions[0].ID, Status: "accepted"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, extraExecutions := executionSubmission(t, db, user, contest, problem, 1)
+			if err := executionStore.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: extraExecutions[0].ID, Status: tc.status}); err != nil {
+				t.Fatal(err)
+			}
+
+			rankingStore := stores.NewRankingStore(db)
+			for run := 1; run <= 2; run++ {
+				res, err := rankingStore.ConsolidateContest(ctx, contest, false, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if res.ParticipantsRanked != 2 || res.PendingSubmissions != 0 {
+					t.Fatalf("run %d: unexpected consolidation: %+v", run, res)
+				}
+				leaderboard, err := rankingStore.GetLeaderboard(ctx, contest, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(leaderboard.Entries) != 2 {
+					t.Fatalf("run %d: got %d entries, want 2", run, len(leaderboard.Entries))
+				}
+				for _, entry := range leaderboard.Entries {
+					wantRank, wantSubmissions := 1, 2
+					if entry.UserID == user {
+						wantRank, wantSubmissions = tc.wantRank, 3
+					}
+					var score, rank int
+					if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, entry.UserID).Scan(&score, &rank); err != nil {
+						t.Fatal(err)
+					}
+					if rank != wantRank || score != 10 || entry.Rank != wantRank || entry.TotalScore != 10 || entry.ProblemsSolved != 1 || entry.LastSubmissionTime != 100_000 {
+						t.Errorf("run %d: stored score/rank=%d/%d, leaderboard=%+v; want score=10 rank=%d solves=1 finish=100000", run, score, rank, entry, wantRank)
+					}
+					// Displayed submissions include infrastructure failures; the rank penalty does not.
+					if len(entry.ProblemScores) != 1 || entry.ProblemScores[0].Attempts != wantSubmissions {
+						t.Errorf("run %d: problem scores=%+v, want %d displayed submissions", run, entry.ProblemScores, wantSubmissions)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestConsolidatedLeaderboardRankZeroOrderingPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -281,4 +365,3 @@ func TestConsolidatedLeaderboardRankZeroOrderingPostgres(t *testing.T) {
 		t.Errorf("entry 3: expected userUnranked at the bottom with rank 4, got user %s rank %d", lb.Entries[3].UserID, lb.Entries[3].Rank)
 	}
 }
-

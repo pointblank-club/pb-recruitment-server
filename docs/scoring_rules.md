@@ -65,7 +65,8 @@ When two or more candidates achieve the same total score, ties are broken strict
    - Candidates who achieved their score earlier rank higher.
    - Candidates who solved $\ge 1$ problems rank ahead of candidates who solved 0 problems.
 4. **Total Submission Attempts (Ascending)**:
-   - Candidates with fewer total submission attempts across the contest rank higher (penalizing brute-force attempts).
+   - Candidates with fewer submission attempts across the contest rank higher (penalizing brute-force attempts). Submissions with the final verdict `judge_error` are excluded: infrastructure failures must not penalize contestants.
+   - Accepted submissions (including repeat solves) and genuine contestant failures (`wrong_answer`, `failed_to_process` for compilation errors, `tle`, `rte`, and `mle`) still count as attempts.
 5. **Deterministic Ordering (User ID Ascending)**:
    - Ensures fully deterministic, reproducible ranking order.
 
@@ -101,3 +102,11 @@ The Consolidator is designed to run at contest conclusion:
 - **Admin API Endpoint**: `POST /admin/contest/:id/consolidate` with optional `?regrade=true` and `?force=true`
 - **Execution Gate**: Consolidation requires the contest to be closed (`GetRunningStatus() == closed`) and all pending code submissions to be evaluated (pending count = 0), returning HTTP 409 Conflict otherwise. Admins can pass `?force=true` to override this gate.
 - **Leaderboard Integration**: Once a contest has been consolidated, the public leaderboard serves the official consolidated ranks, making all documented tie-breaks visible. If scores or visibility flags are modified after consolidation, a rerun is needed to refresh stored ranks.
+- **Existing Final Ranks**: After deploying the `judge_error` attempt exclusion, an administrator must rerun consolidation for previously consolidated contests to refresh stored ranks. No schema migration is needed.
+
+## 6. Contestant API Contract
+
+- **Displayed Submission Counts**: The leaderboard's existing `problem_scores[].attempts` field counts all submissions for that problem, including pending submissions and `judge_error`. It is displayed as **Submissions** and is not the attempt penalty used for final ranking. Live ranks use score only; consolidated ranks apply the tie-breakers above.
+- **Status**: `GET /submission/:id/status` returns only the submission verdict in `status`.
+- **Details**: `GET /submission/:id/details` returns the verdict, per-testcase results, runtime and memory, along with submission metadata and the contestant's code.
+- **Internal Diagnostics**: `compile_output` and `stderr` remain internal. Contestant responses must never include them, hidden testcase input/output, or Judge0 tokens.
