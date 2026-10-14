@@ -3,6 +3,7 @@ package internal
 import (
 	"app/internal/controllers"
 	"context"
+	"strings"
 
 	_ "app/docs"
 	echoSwagger "github.com/swaggo/echo-swagger"
@@ -21,12 +22,20 @@ func NewEchoServer(
 	e := echo.New()
 	e.Use(mdw.Recover())
 	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
+	allowedOrigins := map[string]bool{
+		"https://recruitment.pointblank.club": true,
+		"http://recruitment.pointblank.club":  true,
+		"http://localhost:5173":               true,
+		"http://127.0.0.1:5173":               true,
+	}
+	for _, origin := range strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",") {
+		if origin = strings.TrimSpace(origin); origin != "" {
+			allowedOrigins[origin] = true
+		}
+	}
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
-		AllowOrigins: []string{
-			"https://recruitment.pointblank.club",
-			"http://recruitment.pointblank.club",
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
+		AllowOriginFunc: func(origin string) (bool, error) {
+			return allowedOrigins[origin], nil
 		},
 		AllowMethods: []string{
 			echo.GET,

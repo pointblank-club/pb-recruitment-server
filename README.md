@@ -9,6 +9,22 @@
 - Raw JSON Spec: `http://localhost:8080/swagger/doc.json`
 - Enable Swagger with `STAGE=dev` or `ENABLE_SWAGGER=true`; otherwise these URLs return 404.
 
+## Hosted frontend origins
+
+Set `CORS_ALLOWED_ORIGINS` to the hosted frontend's exact HTTPS origin, or a
+comma-separated list of approved origins. For example:
+
+```dotenv
+CORS_ALLOWED_ORIGINS=https://your-project.vercel.app
+```
+
+The existing local and recruitment.pointblank.club origins remain allowed.
+Origin matching is exact; `*.vercel.app` does not authorize preview deployments.
+Restart the backend after changing this setting. The frontend's
+`VITE_API_BASE_URL` must be the backend's publicly reachable HTTPS URL and requires
+a new Vite build when changed. Add the frontend hostname to the matching Firebase
+project's authorized domains as well.
+
 ## API Documentation (Swagger)
 
 To regenerate Swagger documentation after modifying route annotations or DTOs:
