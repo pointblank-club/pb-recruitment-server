@@ -70,7 +70,7 @@ type executionTestStore struct {
 	insertBatch func(context.Context) error
 }
 
-func (s executionTestStore) InsertBatch(ctx context.Context, _ string, _ []int) ([]models.Execution, error) {
+func (s executionTestStore) InsertBatch(ctx context.Context, _ string, _ []int, jobs ...[]judge0.SubmissionRequest) ([]models.Execution, error) {
 	if s.insertBatch != nil {
 		if err := s.insertBatch(ctx); err != nil {
 			return nil, err
@@ -79,12 +79,11 @@ func (s executionTestStore) InsertBatch(ctx context.Context, _ string, _ []int) 
 	return []models.Execution{{ID: "execution"}}, nil
 }
 
-func (s executionTestStore) SaveTokens(ctx context.Context, tokens map[string]string) error {
-	return s.saveTokens(ctx, tokens)
+func (s executionTestStore) SaveAttemptToken(ctx context.Context, id, attempt, token string) error {
+	return s.saveTokens(ctx, map[string]string{id: token})
 }
-
-func (s executionTestStore) MarkFailed(ctx context.Context, ids []string) error {
-	return s.markFailed(ctx, ids)
+func (s executionTestStore) ProcessFinal(ctx context.Context, r stores.FinalExecutionResult) error {
+	return s.markFailed(ctx, []string{r.ExecutionID})
 }
 
 func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
@@ -108,6 +107,7 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 	}{
 		{name: "token save timeout", timeoutSave: true},
 		{name: "failure status write error", markErr: writeErr},
+		{name: "ambiguous timeout without callbacks", networkFailure: true},
 		{name: "code upload failure", failUpload: true},
 		{name: "execution insertion failure", failInsert: true},
 		{name: "preparation cleanup failure", failInsert: true, markErr: writeErr},
@@ -154,7 +154,12 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 				}
 				var payload struct {
 					Submissions []struct {
-						EnableNetwork *bool `json:"enable_network"`
+						EnableNetwork  *bool   `json:"enable_network"`
+						SourceCode     string  `json:"source_code"`
+						Stdin          string  `json:"stdin"`
+						ExpectedOutput string  `json:"expected_output"`
+						CPUTimeLimit   float64 `json:"cpu_time_limit"`
+						MemoryLimit    float64 `json:"memory_limit"`
 					} `json:"submissions"`
 				}
 				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil || len(payload.Submissions) != 1 {
@@ -162,6 +167,14 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 				} else if enabled := payload.Submissions[0].EnableNetwork; enabled == nil || *enabled {
 					t.Error("dispatch must explicitly disable network access")
 				}
+				if len(payload.Submissions) == 1 {
+					job := payload.Submissions[0]
+					source, decodeErr := base64.StdEncoding.DecodeString(job.SourceCode)
+					if decodeErr != nil || string(source) != "int main(){}" || job.CPUTimeLimit != 1 || job.MemoryLimit != 262144 || job.Stdin != "MQ==" || job.ExpectedOutput != "MQ==" {
+						t.Errorf("source decoded twice or incorrect Judge0 units/payload: %+v source=%q error=%v", job, source, decodeErr)
+					}
+				}
+
 				if tc.networkFailure {
 					conn, _, err := w.(http.Hijacker).Hijack()
 					if err != nil {
@@ -285,7 +298,7 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 				ContestID: "contest", ProblemID: "problem", Language: "cpp",
 				Code: base64.StdEncoding.EncodeToString([]byte("int main(){}")),
 			})
-			wantMarked := !(tc.callbacksEnabled && (tc.timeoutSave || tc.networkFailure || tc.bodyFailure || tc.invalidBody || tc.missingTokens || tc.serverFailure))
+			wantMarked := !(tc.timeoutSave || tc.networkFailure || tc.bodyFailure || tc.invalidBody || tc.missingTokens || tc.serverFailure)
 			if marked != wantMarked {
 				t.Errorf("immediate failure bookkeeping = %v, want %v", marked, wantMarked)
 			}
@@ -544,4 +557,3 @@ func TestCreateSubmissionValidationBeforeRateLimit(t *testing.T) {
 		t.Error("submission should not be inserted when rate limit is exceeded")
 	}
 }
-

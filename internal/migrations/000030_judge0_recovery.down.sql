@@ -1,0 +1,9 @@
+DROP INDEX submission_executions_recovery_idx;
+ALTER TABLE submission_executions
+    DROP COLUMN dispatch_payload,
+    DROP COLUMN dispatch_attempt,
+    DROP COLUMN dispatch_count,
+    DROP COLUMN recovery_failures,
+    DROP COLUMN recovery_claim,
+    DROP COLUMN claim_until,
+    DROP COLUMN next_recovery_at;

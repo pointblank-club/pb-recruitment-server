@@ -210,47 +210,6 @@ func (c *Client) GetSubmissions(ctx context.Context, tokens []string) ([]*Submis
 	return out.Submissions, nil
 }
 
-func (c *Client) WorkersIdle(ctx context.Context) (bool, error) {
-	if c.baseURL == "" {
-		return false, ErrUnavailable
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/workers", nil)
-	if err != nil {
-		return false, err
-	}
-	if c.authToken != "" {
-		req.Header.Set("X-Auth-Token", c.authToken)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return false, ErrUnavailable
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false, fmt.Errorf("%w: workers status %d", ErrUnavailable, resp.StatusCode)
-	}
-	var queues []struct {
-		Queue     string `json:"queue"`
-		Size      *int   `json:"size"`
-		Working   *int   `json:"working"`
-		Available *int   `json:"available"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&queues); err != nil || len(queues) == 0 {
-		return false, ErrInvalidResponse
-	}
-	idle := true
-	for _, queue := range queues {
-		if queue.Queue == "" || queue.Size == nil || queue.Working == nil || queue.Available == nil || *queue.Size < 0 || *queue.Working < 0 || *queue.Available < *queue.Working {
-			return false, ErrInvalidResponse
-		}
-		if *queue.Available == 0 {
-			return false, fmt.Errorf("%w: %q", ErrNoWorkers, queue.Queue)
-		}
-		idle = idle && *queue.Size == 0 && *queue.Working == 0
-	}
-	return idle, nil
-}
-
 func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]SubmissionResult, error) {
 	encoded := make([]SubmissionRequest, len(jobs))
 	for i, job := range jobs {

@@ -23,8 +23,9 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000029`: submission cooldowns
-  (`000027`), saved final ranks (`000028`), and internal compiler diagnostics (`000029`).
+- The current schema requires migrations through `000030`: submission cooldowns
+  (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
+  and Judge0 recovery state (`000030`).
   `make migrate-up` applies only pending migrations; do not force the version or
   roll back a production database.
 
@@ -73,7 +74,7 @@ Correcting a started contest requires controlled regrading and score reconciliat
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
-all migrations through `000029`, and clean up afterward. They skip when
+all migrations through `000030`, and clean up afterward. They skip when
 `TEST_DATABASE_URL` is unset.
 
 ```bash
@@ -82,7 +83,7 @@ TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test -race ./i
 
 ## Judge0 deployment & Environment configuration
 
-- Apply migrations through `000029` to the target database before deploying this build; use PostgreSQL 12+.
+- Apply migrations through `000030` to the target database before deploying this build; use PostgreSQL 12+.
 - Set `SUBMISSION_RATE_LIMIT_SECONDS` (default: 5s) and `LEADERBOARD_CACHE_TTL_SECONDS` (default: 3s, max: 60s) identically across backend replicas.
 - Set `JUDGE0_URL` and `JUDGE0_AUTH_TOKEN`. Keep the Judge0 API inaccessible to contestants.
 - Enable callbacks with `JUDGE0_CALLBACK_BASE_URL` and the same `JUDGE0_CALLBACK_SECRET`
@@ -93,14 +94,25 @@ TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test -race ./i
 - With Vivek, load-test queue capacity for 500–600 contestants. The instance checked
   on 11 October has `max_queue_size=100` and `max_memory_limit=512000` KB; our default
   256 MiB is 262144 KB. Raising the queue limit also requires enough workers.
-- Recovery fetches results in batches respecting `JUDGE0_BATCH_SIZE` and continues
-  across pages within the existing 30-second sweep budget. Abandoned jobs
-  are failed only after two valid idle `/workers` observations at least 15 seconds
-  apart; candidates must predate the first observation by 30 seconds. Busy queues,
-  unavailable statistics, empty queue lists, and queues without workers do not
-  trigger failure cleanup. Verify `/workers` reports the execution queue with the
-  configured credentials. A permanently unavailable observation endpoint needs
-  operator attention; it does not justify discarding potentially valid results.
+- Execution inputs are saved before dispatch. Recovery uses short PostgreSQL claims
+  (`FOR UPDATE SKIP LOCKED`), then makes network requests outside the transaction.
+  Leases expire after 30 seconds; sweeps run every 15 seconds. Retry state is shared
+  across replicas: at most three tokenless dispatch attempts or three consecutive
+  failed result observations, with backoff, before `judge_error`.
+- Queued/running responses reset the failure counter. Wrong answers, compilation,
+  runtime and time-limit errors finalize immediately. Recovery ignores `/workers`
+  and job age; persistently queued jobs require operator investigation.
+- Callback signatures bind the dispatch attempt. Stale callbacks and expired claims
+  cannot replace newer results or award duplicate scores. Replace old backend replicas
+  together after migration `000030`; keep callback secrets identical.
+- Stock Judge0 can execute twice when an accepted request loses its response.
+  `JUDGE0_IDEMPOTENT_DISPATCH=true` requires a separately installed Judge0 API/worker
+  extension. Its `/recruitment/submissions/batch` route must return
+  `X-Recruitment-Idempotency: 1` and stable `recruitment-<UUID>` tokens. The backend
+  commits keys/tokens before HTTP and reuses them on recovery; it never falls back
+  to stock POSTs. All workers must claim keyed jobs once and fence expired workers.
+  A worker crash may yield `judge_error` without rerunning code; retain provider keys.
+  Leave this setting false until that separate deployment is complete.
 - Keep callback signatures out of proxy and load-balancer logs as well as application
   logs. The signature is in the callback URL query string.
 
@@ -108,6 +120,15 @@ Verdicts map status 6 to compilation error and 13/14 to `judge_error`. Judge0 ha
 dedicated memory-limit verdict. Submission runtime is the sum of testcase runtimes;
 memory is the maximum. Scores come from solved problems; freeze problem scores
 before starting and use controlled reconciliation for manual database adjustments.
+
+Judge0 1.13.1 miscompares null stdout with blank expected text. Shared finalization
+corrects this exact case from the saved expected output. Other wrong answers, stale
+attempts, and terminal results remain unchanged. Legacy callbacks without snapshots
+save their token and defer grading to recovery. Historical verdicts need explicit regrading.
+
+For live verification, supply `LIVE_JUDGE0_URL` and a disposable `TEST_DATABASE_URL`
+to `go test -race ./internal/stores -run TestLiveJudge0 -count=1`. Callback checks also
+need `LIVE_JUDGE0_CALLBACK_BASE_URL` routed from the worker to `127.0.0.1:23582`.
 
 ### Local connection to the EC2 judge
 
@@ -154,8 +175,7 @@ of 20, queue limit of 100, and maximum memory limit of 512000 KB. An empty
 registered queues. Verify an actual execution before treating the judge as ready.
 Python and C++17 smoke executions both returned `Accepted` through the SSH tunnel
 on that date. `/workers` then reported zero available workers despite those
-successful executions; token-result polling works, but abandoned-job cleanup
-requires reliable worker statistics and remains unverified.
+successful executions. Recovery therefore ignores these statistics.
 
 The database referenced by the local `DB_ADDR` was checked on 14 October 2026:
 its migration version was `29`, `dirty=false`, and migration `up` reported

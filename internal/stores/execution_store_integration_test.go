@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,7 +144,7 @@ func TestJudge0FinalResults(t *testing.T) {
 			if err != nil || len(results) != 1 || results[0].Status != tc.testcase || results[0].TestCaseID != "0" {
 				t.Fatalf("testcase results: %+v, %v", results, err)
 			}
-			if err := storage.Executions.SaveTokens(context.Background(), map[string]string{id: token}); err != nil {
+			if err := storage.Executions.SaveAttemptToken(context.Background(), id, "", token); err != nil {
 				t.Fatal(err)
 			}
 
@@ -170,7 +169,6 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 	user, contest, problem, _, executions := executionFixture(t, db, 8)
 	store := stores.NewExecutionStore(db)
 	var wg sync.WaitGroup
-	errors := make(chan error, 33)
 	finals := make([]stores.FinalExecutionResult, 0, 32)
 	for _, e := range executions {
 		r := stores.FinalExecutionResult{ExecutionID: e.ID, Token: uuid.NewString(), Status: "accepted", Runtime: 10, Memory: 1024}
@@ -184,10 +182,13 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 	for _, r := range finals {
 		tokens[r.ExecutionID] = r.Token
 	}
+	errors := make(chan error, len(finals)+len(tokens))
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		errors <- store.SaveTokens(context.Background(), tokens)
+		for id, token := range tokens {
+			errors <- store.SaveAttemptToken(context.Background(), id, "", token)
+		}
 	}()
 	for _, result := range finals {
 		wg.Add(1)
@@ -243,11 +244,10 @@ func TestDispatchFailureAndLateResults(t *testing.T) {
 	_, _, _, sub, executions := executionFixture(t, db, 2)
 	store := stores.NewExecutionStore(db)
 	token := uuid.NewString()
-	if err := store.SaveTokens(context.Background(), map[string]string{executions[1].ID: token}); err != nil {
+	if err := store.SaveAttemptToken(context.Background(), executions[1].ID, "", token); err != nil {
 		t.Fatal(err)
 	}
-	ids := []string{executions[0].ID, executions[1].ID}
-	if err := store.MarkFailed(context.Background(), ids); err != nil {
+	if err := store.ProcessFinal(context.Background(), stores.FinalExecutionResult{ExecutionID: executions[0].ID, Status: "judge_error"}); err != nil {
 		t.Fatal(err)
 	}
 	assertSubmission(t, db, sub, "pending", 0, 0)
@@ -264,39 +264,12 @@ func TestDispatchFailureAndLateResults(t *testing.T) {
 	}
 }
 
-func TestBulkTokenSave(t *testing.T) {
-	db := postgresTestDB(t)
-	_, _, _, _, executions := executionFixture(t, db, 3)
-	store := stores.NewExecutionStore(db)
-	a, b, c := executions[0].ID, executions[1].ID, executions[2].ID
-	tokens := map[string]string{a: uuid.NewString(), b: uuid.NewString()}
-	if err := store.SaveTokens(context.Background(), tokens); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SaveTokens(context.Background(), map[string]string{a: uuid.NewString(), c: uuid.NewString()}); err == nil {
-		t.Fatal("conflicting token must fail the whole batch")
-	}
-	if err := store.SaveTokens(context.Background(), map[string]string{c: tokens[a]}); err == nil {
-		t.Fatal("duplicate token must fail")
-	}
-	if err := store.SaveTokens(context.Background(), map[string]string{uuid.NewString(): uuid.NewString(), c: uuid.NewString()}); err == nil {
-		t.Fatal("missing execution must fail the whole batch")
-	}
-	var empty bool
-	if err := db.QueryRow(`SELECT judge0_token IS NULL FROM submission_executions WHERE id=$1`, c).Scan(&empty); err != nil || !empty {
-		t.Fatalf("failed batch leaked a token: empty=%v, err=%v", empty, err)
-	}
-	if err := store.SaveTokens(context.Background(), map[string]string{strings.ToUpper(a): tokens[a], b: tokens[b], c: uuid.NewString()}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestTerminalParentKeepsChildResult(t *testing.T) {
 	db := postgresTestDB(t)
 	_, _, _, sub, executions := executionFixture(t, db, 1)
 	store := stores.NewExecutionStore(db)
 	token := uuid.NewString()
-	if err := store.SaveTokens(context.Background(), map[string]string{executions[0].ID: token}); err != nil {
+	if err := store.SaveAttemptToken(context.Background(), executions[0].ID, "", token); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`UPDATE submissions SET status='judge_error' WHERE id=$1`, sub); err != nil {
@@ -305,7 +278,7 @@ func TestTerminalParentKeepsChildResult(t *testing.T) {
 	if _, err := db.Exec(`UPDATE submission_executions SET created_at=$2 WHERE id=$1`, executions[0].ID, time.Now().Unix()-120); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := store.PendingWithTokens(context.Background(), 50, 0, "")
+	pending, err := store.ClaimRecovery(context.Background(), 50)
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("terminal parent must not be polled: %+v, %v", pending, err)
 	}
@@ -327,7 +300,7 @@ func TestDispatchFailureVerdictPrecedence(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/failureFirst=%v", status, failureFirst), func(t *testing.T) {
 				_, _, _, sub, executions := executionFixture(t, db, 2)
 				fail := func() {
-					if err := store.MarkFailed(context.Background(), []string{executions[1].ID}); err != nil {
+					if err := store.ProcessFinal(context.Background(), stores.FinalExecutionResult{ExecutionID: executions[1].ID, Status: "judge_error"}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -346,117 +319,6 @@ func TestDispatchFailureVerdictPrecedence(t *testing.T) {
 				}
 				assertSubmission(t, db, sub, want, 10, 1000)
 			})
-		}
-	}
-}
-
-func TestExecutionRecoveryQueries(t *testing.T) {
-	db := postgresTestDB(t)
-	_, _, _, sub, executions := executionFixture(t, db, 52)
-	store := stores.NewExecutionStore(db)
-	created := time.Now().Unix() - 600
-	for i, e := range executions {
-		if _, err := db.Exec(`UPDATE submission_executions SET judge0_token=$2,created_at=$3 WHERE id=$1`, e.ID, uuid.NewString(), created+int64(i)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	page, err := store.PendingWithTokens(context.Background(), 50, 0, "")
-	if err != nil || len(page) != 50 {
-		t.Fatalf("first page: %d, %v", len(page), err)
-	}
-	last := page[len(page)-1]
-	next, err := store.PendingWithTokens(context.Background(), 50, last.CreatedAt, last.ID)
-	if err != nil || len(next) != 2 || next[0].ID != executions[50].ID {
-		t.Fatalf("next page: %+v, %v", next, err)
-	}
-	if _, err := db.Exec(`UPDATE submission_executions SET judge0_token=NULL WHERE submission_id=$1`, sub); err != nil {
-		t.Fatal(err)
-	}
-	stale, err := store.PendingTokenlessBefore(context.Background(), time.Now().Unix()-300, 50)
-	if err != nil || len(stale) != 50 {
-		t.Fatalf("stale: %d, %v", len(stale), err)
-	}
-	if err := store.MarkFailed(context.Background(), stale); err != nil {
-		t.Fatal(err)
-	}
-	ready, err := store.TerminalPendingParents(context.Background(), 50)
-	if err != nil || len(ready) != 0 {
-		t.Fatalf("incomplete parent selected: %+v, %v", ready, err)
-	}
-	stale, err = store.PendingTokenlessBefore(context.Background(), time.Now().Unix()-300, 50)
-	if err != nil || len(stale) != 2 {
-		t.Fatalf("remaining stale: %d, %v", len(stale), err)
-	}
-	if err := store.MarkFailed(context.Background(), stale); err != nil {
-		t.Fatal(err)
-	}
-	assertSubmission(t, db, sub, "judge_error", 0, 0)
-}
-
-func TestTokenlessRecoveryWithCallbacks(t *testing.T) {
-	db := postgresTestDB(t)
-	user, contest, problem, sub, executions := executionFixture(t, db, 3)
-	lostSub, lostExecutions := executionSubmission(t, db, user, contest, problem, 1)
-	var busy atomic.Bool
-	busy.Store(true)
-	token := uuid.NewString()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/workers" {
-			working := 0
-			if busy.Load() {
-				working = 1
-			}
-			fmt.Fprintf(w, `[{"queue":"1.13.1","size":0,"available":1,"working":%d}]`, working)
-			return
-		}
-		fmt.Fprintf(w, `{"submissions":[{"token":%q,"status":{"id":2}}]}`, token)
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	t.Setenv("JUDGE0_AUTH_TOKEN", "")
-	t.Setenv("JUDGE0_CALLBACK_BASE_URL", "https://example.test")
-	t.Setenv("JUDGE0_CALLBACK_SECRET", "test-secret")
-	t.Setenv("JUDGE0_BATCH_SIZE", "20")
-	client := judge0.NewClient()
-	storage := stores.NewStorage(db)
-	old := time.Now().Unix() - 1200
-	if _, err := db.Exec(`UPDATE submission_executions SET created_at=$2 WHERE id=$1`, lostExecutions[0].ID, old); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE submission_executions SET created_at=$2 WHERE id IN ($1,$3)`, executions[0].ID, old, executions[1].ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := storage.Executions.SaveTokens(context.Background(), map[string]string{executions[1].ID: token}); err != nil {
-		t.Fatal(err)
-	}
-	service := services.NewSubmissionService(storage, nil, client)
-	service.RecoverJudge0(context.Background())
-	assertSubmission(t, db, lostSub, "pending", 0, 0)
-	for i := range executions {
-		var status string
-		if err := db.QueryRow(`SELECT status FROM submission_executions WHERE id=$1`, executions[i].ID).Scan(&status); err != nil || status != "pending" {
-			t.Fatalf("execution %d: status=%s, err=%v", i, status, err)
-		}
-	}
-	// A valid callback still scores even after twenty minutes in the queue.
-	if err := storage.Executions.ProcessFinal(context.Background(), stores.FinalExecutionResult{ExecutionID: executions[0].ID, Token: uuid.NewString(), Status: "accepted"}); err != nil {
-		t.Fatal(err)
-	}
-	results, err := storage.Submissions.GetTestCaseResultsBySubmissionID(context.Background(), sub)
-	if err != nil || len(results) != 1 || results[0].TestCaseID != "0" || results[0].Status != "pass" {
-		t.Fatalf("recovered results: %+v, %v", results, err)
-	}
-	assertSubmission(t, db, sub, "pending", 0, 0)
-	busy.Store(false)
-	service.RecoverJudge0(context.Background())
-	assertSubmission(t, db, lostSub, "pending", 0, 0)
-	time.Sleep(16 * time.Second)
-	service.RecoverJudge0(context.Background())
-	assertSubmission(t, db, lostSub, "judge_error", 0, 0)
-	for i, want := range []string{"accepted", "judge_error", "pending"} {
-		var status string
-		if err := db.QueryRow(`SELECT status FROM submission_executions WHERE id=$1`, executions[i].ID).Scan(&status); err != nil || status != want {
-			t.Fatalf("idle execution %d: status=%s, err=%v", i, status, err)
 		}
 	}
 }
@@ -560,4 +422,3 @@ func TestLeaderboardCachePostgres(t *testing.T) {
 		t.Fatalf("expected fresh score 99, got %d", freshResp.Entries[0].TotalScore)
 	}
 }
-

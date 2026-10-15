@@ -4,206 +4,121 @@ import (
 	"app/internal/judge0"
 	"app/internal/models"
 	"app/internal/stores"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"go.uber.org/fx"
 	"net/http"
 	"net/http/httptest"
-	"slices"
-	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/labstack/gommon/log"
-	"go.uber.org/fx"
 )
 
 type recoveryTestStore struct {
 	*stores.ExecutionStore
-	items     []models.Execution
-	tokenless []models.Execution
-	marked    []string
-	finals    []stores.FinalExecutionResult
-	cutoff    int64
+	items   []models.Execution
+	finals  []stores.FinalExecutionResult
+	healthy []bool
+	tokens  map[string]string
 }
 
-func (s *recoveryTestStore) PendingTokenlessBefore(_ context.Context, cutoff int64, _ int) ([]string, error) {
-	s.cutoff = cutoff
-	var ids []string
-	for _, item := range s.tokenless {
-		if item.CreatedAt < cutoff {
-			ids = append(ids, item.ID)
-		}
-	}
-	return ids, nil
-}
-func (s *recoveryTestStore) MarkFailed(_ context.Context, ids []string) error {
-	s.marked = append(s.marked, ids...)
-	return nil
-}
 func (*recoveryTestStore) TerminalPendingParents(context.Context, int) ([]stores.FinalExecutionResult, error) {
 	return nil, nil
 }
-func (s *recoveryTestStore) ProcessFinal(_ context.Context, result stores.FinalExecutionResult) error {
-	s.finals = append(s.finals, result)
+func (s *recoveryTestStore) ClaimRecovery(context.Context, int) ([]models.Execution, error) {
+	if len(s.items) == 0 {
+		return nil, nil
+	}
+	e := s.items[0]
+	s.items = s.items[1:]
+	return []models.Execution{e}, nil
+}
+func (s *recoveryTestStore) ReleaseRecovery(_ context.Context, _ models.Execution, healthy bool) error {
+	s.healthy = append(s.healthy, healthy)
 	return nil
 }
-func (s *recoveryTestStore) PendingWithTokens(_ context.Context, limit int, created int64, id string) ([]models.Execution, error) {
-	var out []models.Execution
-	for _, item := range s.items {
-		if item.CreatedAt > created || item.CreatedAt == created && item.ID > id {
-			out = append(out, item)
-		}
+func (s *recoveryTestStore) ProcessFinal(_ context.Context, r stores.FinalExecutionResult) error {
+	s.finals = append(s.finals, r)
+	return nil
+}
+func (s *recoveryTestStore) SaveAttemptToken(_ context.Context, id, attempt, token string) error {
+	if s.tokens == nil {
+		s.tokens = map[string]string{}
 	}
-	return out[:min(limit, len(out))], nil
+	s.tokens[id] = token
+	return nil
 }
 
-func TestRecoveryCursorSurvivesTimeout(t *testing.T) {
-	store := &recoveryTestStore{items: []models.Execution{
-		{ID: "a", Judge0Token: "slow", CreatedAt: 1},
-		{ID: "b", Judge0Token: "missing", CreatedAt: 1},
-		{ID: "c", Judge0Token: "queued", CreatedAt: 2},
-	}}
-	var mu sync.Mutex
-	var requests []string
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/workers" {
-			w.Write([]byte(`[{"queue":"1.13.1","size":1,"available":1,"working":0}]`))
-			return
-		}
-		token := r.URL.Query().Get("tokens")
-		mu.Lock()
-		requests = append(requests, token)
-		mu.Unlock()
-		if token == "slow" {
-			cancel()
-			<-r.Context().Done()
-			return
-		}
-		if token == "missing" {
-			w.Write([]byte(`{"submissions":[null]}`))
-			return
-		}
-		w.Write([]byte(`{"submissions":[{"token":"queued","status":{"id":1}}]}`))
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	t.Setenv("JUDGE0_AUTH_TOKEN", "")
-	t.Setenv("JUDGE0_BATCH_SIZE", "1")
-	ss := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient())
-	ss.RecoverJudge0(ctx)
-	if ss.recoveryCursorID != "a" {
-		t.Fatalf("cursor advanced to %q", ss.recoveryCursorID)
-	}
-	ss.RecoverJudge0(context.Background())
-	mu.Lock()
-	got := slices.Clone(requests)
-	mu.Unlock()
-	if !slices.Equal(got, []string{"slow", "missing", "queued"}) {
-		t.Fatalf("requests = %v", got)
-	}
-	if ss.recoveryCursorID != "" || ss.recoveryCursorTime != 0 {
-		t.Fatal("empty page must reset the cursor")
-	}
-}
-
-func TestRecoveryRequiresConfirmedIdle(t *testing.T) {
+func TestRecoveryOutcomes(t *testing.T) {
 	for _, tc := range []struct {
-		name, workers string
-		idle          bool
+		name, body, want string
+		failures         int
+		healthy          bool
 	}{
-		{"idle", `[{"queue":"1.13.1","size":0,"available":1,"working":0}]`, true},
-		{"queued", `[{"queue":"1.13.1","size":1,"available":1,"working":0}]`, false},
-		{"working", `[{"queue":"1.13.1","size":0,"available":1,"working":1}]`, false},
-		{"no workers", `[{"queue":"1.13.1","size":0,"available":0,"working":0}]`, false},
-		{"unknown", `[]`, false},
-		{"malformed", `{`, false},
-		{"missing fields", `[{"queue":"1.13.1"}]`, false},
-		{"mixed queues", `[{"queue":"a","size":0,"available":1,"working":0},{"queue":"b","size":1,"available":1,"working":0}]`, false},
+		{"queued", `{"token":"job","status":{"id":1}}`, "", 3, true},
+		{"processing", `{"token":"job","status":{"id":2}}`, "", 3, true},
+		{"accepted", `{"token":"job","status":{"id":3},"time":"0.125","memory":256}`, "accepted", 1, true},
+		{"wrong answer", `{"token":"job","status":{"id":4}}`, "wrong_answer", 1, true},
+		{"timeout", `{"token":"job","status":{"id":5}}`, "tle", 1, true},
+		{"compilation", `{"token":"job","status":{"id":6}}`, "failed_to_process", 1, true},
+		{"missing retry", "null", "", 1, false},
+		{"missing exhausted", "null", "judge_error", 3, false},
+		{"outage retry", "outage", "", 1, false},
+		{"outage exhausted", "outage", "judge_error", 3, false},
+		{"internal error retry", `{"token":"job","status":{"id":13}}`, "", 1, false},
+		{"internal error exhausted", `{"token":"job","status":{"id":13}}`, "judge_error", 3, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var output bytes.Buffer
-			previous := log.Output()
-			log.SetOutput(&output)
-			defer log.SetOutput(previous)
-			store := &recoveryTestStore{
-				items:     []models.Execution{{ID: "a", Judge0Token: "queued", CreatedAt: 1}, {ID: "b", Judge0Token: "processing", CreatedAt: 1}, {ID: "c", Judge0Token: "accepted", CreatedAt: 1}},
-				tokenless: []models.Execution{{ID: "lost", CreatedAt: 1}, {ID: "recent", CreatedAt: time.Now().Unix()}},
-			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/workers" {
-					w.Write([]byte(tc.workers))
+					t.Error("recovery must not consult worker statistics")
+				}
+				if tc.body == "outage" {
+					w.WriteHeader(502)
 					return
 				}
-				w.Write([]byte(`{"submissions":[{"token":"queued","status":{"id":1}},{"token":"processing","status":{"id":2}},{"token":"accepted","status":{"id":3}}]}`))
+				fmt.Fprintf(w, `{"submissions":[%s]}`, tc.body)
 			}))
 			defer server.Close()
 			t.Setenv("JUDGE0_URL", server.URL)
-			t.Setenv("JUDGE0_BATCH_SIZE", "20")
+			store := &recoveryTestStore{items: []models.Execution{{ID: "exec", Judge0Token: "job", Attempt: "attempt", Claim: "claim", RecoveryFailures: tc.failures}}}
 			ss := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient())
 			ss.RecoverJudge0(context.Background())
-			if tc.name == "no workers" {
-				logged := output.String()
-				if !strings.Contains(logged, "judge0 recovery worker observation failed") || !strings.Contains(logged, "no available workers") || !strings.Contains(logged, "1.13.1") {
-					t.Fatalf("missing actionable worker warning: %s", logged)
+			if len(store.healthy) != 1 || store.healthy[0] != tc.healthy {
+				t.Fatalf("health=%v", store.healthy)
+			}
+			if tc.want == "" {
+				if len(store.finals) != 0 {
+					t.Fatal(store.finals)
 				}
-			}
-			if len(store.marked) != 0 || len(store.finals) != 1 || store.finals[0].Status != "accepted" {
-				t.Fatalf("first observation: marked=%v, finals=%+v", store.marked, store.finals)
-			}
-			// A second immediate call is not a second sweep.
-			ss.RecoverJudge0(context.Background())
-			if len(store.marked) != 0 {
-				t.Fatal("cleanup must wait for a separate sweep")
-			}
-			ss.recoveryIdleSince = time.Now().Add(-16 * time.Second)
-			store.finals = nil
-			ss.RecoverJudge0(context.Background())
-			if tc.idle {
-				if !slices.Equal(store.marked, []string{"lost"}) || len(store.finals) != 3 || store.finals[0].Status != "judge_error" || store.finals[1].Status != "judge_error" || store.finals[2].Status != "accepted" {
-					t.Fatalf("idle cleanup: marked=%v, finals=%+v", store.marked, store.finals)
-				}
-			} else if len(store.marked) != 0 || !ss.recoveryIdleSince.IsZero() || len(store.finals) != 1 || store.finals[0].Status != "accepted" {
-				t.Fatalf("unsafe cleanup: marked=%v, finals=%+v", store.marked, store.finals)
+			} else if len(store.finals) != 1 || store.finals[0].Status != tc.want || store.finals[0].Attempt != "attempt" || store.finals[0].Claim != "claim" {
+				t.Fatalf("final=%+v", store.finals)
 			}
 		})
 	}
 }
-
-func TestRecoveryBatchesAcrossPages(t *testing.T) {
-	store := &recoveryTestStore{}
-	for i := 0; i < 121; i++ {
-		id := fmt.Sprintf("%03d", i)
-		store.items = append(store.items, models.Execution{ID: id, Judge0Token: id, CreatedAt: 1})
-	}
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/workers" {
-			w.Write([]byte(`[{"queue":"1.13.1","size":121,"available":1,"working":1}]`))
-			return
-		}
-		requests++
-		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
-		if len(tokens) > 20 {
-			t.Error("batch limit exceeded")
-		}
-		results := make([]judge0.SubmissionStatusResponse, len(tokens))
-		for i, token := range tokens {
-			results[i].Token, results[i].Status.ID = token, 3
-		}
-		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	t.Setenv("JUDGE0_BATCH_SIZE", "20")
-	ss := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient())
-	ss.RecoverJudge0(context.Background())
-	if len(store.finals) != 121 || requests != 8 || ss.recoveryCursorID != "" {
-		t.Fatalf("finals=%d, requests=%d, cursor=%q", len(store.finals), requests, ss.recoveryCursorID)
+func TestTokenlessRecoveryDispatch(t *testing.T) {
+	for _, count := range []int{2, 4} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				w.WriteHeader(201)
+				w.Write([]byte(`[{"token":"recovered"}]`))
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			payload, _ := json.Marshal(judge0.SubmissionRequest{SourceCode: "print(1)", LanguageID: 71})
+			store := &recoveryTestStore{items: []models.Execution{{ID: "exec", Attempt: "new", Claim: "claim", DispatchCount: count, DispatchPayload: payload}}}
+			NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).RecoverJudge0(context.Background())
+			if count == 2 {
+				if calls != 1 || store.tokens["exec"] != "recovered" || len(store.finals) != 0 {
+					t.Fatalf("calls=%d tokens=%v finals=%v", calls, store.tokens, store.finals)
+				}
+			} else if calls != 0 || len(store.finals) != 1 || store.finals[0].Status != "judge_error" {
+				t.Fatalf("calls=%d finals=%v", calls, store.finals)
+			}
+		})
 	}
 }
 
@@ -244,5 +159,73 @@ func TestJudge0StatusAndRuntime(t *testing.T) {
 		if (err != nil) != tc.invalid || err == nil && got != tc.want {
 			t.Fatalf("runtime %s = %d, %v", tc.raw, got, err)
 		}
+	}
+}
+
+func TestIdempotentRecoveryReusesDurableKey(t *testing.T) {
+	const key = "e6fe09a3-f468-4181-a920-82584634b1a0"
+	for _, tc := range []struct {
+		name                  string
+		token                 bool
+		failures              int
+		unsupported           bool
+		wantPosts, wantFinals int
+	}{
+		{"before token save crash", false, 1, false, 1, 0},
+		{"before HTTP crash", true, 1, false, 1, 0},
+		{"missing exhausted", true, 3, false, 0, 1},
+		{"unsupported provider", true, 1, true, 1, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("JUDGE0_IDEMPOTENT_DISPATCH", "true")
+			payload, _ := json.Marshal(judge0.SubmissionRequest{RecruitmentKey: key, SourceCode: "pass", LanguageID: 71})
+			e := models.Execution{ID: "exec", Attempt: "attempt", Claim: "claim", DispatchCount: 2, RecoveryFailures: tc.failures, DispatchPayload: payload}
+			if tc.token {
+				e.Judge0Token = judge0.IdempotentToken(key)
+			}
+			store := &recoveryTestStore{}
+			posts := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.Write([]byte(`{"submissions":[null]}`))
+					return
+				}
+				posts++
+				if store.tokens[e.ID] != judge0.IdempotentToken(key) {
+					t.Error("token was not persisted before dispatch")
+				}
+				var body struct {
+					Submissions []judge0.SubmissionRequest `json:"submissions"`
+				}
+				json.NewDecoder(r.Body).Decode(&body)
+				if body.Submissions[0].RecruitmentKey != key {
+					t.Error(body)
+				}
+				if !tc.unsupported {
+					w.Header().Set("X-Recruitment-Idempotency", "1")
+				}
+				w.WriteHeader(201)
+				fmt.Fprintf(w, `[{"token":%q}]`, judge0.IdempotentToken(key))
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			healthy, err := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).recoverExecution(context.Background(), e)
+			if err != nil || posts != tc.wantPosts || len(store.finals) != tc.wantFinals {
+				t.Fatalf("posts=%d finals=%v err=%v", posts, store.finals, err)
+			}
+			if tc.token && healthy {
+				t.Error("ACK for a missing token reset the failure budget")
+			}
+		})
+	}
+}
+
+func TestIdempotentRecoveryNeverReplaysLegacyAmbiguity(t *testing.T) {
+	t.Setenv("JUDGE0_IDEMPOTENT_DISPATCH", "true")
+	payload, _ := json.Marshal(judge0.SubmissionRequest{SourceCode: "pass", LanguageID: 71})
+	store := &recoveryTestStore{}
+	_, err := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).recoverExecution(context.Background(), models.Execution{ID: "exec", DispatchPayload: payload})
+	if err != nil || len(store.finals) != 1 || store.finals[0].Status != "judge_error" {
+		t.Fatal(store.finals, err)
 	}
 }

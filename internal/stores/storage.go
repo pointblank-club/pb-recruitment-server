@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"app/internal/judge0"
 	"app/internal/models"
 	"app/internal/models/dto"
 	"context"
@@ -38,13 +39,13 @@ type Storage struct {
 		CheckSubmissionRateLimit(context.Context, string, int64) error
 	}
 	Executions interface {
-		InsertBatch(ctx context.Context, submissionID string, indexes []int) ([]models.Execution, error)
-		SaveTokens(ctx context.Context, tokens map[string]string) error
-		MarkFailed(ctx context.Context, ids []string) error
+		InsertBatch(ctx context.Context, submissionID string, indexes []int, jobs ...[]judge0.SubmissionRequest) ([]models.Execution, error)
+		ClaimRecovery(context.Context, int) ([]models.Execution, error)
+		ReleaseRecovery(context.Context, models.Execution, bool) error
+		SaveAttemptToken(context.Context, string, string, string) error
+		SaveRecoveryPayload(context.Context, models.Execution, judge0.SubmissionRequest) error
 		ProcessFinal(ctx context.Context, result FinalExecutionResult) error
-		PendingWithTokens(ctx context.Context, limit int, cursorTime int64, cursorID string) ([]models.Execution, error)
 		TerminalPendingParents(ctx context.Context, limit int) ([]FinalExecutionResult, error)
-		PendingTokenlessBefore(ctx context.Context, cutoff int64, limit int) ([]string, error)
 	}
 	Rankings interface {
 		UpdateLeaderboardUser(ctx context.Context, contestID string, userID string, req *dto.UpdateLeaderboardUserRequest) error
