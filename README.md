@@ -23,8 +23,9 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000029`: submission cooldowns
-  (`000027`), saved final ranks (`000028`), and internal compiler diagnostics (`000029`).
+- The current schema requires migrations through `000030`: submission cooldowns
+  (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
+  and Dolos report/review state (`000030`–`000031`).
   `make migrate-up` applies only pending migrations; do not force the version or
   roll back a production database.
 
@@ -108,6 +109,24 @@ Verdicts map status 6 to compilation error and 13/14 to `judge_error`. Judge0 ha
 dedicated memory-limit verdict. Submission runtime is the sum of testcase runtimes;
 memory is the maximum. Scores come from solved problems; freeze problem scores
 before starting and use controlled reconciliation for manual database adjustments.
+
+### Dolos plagiarism checks
+
+After each contest end time, when `DOLOS_API_URL` is set, the background worker packages the latest code submission
+for each participant and problem, uploads the ZIP to Dolos, and polls report status every
+15 seconds. Admins can see the status and open the report in the contest management page.
+Set `DOLOS_API_URL` explicitly to `https://dolos.ugent.be/api` to use the public API, or
+to a self-hosted Dolos API URL to keep source code within your own infrastructure. An
+empty setting disables automated checks. The public API receives submitted code and
+currently limits ZIP uploads to 10 MB. A contest with fewer
+than two code submissions is skipped. Apply migration `000030` before deploying.
+
+Admin APIs are available at `GET /admin/contest/{id}/plagiarism` for report status,
+`GET /admin/contest/{id}/plagiarism/pairs` for matching pairs, and
+`PATCH /admin/contest/{id}/plagiarism/pairs/{pairKey}` to record an admin review. The
+PATCH JSON body is `{"status":"cleared","note":"..."}`; `confirmed` and
+`unreviewed` are also supported. These routes require the normal Firebase admin auth.
+Apply migrations through `000031` to persist review decisions.
 
 ### Local connection to the EC2 judge
 

@@ -45,6 +45,7 @@ func main() {
 			services.NewUserService,
 			services.NewSubmissionService,
 			services.NewAdminService,
+			services.NewDolosService,
 			internal.NewEchoServer,
 			stores.NewStorage,
 			db.NewDBConn,
@@ -55,6 +56,7 @@ func main() {
 		fx.Invoke(routes.AddContestRoutes),
 		fx.Invoke(routes.AddSubmissionRoutes),
 		fx.Invoke(services.NewJudge0Recovery),
+		fx.Invoke(services.NewDolosWorker),
 		fx.Invoke(routes.AddAdminRoutes),
 		fx.Invoke(internal.StartEchoServer),
 	).Run()

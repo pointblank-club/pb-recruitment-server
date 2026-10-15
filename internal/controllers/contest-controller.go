@@ -18,12 +18,44 @@ import (
 
 type ContestController struct {
 	contestService *services.ContestService
+	dolosService   *services.DolosService
 }
 
-func NewContestController(contestService *services.ContestService) *ContestController {
+func NewContestController(contestService *services.ContestService, dolosServices ...*services.DolosService) *ContestController {
+	var dolosService *services.DolosService
+	if len(dolosServices) > 0 {
+		dolosService = dolosServices[0]
+	}
 	return &ContestController{
 		contestService: contestService,
+		dolosService:   dolosService,
 	}
+}
+
+func (cc *ContestController) GetDolosReport(ctx echo.Context) error {
+	report, err := cc.dolosService.GetReport(ctx.Request().Context(), ctx.Param("id"))
+	if err != nil {
+		log.Errorf("get Dolos report for contest %s: %v", ctx.Param("id"), err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get plagiarism report"})
+	}
+	return ctx.JSON(http.StatusOK, report)
+}
+
+func (cc *ContestController) GetDolosPairs(ctx echo.Context) error {
+	pairs, err := cc.dolosService.GetPairs(ctx.Request().Context(), ctx.Param("id"))
+	if err != nil {
+		return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	}
+	return ctx.JSON(http.StatusOK, pairs)
+}
+
+func (cc *ContestController) ReviewDolosPair(ctx echo.Context) error {
+	req := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.PlagiarismPairReviewRequest)
+	if err := cc.dolosService.ReviewPair(ctx.Request().Context(), ctx.Param("id"), ctx.Param("pairKey"), req.Status, req.Note); err != nil {
+		log.Errorf("review Dolos pair for contest %s: %v", ctx.Param("id"), err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update plagiarism review"})
+	}
+	return ctx.NoContent(http.StatusNoContent)
 }
 
 // ModifyRegistration godoc

@@ -47,6 +47,9 @@ func AddAdminRoutes(
 	//Leaderboard/User Management
 	adminGroup.PUT("/:contestid/leaderboard/:userid", contestController.HandleUpdateLeaderboardUser)
 	adminGroup.POST("/contest/:id/consolidate", contestController.HandleConsolidateContest)
+	adminGroup.GET("/contest/:id/plagiarism", contestController.GetDolosReport)
+	adminGroup.GET("/contest/:id/plagiarism/pairs", contestController.GetDolosPairs)
+	adminGroup.PATCH("/contest/:id/plagiarism/pairs/:pairKey", contestController.ReviewDolosPair, middleware.ValidateRequest(new(dto.PlagiarismPairReviewRequest)))
 
 	adminGroup.GET("/contests/:contestId/registrations", contestController.GetContestRegistrations)
 }
