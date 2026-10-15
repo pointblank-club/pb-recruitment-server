@@ -71,6 +71,15 @@ verdicts and leaderboard scores. Finish any in-flight edits before opening the r
 The start time cannot be changed once the contest starts; end-time extensions remain allowed.
 Correcting a started contest requires controlled regrading and score reconciliation.
 
+### Testcase caching
+
+Testcase/answer pairs share concurrent loads and cache successful reads per replica:
+64 entries, 32 MiB, five-minute TTL. Failures and oversized results are not cached.
+Problem edits publish both objects under a new version directory before updating the
+problem key, so replicas cannot mix old inputs with new answers. Hidden cases remain
+server-side. Old versions remain until problem deletion; legacy objects overwritten
+outside the edit API may stay cached for five minutes.
+
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
