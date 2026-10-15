@@ -187,7 +187,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 			SourceCode:      source,
 			LanguageID:      languageID,
 			Stdin:           inputs[i],
-			ExpectedOutput:  outputs[i],
+			ExpectedOutput:  &outputs[i],
 			CPUTimeLimit:    cpuLimit,
 			MemoryLimit:     memLimit,
 			CallbackURL:     ss.judge0.CallbackURL(exec.ID),

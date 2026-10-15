@@ -2,11 +2,15 @@ package judge0
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,7 +25,7 @@ func TestBatchRejections(t *testing.T) {
 		{"queue full", 503, `{"error":"queue is full"}`, []error{ErrDispatchRejected, ErrDispatchRejected}},
 		{"invalid request", 422, `[{"memory_limit":["exceeds maximum"]}]`, []error{ErrDispatchRejected, ErrDispatchRejected}},
 		{"mixed validation", 201, `[{"token":"accepted"},{"memory_limit":["exceeds maximum"]}]`, []error{nil, ErrDispatchRejected}},
-		{"empty entry", 201, `[{"token":"accepted"},{}]`, []error{nil, ErrDispatchRejected}},
+		{"empty entry", 201, `[{"token":"accepted"},{}]`, []error{nil, ErrInvalidResponse}},
 		{"missing entry", 201, `[{"token":"accepted"}]`, []error{nil, ErrInvalidResponse}},
 		{"internal error", 500, `{}`, []error{ErrUnavailable, ErrUnavailable}},
 		{"bad gateway", 502, `{}`, []error{ErrUnavailable, ErrUnavailable}},
@@ -178,5 +182,163 @@ func TestDispatchTimeout(t *testing.T) {
 	}
 	if timeout := (*Client)(nil).Timeout(); timeout != 10*time.Second {
 		t.Fatalf("fallback timeout = %v", timeout)
+	}
+}
+
+func TestBase64AndPartialBatchMapping(t *testing.T) {
+	for _, failAt := range []int32{0, 2} {
+		t.Run(fmt.Sprint(failAt), func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				call := requests.Add(1)
+				if r.URL.Query().Get("base64_encoded") != "true" {
+					t.Error("base64 contract disabled")
+				}
+				var payload struct {
+					Submissions []SubmissionRequest `json:"submissions"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+					return
+				}
+				for i, job := range payload.Submissions {
+					for _, value := range []struct{ got, want string }{{job.SourceCode, "print('नमस्ते')\n"}, {job.Stdin, ""}, {*job.ExpectedOutput, "नमस्ते\n"}} {
+						decoded, err := base64.StdEncoding.DecodeString(value.got)
+						if err != nil || string(decoded) != value.want {
+							t.Errorf("job %d encoded=%q want=%q error=%v", i, decoded, value.want, err)
+						}
+					}
+				}
+				if call == failAt {
+					w.WriteHeader(504)
+					return
+				}
+				w.WriteHeader(201)
+				responses := make([]map[string]string, len(payload.Submissions))
+				for i := range responses {
+					responses[i] = map[string]string{"token": fmt.Sprint((int(call)-1)*2 + i)}
+				}
+				json.NewEncoder(w).Encode(responses)
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			t.Setenv("JUDGE0_BATCH_SIZE", "2")
+			output := "नमस्ते\n"
+			jobs := make([]SubmissionRequest, 5)
+			for i := range jobs {
+				jobs[i] = SubmissionRequest{SourceCode: "print('नमस्ते')\n", Stdin: "", ExpectedOutput: &output}
+			}
+			results, err := NewClient().CreateBatch(context.Background(), jobs)
+			if failAt == 0 {
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i, r := range results {
+					if r.Token != fmt.Sprint(i) {
+						t.Fatalf("result %d=%+v", i, r)
+					}
+				}
+			} else {
+				if !errors.Is(err, ErrUnavailable) || results[0].Token != "0" || results[1].Token != "1" || !errors.Is(results[2].Error, ErrUnavailable) || !errors.Is(results[3].Error, ErrUnavailable) || !errors.Is(results[4].Error, ErrDispatchNotSent) {
+					t.Fatalf("partial results=%+v, %v", results, err)
+				}
+			}
+			if jobs[0].SourceCode != "print('नमस्ते')\n" || *jobs[0].ExpectedOutput != output {
+				t.Fatal("client mutated caller inputs")
+			}
+		})
+	}
+}
+func TestAcceptedDispatchTimeoutIsAmbiguous(t *testing.T) {
+	var accepted atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accepted.Store(true)
+		time.Sleep(60 * time.Millisecond)
+		w.WriteHeader(201)
+		w.Write([]byte(`[{"token":"already-created"}]`))
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	t.Setenv("JUDGE0_TIMEOUT_MS", "20")
+	results, err := NewClient().CreateBatch(context.Background(), []SubmissionRequest{{SourceCode: "print(1)"}})
+	if !accepted.Load() || !errors.Is(err, ErrUnavailable) || errors.Is(err, ErrDispatchRejected) || len(results) != 1 || results[0].Token != "" {
+		t.Fatalf("accepted=%v result=%+v err=%v", accepted.Load(), results, err)
+	}
+}
+func TestCallbackAttemptAuthentication(t *testing.T) {
+	t.Setenv("JUDGE0_CALLBACK_BASE_URL", "https://callback.test")
+	t.Setenv("JUDGE0_CALLBACK_SECRET", "secret")
+	c := NewClient()
+	id := "e032ee69-cfd1-4350-b083-cc6e9822e9ec"
+	u, _ := url.Parse(c.CallbackURL(id, "attempt"))
+	if u.Query().Get("attempt") != "attempt" || !c.VerifyCallback(id, u.Query().Get("sig"), "attempt") || c.VerifyCallback(id, u.Query().Get("sig"), "other") || c.VerifyCallback(id, u.Query().Get("sig")) {
+		t.Fatal("attempt signature not fenced")
+	}
+}
+
+func TestIdempotentDispatchContract(t *testing.T) {
+	const key = "e6fe09a3-f468-4181-a920-82584634b1a0"
+	for _, tc := range []struct {
+		name, header, body string
+		want               error
+	}{
+		{"valid", "1", `[{"token":"recruitment-` + key + `"}]`, nil},
+		{"unsupported", "", `[{"token":"recruitment-` + key + `"}]`, ErrIdempotencyUnsupported},
+		{"wrong token", "1", `[{"token":"random"}]`, ErrIdempotencyUnsupported},
+		{"queue full", "1", `[{"recruitment_key":["queue is full"]}]`, ErrUnavailable},
+		{"changed inputs", "1", `[{"recruitment_key":["key already belongs to different execution inputs"]}]`, ErrDispatchRejected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/recruitment/submissions/batch" || r.URL.Query().Get("base64_encoded") != "true" {
+					t.Error(r.URL)
+				}
+				var payload struct {
+					Submissions []SubmissionRequest `json:"submissions"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				if payload.Submissions[0].RecruitmentKey != key || payload.Submissions[0].SourceCode != base64.StdEncoding.EncodeToString([]byte("नमस्ते\n")) {
+					t.Error(payload)
+				}
+				w.Header().Set("X-Recruitment-Idempotency", tc.header)
+				w.WriteHeader(201)
+				w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			job := SubmissionRequest{RecruitmentKey: key, SourceCode: "नमस्ते\n"}
+			results, _ := NewClient().CreateBatch(context.Background(), []SubmissionRequest{job})
+			if !errors.Is(results[0].Error, tc.want) {
+				t.Fatalf("result=%+v want=%v", results, tc.want)
+			}
+			if tc.want == nil && results[0].Token != IdempotentToken(key) {
+				t.Fatal(results)
+			}
+		})
+	}
+}
+
+func TestIdempotentRunGeneratesKeyWithoutMutatingCaller(t *testing.T) {
+	t.Setenv("JUDGE0_IDEMPOTENT_DISPATCH", "true")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Submissions []SubmissionRequest `json:"submissions"`
+		}
+		json.NewDecoder(r.Body).Decode(&payload)
+		if payload.Submissions[0].RecruitmentKey == "" {
+			t.Error("missing generated key")
+		}
+		w.Header().Set("X-Recruitment-Idempotency", "1")
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode([]map[string]string{{"token": IdempotentToken(payload.Submissions[0].RecruitmentKey)}})
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	jobs := []SubmissionRequest{{SourceCode: "print(1)"}}
+	results, err := NewClient().CreateBatch(context.Background(), jobs)
+	if err != nil || results[0].Error != nil || jobs[0].RecruitmentKey != "" {
+		t.Fatalf("results=%+v err=%v caller=%+v", results, err, jobs)
 	}
 }

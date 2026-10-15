@@ -3,8 +3,11 @@ package judge0
 import "errors"
 
 var (
-	ErrUnavailable         = errors.New("judge0 unavailable")
-	ErrInvalidResponse     = errors.New("judge0 returned an invalid response")
-	ErrNoWorkers           = errors.New("judge0 queue has no available workers")
-	ErrUnsupportedLanguage = errors.New("unsupported language")
+	ErrNoWorkers              = errors.New("judge0 queue has no available workers")
+	ErrDispatchRejected       = errors.New("Judge0 explicitly rejected dispatch")
+	ErrDispatchNotSent        = errors.New("Judge0 dispatch was not attempted")
+	ErrIdempotencyUnsupported = errors.New("Judge0 did not honor the required idempotency contract")
+	ErrUnavailable            = errors.New("judge0 unavailable")
+	ErrInvalidResponse        = errors.New("judge0 returned an invalid response")
+	ErrUnsupportedLanguage    = errors.New("unsupported language")
 )
