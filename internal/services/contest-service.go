@@ -204,8 +204,9 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 
 	if req.Type == "code" && len(req.Testcases) > 0 {
 
-		testcasesKey = fmt.Sprintf("problems/%s/%s/testcases.json", contestID, problemID)
-		answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+		// shortcut: retain old versions until problem deletion; add pruning if authoring churn warrants it.
+		testcasesKey = fmt.Sprintf("problems/%s/%s/%s/testcases.json", contestID, problemID, uuid.NewString())
+		answersKey := testcaseAnswersKey(testcasesKey)
 
 		tcArray := []map[string]interface{}{}
 		ansArray := []string{}
@@ -221,12 +222,12 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		}
 
 		tcBytes, _ := json.Marshal(tcArray)
-		if err := cs.s3.PutObjectOverwrite(ctx, testcasesKey, string(tcBytes)); err != nil {
+		if err := cs.s3.PutObject(ctx, testcasesKey, string(tcBytes)); err != nil {
 			return nil, err
 		}
 
 		ansBytes, _ := json.Marshal(ansArray)
-		if err := cs.s3.PutObjectOverwrite(ctx, answersKey, string(ansBytes)); err != nil {
+		if err := cs.s3.PutObject(ctx, answersKey, string(ansBytes)); err != nil {
 			return nil, err
 		}
 	}
@@ -316,7 +317,6 @@ func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID st
 	return nil
 }
 
-
 func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID string) ([]dto.ProblemOverview, error) {
 	return cs.stores.Problems.GetProblemList(ctx, contestID)
 }
@@ -339,7 +339,7 @@ func (cs *ContestService) GetContestProblem(ctx context.Context, contestID strin
 		if err != nil {
 			return nil, err
 		}
-		
+
 		var data struct {
 			Description string `json:"description"`
 		}
@@ -373,7 +373,7 @@ func (cs *ContestService) GetContestProblem(ctx context.Context, contestID strin
 					// output, which lives in answers.json. Hidden cases keep theirs
 					// server-side.
 					if len(sampleCases) > 0 {
-						answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+						answersKey := testcaseAnswersKey(meta.TestcasesKey)
 						if raw, err := cs.s3.GetObject(ctx, answersKey); err != nil {
 							log.Errorf("failed to load answers for problem %s: %v", problemID, err)
 						} else {
@@ -459,7 +459,7 @@ func (cs *ContestService) GetProblemAnswers(ctx context.Context, contestID, prob
 		return []string{}, nil
 	}
 
-	answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+	answersKey := testcaseAnswersKey(meta.TestcasesKey)
 
 	raw, err := cs.s3.GetObject(ctx, answersKey)
 	if err != nil {
