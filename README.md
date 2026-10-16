@@ -105,14 +105,13 @@ TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test -race ./i
 - Callback signatures bind the dispatch attempt. Stale callbacks and expired claims
   cannot replace newer results or award duplicate scores. Replace old backend replicas
   together after migration `000030`; keep callback secrets identical.
-- Stock Judge0 can execute twice when an accepted request loses its response.
-  `JUDGE0_IDEMPOTENT_DISPATCH=true` requires a separately installed Judge0 API/worker
-  extension. Its `/recruitment/submissions/batch` route must return
-  `X-Recruitment-Idempotency: 1` and stable `recruitment-<UUID>` tokens. The backend
-  commits keys/tokens before HTTP and reuses them on recovery; it never falls back
-  to stock POSTs. All workers must claim keyed jobs once and fence expired workers.
-  A worker crash may yield `judge_error` without rerunning code; retain provider keys.
-  Leave this setting false until that separate deployment is complete.
+- Use the stock Judge0 API and workers. The initial 30-second lease gives callbacks
+  time to arrive before retrying a tokenless dispatch; subsequent tokenless retries
+  wait at least 30 seconds, with backoff. A callback received during this grace
+  period can complete the execution without another POST.
+- shortcut: an accepted request with a lost response and no timely callback may
+  execute twice on retry; add provider-supported idempotency only if duplicate CPU
+  work becomes unacceptable. Attempts are bounded and scoring remains idempotent.
 - Keep callback signatures out of proxy and load-balancer logs as well as application
   logs. The signature is in the callback URL query string.
 
