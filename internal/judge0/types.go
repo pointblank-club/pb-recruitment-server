@@ -13,7 +13,6 @@ type SubmissionRequest struct {
 	CompilerOptions string  `json:"compiler_options,omitempty"`
 	EnableNetwork   bool    `json:"enable_network"`
 	WallTimeLimit   float64 `json:"wall_time_limit,omitempty"`
-	MaxFileSize     int     `json:"max_file_size,omitempty"`
 }
 
 type SubmissionResult struct {
