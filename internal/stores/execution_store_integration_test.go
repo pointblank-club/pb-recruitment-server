@@ -278,7 +278,7 @@ func TestTerminalParentKeepsChildResult(t *testing.T) {
 	if _, err := db.Exec(`UPDATE submission_executions SET created_at=$2 WHERE id=$1`, executions[0].ID, time.Now().Unix()-120); err != nil {
 		t.Fatal(err)
 	}
-	pending, err := store.ClaimRecovery(context.Background(), 50)
+	pending, err := store.ClaimRecovery(context.Background(), 50, true)
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("terminal parent must not be polled: %+v, %v", pending, err)
 	}

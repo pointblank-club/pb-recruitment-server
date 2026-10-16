@@ -23,9 +23,9 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000030`: submission cooldowns
+- The current schema requires migrations through `000031`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
-  and Judge0 recovery state (`000030`).
+  Judge0 recovery state (`000030`), and ordered recovery claims (`000031`).
   `make migrate-up` applies only pending migrations; do not force the version or
   roll back a production database.
 
@@ -74,37 +74,61 @@ Correcting a started contest requires controlled regrading and score reconciliat
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
-all migrations through `000030`, and clean up afterward. They skip when
+all migrations through `000031`, and clean up afterward. They skip when
 `TEST_DATABASE_URL` is unset.
 
 ```bash
 TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test -race ./internal/stores -count=1
 ```
 
+The opt-in contest load test starts 600 simultaneous submission requests with ten
+testcases each, then checks polling and duplicate callbacks racing three recovery
+workers. It uses real PostgreSQL and simulated S3/Judge0; it does not certify the
+production Judge0 fleet. It uses the configured database pool (defaults: 25 open/idle).
+
+```bash
+RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/test_db' \
+  go test -race ./internal/stores -run '^TestJudge0ContestLoadPostgres$' -count=1 -v
+```
+
 ## Judge0 deployment & Environment configuration
 
-- Apply migrations through `000030` to the target database before deploying this build; use PostgreSQL 12+.
+- Apply migrations through `000031` to the target database before deploying this build; use PostgreSQL 12+.
 - Set `SUBMISSION_RATE_LIMIT_SECONDS` (default: 5s) and `LEADERBOARD_CACHE_TTL_SECONDS` (default: 3s, max: 60s) identically across backend replicas.
 - Set `JUDGE0_URL` and `JUDGE0_AUTH_TOKEN`. Keep the Judge0 API inaccessible to contestants.
+- Use localhost or a private network for production Judge0 traffic. SSH forwarding is for local verification.
 - Enable callbacks with `JUDGE0_CALLBACK_BASE_URL` and the same `JUDGE0_CALLBACK_SECRET`
   on every backend replica. Verify a signed callback reaches the backend from Judge0.
 - For a local backend without an inbound callback address, leave both callback
   settings empty. The existing recovery worker fetches results every 15 seconds;
   callbacks are not required for this local setup.
 - With Vivek, load-test queue capacity for 500–600 contestants. The instance checked
-  on 11 October has `max_queue_size=100` and `max_memory_limit=512000` KB; our default
-  256 MiB is 262144 KB. Raising the queue limit also requires enough workers.
+  on 16 October still has `max_queue_size=100` and `max_memory_limit=512000` KB; our default
+  256 MiB is 262144 KB. This queue cannot absorb a simultaneous contest burst: size it for
+  participants × testcases per submission × submission waves, plus existing backlog.
+  For 600 contestants and ten testcases, one wave is 6,000 execution jobs. Raising the queue
+  limit also requires measuring worker throughput and acceptable completion time on staging.
+- Source must decode to valid UTF-8; malformed source returns HTTP 400 before submission creation.
 - Execution inputs are saved before dispatch. Recovery uses short PostgreSQL claims
   (`FOR UPDATE SKIP LOCKED`), then makes network requests outside the transaction.
-  Leases expire after 30 seconds; sweeps run every 15 seconds. Retry state is shared
+  Leases expire after 30 seconds; sweeps run every 15 seconds. Token-bearing jobs
+  are polled in batches respecting `JUDGE0_BATCH_SIZE`; tokenless jobs are claimed
+  one at a time so slow dispatches cannot consume other jobs' leases. Retry state is shared
   across replicas: at most three tokenless dispatch attempts or three consecutive
   failed result observations, with backoff, before `judge_error`.
+- Each claimed polling batch applies results concurrently before releasing its claims.
+  Keep the default batch size of 20 with `DB_MAX_OPEN_CONNS=25` and `DB_MAX_IDLE_CONNS=25`;
+  update existing configurations that still retain only five idle connections, to avoid
+  opening connections again on each batch. Account for
+  every replica's pool when sizing PostgreSQL's connection limit. Routine polling omits
+  stdout and retains stderr/compiler diagnostics. Only Wrong Answer jobs with blank
+  expected output fetch stdout to verify the Judge0 defect before correcting the verdict.
 - Queued/running responses reset the failure counter. Wrong answers, compilation,
   runtime and time-limit errors finalize immediately. Recovery ignores `/workers`
   and job age; persistently queued jobs require operator investigation.
 - Callback signatures bind the dispatch attempt. Stale callbacks and expired claims
   cannot replace newer results or award duplicate scores. Replace old backend replicas
-  together after migration `000030`; keep callback secrets identical.
+  together after migrations through `000031`; keep callback secrets identical.
 - Use the stock Judge0 API and workers. The initial 30-second lease gives callbacks
   time to arrive before retrying a tokenless dispatch; subsequent tokenless retries
   wait at least 30 seconds, with backoff. A callback received during this grace
@@ -133,10 +157,11 @@ need `LIVE_JUDGE0_CALLBACK_BASE_URL` routed from the worker to `127.0.0.1:23582`
 
 The judge at `ubuntu@13.205.163.28` is reachable over SSH on port `6622`.
 Its HTTP port `2358` was not directly reachable from the development machine on
-14 October 2026. Forward it to localhost and keep the tunnel running:
+14 October 2026. Compression helps larger requests and results fit the client's
+ten-second timeout. Forward it to localhost and keep the tunnel running:
 
 ```bash
-ssh -NT -p 6622 \
+ssh -CNT -p 6622 \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
   -L 127.0.0.1:2358:127.0.0.1:2358 ubuntu@13.205.163.28

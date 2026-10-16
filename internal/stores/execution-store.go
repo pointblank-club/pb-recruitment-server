@@ -23,8 +23,7 @@ type FinalExecutionResult struct {
 	CompileOutput, Stderr      string
 }
 type executionChild struct {
-	id, status    string
-	testCaseIndex int
+	id, status string
 }
 
 type ExecutionStore struct {

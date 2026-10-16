@@ -557,3 +557,38 @@ func TestCreateSubmissionValidationBeforeRateLimit(t *testing.T) {
 		t.Error("submission should not be inserted when rate limit is exceeded")
 	}
 }
+
+func TestDecodeSourcePreservesUTF8(t *testing.T) {
+	source := "print('नमस्ते')\n"
+	for _, tc := range []struct {
+		name, code, want string
+		invalid          bool
+	}{
+		{"plain Unicode", source, source, false},
+		{"encoded Unicode", base64.StdEncoding.EncodeToString([]byte(source)), source, false},
+		{"encoded invalid UTF8", base64.StdEncoding.EncodeToString([]byte{'/', '/', ' ', 0xff}), "", true},
+		{"plain invalid UTF8", string([]byte{'/', '/', ' ', 0xff}), "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := decodeSource(tc.code)
+			if tc.invalid {
+				if !errors.Is(err, common.ErrInvalidCode) {
+					t.Fatalf("non-UTF8 source can change during snapshotting: %q %v", got, err)
+				}
+			} else if err != nil || got != tc.want {
+				t.Fatal(got, err)
+			}
+		})
+	}
+}
+
+func TestCreateSubmissionRejectsInvalidUTF8BeforePreparation(t *testing.T) {
+	service := NewSubmissionService(&stores.Storage{Problems: problemTestStore{}}, nil, nil)
+	id, err := service.CreateSubmission(context.Background(), "user", models.Code, &dto.SubmitSubmissionRequest{
+		ContestID: "contest", ProblemID: "problem", Language: "cpp",
+		Code: base64.StdEncoding.EncodeToString([]byte{'/', '/', ' ', 0xff}),
+	})
+	if id != "" || !errors.Is(err, common.ErrInvalidCode) {
+		t.Fatal("invalid source reached preparation", id, err)
+	}
+}

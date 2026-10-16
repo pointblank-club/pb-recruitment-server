@@ -40,8 +40,8 @@ type Storage struct {
 	}
 	Executions interface {
 		InsertBatch(ctx context.Context, submissionID string, indexes []int, jobs ...[]judge0.SubmissionRequest) ([]models.Execution, error)
-		ClaimRecovery(context.Context, int) ([]models.Execution, error)
-		ReleaseRecovery(context.Context, models.Execution, bool) error
+		ClaimRecovery(context.Context, int, bool) ([]models.Execution, error)
+		ReleaseRecovery(context.Context, []models.Execution, []bool) error
 		SaveAttemptToken(context.Context, string, string, string) error
 		SaveRecoveryPayload(context.Context, models.Execution, judge0.SubmissionRequest) error
 		ProcessFinal(ctx context.Context, result FinalExecutionResult) error

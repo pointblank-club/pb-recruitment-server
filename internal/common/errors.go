@@ -24,7 +24,7 @@ var (
 	KeyAlreadyExistsError          = errors.New("key already exists")
 	ErrUnsupportedLanguage         = errors.New("unsupported language")
 	ErrNoTestcases                 = errors.New("problem has no testcases")
-	ErrInvalidCode                 = errors.New("code is required")
+	ErrInvalidCode                 = errors.New("code must be non-empty UTF-8 text")
 	ErrInvalidAnswer               = errors.New("MCQ answer must refer to an existing option")
 	ErrProblemsLocked              = errors.New("problems cannot be edited or deleted after the contest starts")
 	ErrRateLimitExceeded           = errors.New("rate limit exceeded, please wait before submitting again")

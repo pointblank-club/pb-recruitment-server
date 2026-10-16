@@ -49,7 +49,7 @@ func TestRecoveryClaimsAndFencingPostgres(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			items, err := stores.NewExecutionStore(db).ClaimRecovery(ctx, 4)
+			items, err := stores.NewExecutionStore(db).ClaimRecovery(ctx, 4, false)
 			claims <- items
 			errs <- err
 		}()
@@ -75,12 +75,12 @@ func TestRecoveryClaimsAndFencingPostgres(t *testing.T) {
 		t.Fatalf("claims=%d", len(seen))
 	}
 	store := stores.NewExecutionStore(db)
-	items, err := store.ClaimRecovery(ctx, 100)
+	items, err := store.ClaimRecovery(ctx, 100, false)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("active leases reclaimed: %+v %v", items, err)
 	}
 	readyExecutions(t, db, sub)
-	newClaims, err := store.ClaimRecovery(ctx, 100)
+	newClaims, err := store.ClaimRecovery(ctx, 100, false)
 	if err != nil || len(newClaims) != 24 {
 		t.Fatalf("expired leases: %d %v", len(newClaims), err)
 	}
@@ -96,7 +96,7 @@ func TestRecoveryClaimsAndFencingPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		// A stale release must not reset the new lease or its persisted counters.
-		if err := store.ReleaseRecovery(ctx, old, true); err != nil {
+		if err := store.ReleaseRecovery(ctx, []models.Execution{old}, []bool{true}); err != nil {
 			t.Fatal(err)
 		}
 		var token sql.NullString
@@ -164,7 +164,7 @@ func TestRecoveryWorkerCrashAndAmbiguousDispatchPostgres(t *testing.T) {
 	client := judge0.NewClient()
 	ctx := context.Background()
 	// Crash after claiming, before sending. A new replica must wait for expiry.
-	crashed, err := storage.Executions.ClaimRecovery(ctx, 1)
+	crashed, err := storage.Executions.ClaimRecovery(ctx, 1, false)
 	if err != nil || len(crashed) != 1 {
 		t.Fatal(crashed, err)
 	}
@@ -311,7 +311,7 @@ func TestCallbackAndRecoveryRacePostgres(t *testing.T) {
 	snapshotExecutions(t, db, sub)
 	ctx := context.Background()
 	store := stores.NewExecutionStore(db)
-	claims, err := store.ClaimRecovery(ctx, 1)
+	claims, err := store.ClaimRecovery(ctx, 1, false)
 	if err != nil || len(claims) != 1 {
 		t.Fatal(claims, err)
 	}
@@ -320,12 +320,12 @@ func TestCallbackAndRecoveryRacePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	readyExecutions(t, db, sub)
-	firstPolls, err := store.ClaimRecovery(ctx, 1)
+	firstPolls, err := store.ClaimRecovery(ctx, 1, true)
 	if err != nil || len(firstPolls) != 1 {
 		t.Fatal(firstPolls, err)
 	}
 	readyExecutions(t, db, sub)
-	newPolls, err := store.ClaimRecovery(ctx, 1)
+	newPolls, err := store.ClaimRecovery(ctx, 1, true)
 	if err != nil || len(newPolls) != 1 {
 		t.Fatal(newPolls, err)
 	}
@@ -459,7 +459,12 @@ func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 			fmt.Fprintf(w, `[{"token":"legacy-%d"}]`, n)
 			return
 		}
-		fmt.Fprintf(w, `{"submissions":[{"token":%q,"status":{"id":3}}]}`, r.URL.Query().Get("tokens"))
+		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
+		results := make([]judge0.SubmissionStatusResponse, len(tokens))
+		for i, token := range tokens {
+			results[i] = judge0.SubmissionStatusResponse{Token: token, Status: judge0.StatusResponse{ID: 3}}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
 	}))
 	defer server.Close()
 	t.Setenv("JUDGE0_URL", server.URL)
@@ -490,7 +495,7 @@ func TestPreparedDispatchSnapshotPostgres(t *testing.T) {
 	if err != nil || len(executions) != 2 {
 		t.Fatal(executions, err)
 	}
-	claims, err := store.ClaimRecovery(ctx, 2)
+	claims, err := store.ClaimRecovery(ctx, 2, false)
 	if err != nil || len(claims) != 0 {
 		t.Fatal("initial dispatch lease missing", claims, err)
 	}
@@ -510,7 +515,7 @@ func TestPreparedDispatchSnapshotPostgres(t *testing.T) {
 		}
 	}
 	readyExecutions(t, db, sub)
-	claims, err = store.ClaimRecovery(ctx, 2)
+	claims, err = store.ClaimRecovery(ctx, 2, false)
 	if err != nil || len(claims) != 2 {
 		t.Fatal(claims, err)
 	}
@@ -519,4 +524,135 @@ func TestPreparedDispatchSnapshotPostgres(t *testing.T) {
 			t.Fatal("initial attempt was not fenced", claim)
 		}
 	}
+}
+
+func TestRecoveryMixedBacklogPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, sub, items := executionFixture(t, db, 41)
+	snapshotExecutions(t, db, sub)
+	for _, e := range items[:39] {
+		if err := stores.NewExecutionStore(db).SaveAttemptToken(context.Background(), e.ID, "", e.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var gets, posts atomic.Int32
+	stdout, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 256<<10))))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			n := posts.Add(1)
+			var reserved int
+			if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND judge0_token IS NULL AND recovery_claim<>''`, sub).Scan(&reserved); err != nil || reserved != 1 {
+				t.Error("unsent jobs claimed ahead of their dispatch", reserved, err)
+			}
+			w.WriteHeader(201)
+			fmt.Fprintf(w, `[{"token":"retry-%d"}]`, n)
+			return
+		}
+		gets.Add(1)
+		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
+		if len(tokens) > 20 {
+			t.Error("batch exceeds configured size", len(tokens))
+		}
+		results := make([]judge0.SubmissionStatusResponse, len(tokens))
+		for i, token := range tokens {
+			results[i] = judge0.SubmissionStatusResponse{Token: token, Stdout: stdout, Status: judge0.StatusResponse{ID: 3}}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	t.Setenv("JUDGE0_BATCH_SIZE", "20")
+	service := services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient())
+	service.RecoverJudge0(context.Background())
+	if gets.Load() != 2 || posts.Load() != 2 {
+		t.Fatalf("backlog fairness/batching: GET=%d POST=%d", gets.Load(), posts.Load())
+	}
+	assertSubmission(t, db, sub, "pending", 0, 0)
+	readyExecutions(t, db, sub)
+	service.RecoverJudge0(context.Background())
+	if gets.Load() != 3 || posts.Load() != 2 {
+		t.Fatalf("successful dispatch was repeated: GET=%d POST=%d", gets.Load(), posts.Load())
+	}
+	assertSubmission(t, db, sub, "accepted", 0, 0)
+	var score, count int
+	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
+		t.Fatal(score, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM test_case_results WHERE submission_id=$1`, sub).Scan(&count); err != nil || count != 41 {
+		t.Fatal(count, err)
+	}
+}
+
+func TestBulkRecoveryReleaseFencingPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	_, _, _, sub, items := executionFixture(t, db, 4)
+	snapshotExecutions(t, db, sub)
+	store := stores.NewExecutionStore(db)
+	ctx := context.Background()
+	for _, e := range items {
+		if err := store.SaveAttemptToken(ctx, e.ID, "", e.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE submission_executions SET recovery_failures=2 WHERE submission_id=$1`, sub); err != nil {
+		t.Fatal(err)
+	}
+	claims, err := store.ClaimRecovery(ctx, 4, true)
+	if err != nil || len(claims) != 4 {
+		t.Fatal(claims, err)
+	}
+	// Replace one claim while the old batch is still applying its observations.
+	if _, err := db.Exec(`UPDATE submission_executions SET claim_until='-infinity',next_recovery_at='-infinity' WHERE id=$1`, claims[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := store.ClaimRecovery(ctx, 1, true)
+	if err != nil || len(replacement) != 1 || replacement[0].ID != claims[0].ID {
+		t.Fatal(replacement, err)
+	}
+	outcomes := []bool{true, false, true, false}
+	if err := store.ReleaseRecovery(ctx, claims, outcomes); err != nil {
+		t.Fatal(err)
+	}
+	for i, e := range claims {
+		var failures int
+		var active bool
+		var claim string
+		var delay float64
+		if err := db.QueryRow(`SELECT recovery_failures,claim_until>now(),recovery_claim,extract(epoch FROM next_recovery_at-now()) FROM submission_executions WHERE id=$1`, e.ID).Scan(&failures, &active, &claim, &delay); err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			if failures != 4 || !active || claim != replacement[0].Claim {
+				t.Fatal("stale bulk release changed replacement", failures, active, claim)
+			}
+		} else {
+			wantFailures, wantDelay := 3, 45.0
+			if outcomes[i] {
+				wantFailures, wantDelay = 0, 15
+			}
+			if failures != wantFailures || active || delay < wantDelay-2 || delay > wantDelay {
+				t.Fatal("outcome assigned to wrong execution", i, failures, active, delay)
+			}
+		}
+	}
+	// Bulk releases and callbacks must acquire child locks in the same order.
+	start := make(chan struct{})
+	errs := make(chan error, len(claims)+1)
+	go func() {
+		<-start
+		errs <- store.ReleaseRecovery(ctx, claims, outcomes)
+	}()
+	for _, e := range claims {
+		go func(e models.Execution) {
+			<-start
+			errs <- store.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Token: e.Judge0Token, Status: "accepted", Runtime: 1})
+		}(e)
+	}
+	close(start)
+	for range len(claims) + 1 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertSubmission(t, db, sub, "accepted", 4, 0)
 }

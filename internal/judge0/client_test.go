@@ -150,6 +150,9 @@ func TestGetSubmissionsRequestsBase64(t *testing.T) {
 		if got := r.URL.Query().Get("base64_encoded"); got != "true" {
 			t.Errorf("base64_encoded = %q, want %q", got, "true")
 		}
+		if fields := r.URL.Query().Get("fields"); strings.Contains(fields, "stdout") || !strings.Contains(fields, "stderr") || !strings.Contains(fields, "compile_output") {
+			t.Errorf("routine polls must omit stdout and preserve diagnostics: %q", fields)
+		}
 		w.Write([]byte(`{"submissions":[{"token":"a","status":{"id":3}}]}`))
 	}))
 	defer server.Close()
@@ -273,5 +276,24 @@ func TestCallbackAttemptAuthentication(t *testing.T) {
 	u, _ := url.Parse(c.CallbackURL(id, "attempt"))
 	if u.Query().Get("attempt") != "attempt" || !c.VerifyCallback(id, u.Query().Get("sig"), "attempt") || c.VerifyCallback(id, u.Query().Get("sig"), "other") || c.VerifyCallback(id, u.Query().Get("sig")) {
 		t.Fatal("attempt signature not fenced")
+	}
+}
+
+func TestPollingLargeDiagnosticsBatch(t *testing.T) {
+	tokens := make([]string, 20)
+	results := make([]SubmissionStatusResponse, len(tokens))
+	stderr, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 256<<10))))
+	for i := range tokens {
+		tokens[i] = fmt.Sprint(i)
+		results[i] = SubmissionStatusResponse{Token: tokens[i], Stderr: stderr, Status: StatusResponse{ID: 3}}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	got, err := NewClient().GetSubmissions(context.Background(), tokens)
+	if err != nil || len(got) != len(tokens) {
+		t.Fatalf("valid output batch rejected: results=%d error=%v", len(got), err)
 	}
 }
