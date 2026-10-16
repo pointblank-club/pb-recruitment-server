@@ -436,26 +436,15 @@ func TestSubmissionServiceRateLimit(t *testing.T) {
 	}
 	svc := NewSubmissionService(storage, nil, nil)
 
-	// Normal user passes
-	if err := svc.CheckRateLimitWithCooldown(context.Background(), "alice", 10); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if checkedUser != "alice" || checkedCooldown != 10 {
-		t.Errorf("checkedUser=%s, checkedCooldown=%d", checkedUser, checkedCooldown)
-	}
-
-	// Spammer rejected
-	if err := svc.CheckRateLimitWithCooldown(context.Background(), "spammer", 5); !errors.Is(err, common.ErrRateLimitExceeded) {
-		t.Fatalf("expected ErrRateLimitExceeded, got %v", err)
-	}
-
-	// Environment variable fallback
 	t.Setenv("SUBMISSION_RATE_LIMIT_SECONDS", "7")
 	if err := svc.CheckRateLimit(context.Background(), "bob"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if checkedCooldown != 7 {
-		t.Errorf("expected cooldown from env to be 7, got %d", checkedCooldown)
+	if checkedUser != "bob" || checkedCooldown != 7 {
+		t.Errorf("checkedUser=%s, checkedCooldown=%d", checkedUser, checkedCooldown)
+	}
+	if err := svc.CheckRateLimit(context.Background(), "spammer"); !errors.Is(err, common.ErrRateLimitExceeded) {
+		t.Fatalf("expected ErrRateLimitExceeded, got %v", err)
 	}
 }
 

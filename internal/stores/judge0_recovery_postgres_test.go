@@ -150,6 +150,12 @@ func TestRecoveryPollingProgressDuringBlockedDispatchPostgres(t *testing.T) {
 			w.WriteHeader(502)
 			return
 		}
+		// Keep polling finalization from locking the tokenless row before its claim.
+		select {
+		case <-postStarted:
+		case <-r.Context().Done():
+			return
+		}
 		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
 		results := make([]judge0.SubmissionStatusResponse, len(tokens))
 		for i, token := range tokens {

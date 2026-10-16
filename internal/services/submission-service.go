@@ -79,13 +79,6 @@ func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) 
 	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, cooldown)
 }
 
-func (ss *SubmissionService) CheckRateLimitWithCooldown(ctx context.Context, userID string, cooldown int64) error {
-	if ss == nil || ss.stores == nil || ss.stores.Submissions == nil {
-		return nil
-	}
-	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, cooldown)
-}
-
 func (ss *SubmissionService) JudgeMCQ(ctx context.Context, submissionID string) error {
 	if err := ss.stores.Submissions.JudgeMCQ(ctx, submissionID); err != nil {
 		return ss.markSubmissionFailed(ctx, submissionID, err)
@@ -457,9 +450,17 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 		return true, nil
 	}
 	if status == "wrong_answer" {
-		job, err := ss.recoveryJob(callCtx, e)
-		if err == nil && job.ExpectedOutput != nil && strings.Trim(*job.ExpectedOutput, " \t\n\r\v\f\x00") == "" {
+		var err error
+		// Non-null stdout rules out the defect without loading legacy inputs.
+		if len(e.DispatchPayload) == 0 {
 			result.Stdout, err = ss.judge0.GetSubmissionStdout(callCtx, e.Judge0Token)
+		}
+		if err == nil && (len(e.DispatchPayload) > 0 || strings.TrimSpace(string(result.Stdout)) == "null") {
+			var job judge0.SubmissionRequest
+			job, err = ss.recoveryJob(callCtx, e)
+			if err == nil && len(result.Stdout) == 0 && job.ExpectedOutput != nil && strings.Trim(*job.ExpectedOutput, " \t\n\r\v\f\x00") == "" {
+				result.Stdout, err = ss.judge0.GetSubmissionStdout(callCtx, e.Judge0Token)
+			}
 		}
 		if err != nil {
 			if e.RecoveryFailures >= maxJudgeRetries {
