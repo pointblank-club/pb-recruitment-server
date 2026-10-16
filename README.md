@@ -116,6 +116,9 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
   one at a time so slow dispatches cannot consume other jobs' leases. Retry state is shared
   across replicas: at most three tokenless dispatch attempts or three consecutive
   failed result observations, with backoff, before `judge_error`.
+- Polling and tokenless dispatch run independently within each sweep, so a slow POST
+  cannot hold up healthy results. Saving the first token atomically starts a fresh
+  result-observation budget; duplicate token deliveries do not reset polling failures.
 - Each claimed polling batch applies results concurrently before releasing its claims.
   Keep the default batch size of 20 with `DB_MAX_OPEN_CONNS=25` and `DB_MAX_IDLE_CONNS=25`;
   update existing configurations that still retain only five idle connections, to avoid
@@ -123,6 +126,9 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
   every replica's pool when sizing PostgreSQL's connection limit. Routine polling omits
   stdout and retains stderr/compiler diagnostics. Only Wrong Answer jobs with blank
   expected output fetch stdout to verify the Judge0 defect before correcting the verdict.
+  Polling responses are bounded at 12 MiB per job, allowing two stock Judge0 4 MiB
+  diagnostic files with Base64 and JSON overhead. Raise this bound before increasing
+  the provider's file limits beyond that allowance.
 - Queued/running responses reset the failure counter. Wrong answers, compilation,
   runtime and time-limit errors finalize immediately. Recovery ignores `/workers`
   and job age; persistently queued jobs require operator investigation.

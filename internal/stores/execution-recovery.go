@@ -43,7 +43,8 @@ func (s *ExecutionStore) ClaimRecovery(ctx context.Context, limit int, withToken
 }
 
 func (s *ExecutionStore) SaveAttemptToken(ctx context.Context, id, attempt, token string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE submission_executions SET judge0_token=$3
+	_, err := s.db.ExecContext(ctx, `UPDATE submission_executions SET judge0_token=$3,
+		recovery_failures=CASE WHEN judge0_token IS NULL THEN 0 ELSE recovery_failures END
 		WHERE id=$1 AND dispatch_attempt=$2 AND status='pending' AND (judge0_token IS NULL OR judge0_token=$3)`, id, attempt, token)
 	return err
 }

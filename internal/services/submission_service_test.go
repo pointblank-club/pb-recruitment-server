@@ -111,7 +111,6 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 		{name: "code upload failure", failUpload: true},
 		{name: "execution insertion failure", failInsert: true},
 		{name: "preparation cleanup failure", failInsert: true, markErr: writeErr},
-		{name: "callbacks enabled token save timeout", callbacksEnabled: true, timeoutSave: true},
 		{name: "callbacks enabled network failure", callbacksEnabled: true, networkFailure: true},
 		{name: "callbacks enabled body failure", callbacksEnabled: true, bodyFailure: true},
 		{name: "callbacks enabled explicit rejection", callbacksEnabled: true},

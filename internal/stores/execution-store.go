@@ -135,8 +135,8 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 		return fmt.Errorf("conflicting Judge0 token")
 	}
 	alreadyTerminal := currentStatus != "pending"
-	if !alreadyTerminal && r.Token != "" {
-		_, err = tx.ExecContext(ctx, `UPDATE submission_executions SET judge0_token=$2 WHERE id=$1 AND (judge0_token IS NULL OR judge0_token=$2)`, r.ExecutionID, r.Token)
+	if !alreadyTerminal && currentToken == "" && r.Token != "" {
+		_, err = tx.ExecContext(ctx, `UPDATE submission_executions SET judge0_token=$2,recovery_failures=0 WHERE id=$1 AND judge0_token IS NULL`, r.ExecutionID, r.Token)
 		if err != nil {
 			return err
 		}

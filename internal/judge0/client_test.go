@@ -280,20 +280,37 @@ func TestCallbackAttemptAuthentication(t *testing.T) {
 }
 
 func TestPollingLargeDiagnosticsBatch(t *testing.T) {
-	tokens := make([]string, 20)
-	results := make([]SubmissionStatusResponse, len(tokens))
-	stderr, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 256<<10))))
-	for i := range tokens {
-		tokens[i] = fmt.Sprint(i)
-		results[i] = SubmissionStatusResponse{Token: tokens[i], Stderr: stderr, Status: StatusResponse{ID: 3}}
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	got, err := NewClient().GetSubmissions(context.Background(), tokens)
-	if err != nil || len(got) != len(tokens) {
-		t.Fatalf("valid output batch rejected: results=%d error=%v", len(got), err)
+	for _, tc := range []struct {
+		name                           string
+		count, compilerBytes, errBytes int
+		tooLarge                       bool
+	}{
+		{"maximum warnings and stderr", 1, 4 << 20, 4 << 20, false},
+		{"batch diagnostics", 20, 0, 256 << 10, false},
+		{"oversized response", 1, 9 << 20, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := make([]string, tc.count)
+			results := make([]SubmissionStatusResponse, len(tokens))
+			compiler, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", tc.compilerBytes))))
+			stderr, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", tc.errBytes))))
+			for i := range tokens {
+				tokens[i] = fmt.Sprint(i)
+				results[i] = SubmissionStatusResponse{Token: tokens[i], CompileOutput: compiler, Stderr: stderr, Status: StatusResponse{ID: 3}}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"submissions": results})
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			got, err := NewClient().GetSubmissions(context.Background(), tokens)
+			if tc.tooLarge {
+				if !errors.Is(err, ErrInvalidResponse) {
+					t.Fatalf("oversized response error=%v", err)
+				}
+			} else if err != nil || len(got) != len(tokens) || string(got[0].CompileOutput) != string(compiler) || string(got[0].Stderr) != string(stderr) {
+				t.Fatalf("valid output batch rejected or changed: results=%d error=%v", len(got), err)
+			}
+		})
 	}
 }

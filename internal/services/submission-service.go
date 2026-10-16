@@ -7,7 +7,6 @@ import (
 	"app/internal/models/dto"
 	"app/internal/s3"
 	"app/internal/stores"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -356,30 +355,30 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 			log.Errorf("reconcile Judge0 result: %v", err)
 		}
 	}
-	for ctx.Err() == nil {
-		found := false
-		for _, withToken := range []bool{true, false} {
-			if ctx.Err() != nil {
-				return
-			}
+	// Slow tokenless dispatches must not delay polling healthy jobs.
+	var workers sync.WaitGroup
+	for _, withToken := range []bool{true, false} {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
 			limit := 1
 			if withToken {
 				limit = ss.judge0.BatchSize()
 			}
-			items, err := ss.stores.Executions.ClaimRecovery(ctx, limit, withToken)
-			if err != nil {
-				log.Errorf("claim Judge0 recovery: %v", err)
-				return
-			}
-			if len(items) > 0 {
-				found = true
+			for ctx.Err() == nil {
+				items, err := ss.stores.Executions.ClaimRecovery(ctx, limit, withToken)
+				if err != nil {
+					log.Errorf("claim Judge0 recovery: %v", err)
+					return
+				}
+				if len(items) == 0 {
+					return
+				}
 				ss.recoverBatch(ctx, items)
 			}
-		}
-		if !found {
-			return
-		}
+		}()
 	}
+	workers.Wait()
 }
 
 func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Execution) {
@@ -457,9 +456,9 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 	if !final {
 		return true, nil
 	}
-	if status == "wrong_answer" && (len(result.Stdout) == 0 || (bytes.Equal(bytes.TrimSpace(result.Stdout), []byte("null")) && len(e.DispatchPayload) == 0)) {
+	if status == "wrong_answer" {
 		job, err := ss.recoveryJob(callCtx, e)
-		if err == nil && len(result.Stdout) == 0 && job.ExpectedOutput != nil && strings.Trim(*job.ExpectedOutput, " \t\n\r\v\f\x00") == "" {
+		if err == nil && job.ExpectedOutput != nil && strings.Trim(*job.ExpectedOutput, " \t\n\r\v\f\x00") == "" {
 			result.Stdout, err = ss.judge0.GetSubmissionStdout(callCtx, e.Judge0Token)
 		}
 		if err != nil {

@@ -34,6 +34,9 @@ type Client struct {
 // Dispatch leaves ten seconds for DB bookkeeping within the browser's thirty-second timeout.
 const maxDispatchTimeout = 10 * time.Second
 
+// shortcut: covers two stock Judge0 4 MiB files with Base64/JSON; raise if provider file limits grow.
+const maxResultBytesPerSubmission = 12 << 20
+
 func NewClient() *Client {
 	callbackBase, callbackSecret := strings.TrimRight(os.Getenv("JUDGE0_CALLBACK_BASE_URL"), "/"), os.Getenv("JUDGE0_CALLBACK_SECRET")
 	if (callbackBase == "") != (callbackSecret == "") {
@@ -195,7 +198,7 @@ func (c *Client) getSubmissions(ctx context.Context, tokens []string, fields str
 		Submissions []*SubmissionStatusResponse `json:"submissions"`
 	}
 	// Keep the response bound proportional to the requested batch.
-	if err = json.NewDecoder(io.LimitReader(resp.Body, int64(len(tokens))*(4<<20))).Decode(&out); err != nil {
+	if err = json.NewDecoder(io.LimitReader(resp.Body, int64(len(tokens))*maxResultBytesPerSubmission)).Decode(&out); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
 	if len(out.Submissions) != len(tokens) {

@@ -189,7 +189,11 @@ func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 				if r.Method != http.MethodGet {
 					t.Error("legacy token must not be redispatched")
 				}
-				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{map[string]any{"token": token, "stdout": nil, "status": map[string]int{"id": 4}, "time": "0.01", "memory": 1024}}})
+				result := map[string]any{"token": token, "status": map[string]int{"id": 4}, "time": "0.01", "memory": 1024}
+				if strings.Contains(r.URL.Query().Get("fields"), "stdout") {
+					result["stdout"] = nil
+				}
+				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{result}})
 			}))
 			defer judge.Close()
 			t.Setenv("JUDGE0_URL", judge.URL)

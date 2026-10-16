@@ -32,6 +32,8 @@ func (*recoveryTestStore) TerminalPendingParents(context.Context, int) ([]stores
 	return nil, nil
 }
 func (s *recoveryTestStore) ClaimRecovery(_ context.Context, limit int, withToken bool) ([]models.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var claimed, remaining []models.Execution
 	for _, e := range s.items {
 		if (e.Judge0Token != "") == withToken && len(claimed) < limit {
@@ -45,6 +47,8 @@ func (s *recoveryTestStore) ClaimRecovery(_ context.Context, limit int, withToke
 }
 
 func (s *recoveryTestStore) ReleaseRecovery(_ context.Context, _ []models.Execution, healthy []bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.healthy = append(s.healthy, healthy...)
 	return nil
 }
@@ -61,6 +65,8 @@ func (s *recoveryTestStore) SaveAttemptToken(ctx context.Context, id, attempt, t
 	if s.saveToken != nil {
 		return s.saveToken(ctx, id, attempt, token)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.tokens == nil {
 		s.tokens = map[string]string{}
 	}
