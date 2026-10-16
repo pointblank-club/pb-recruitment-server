@@ -20,7 +20,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"github.com/labstack/gommon/log"
 	"go.uber.org/fx"
 )
@@ -172,9 +171,6 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 			SourceCode: source, LanguageID: languageID, Stdin: inputs[i], ExpectedOutput: &outputs[i],
 			CPUTimeLimit: cpuLimit, MemoryLimit: memLimit, CompilerOptions: compilerOptions,
 		}
-		if ss.judge0.IdempotentDispatchEnabled() {
-			jobs[i].RecruitmentKey = uuid.NewString()
-		}
 	}
 	executions, err := ss.stores.Executions.InsertBatch(ctx, submissionID, indexes, jobs)
 	if err != nil {
@@ -203,7 +199,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 			if err := ss.stores.Executions.SaveAttemptToken(dbCtx, exec.ID, exec.Attempt, result.Token); err != nil {
 				log.Errorf("save Judge0 token for execution %s: %v", exec.ID, err)
 			}
-		} else if errors.Is(result.Error, judge0.ErrDispatchRejected) || errors.Is(result.Error, judge0.ErrIdempotencyUnsupported) {
+		} else if errors.Is(result.Error, judge0.ErrDispatchRejected) {
 			if err := ss.stores.Executions.ProcessFinal(dbCtx, stores.FinalExecutionResult{ExecutionID: exec.ID, Attempt: exec.Attempt, Status: "judge_error"}); err != nil {
 				return "", err
 			}
@@ -396,27 +392,13 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 		if err != nil {
 			return false, err
 		}
-		// A legacy unkeyed request may already have executed on the stock API.
-		if ss.judge0.IdempotentDispatchEnabled() && job.RecruitmentKey == "" {
-			return false, finalize("judge_error")
-		}
+		// shortcut: a lost response and delayed callback can duplicate execution; use provider idempotency if CPU duplication becomes unacceptable.
 		return ss.dispatchRecovery(callCtx, e, job)
 	}
 	results, err := ss.judge0.GetSubmissions(callCtx, []string{e.Judge0Token})
 	if err != nil || results[0] == nil || results[0].Status.ID >= 13 {
 		if e.RecoveryFailures >= maxJudgeRetries {
 			return false, finalize("judge_error")
-		}
-		if err == nil && results[0] == nil && len(e.DispatchPayload) > 0 {
-			var job judge0.SubmissionRequest
-			if decodeErr := json.Unmarshal(e.DispatchPayload, &job); decodeErr != nil {
-				return false, decodeErr
-			}
-			if job.RecruitmentKey != "" && e.Judge0Token == judge0.IdempotentToken(job.RecruitmentKey) {
-				_, err = ss.dispatchRecovery(callCtx, e, job)
-				// An ACK alone cannot reset missing-job failures indefinitely.
-				return false, err
-			}
 		}
 		return false, err
 	}
@@ -449,18 +431,12 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 }
 
 func (ss *SubmissionService) dispatchRecovery(ctx context.Context, e models.Execution, job judge0.SubmissionRequest) (bool, error) {
-	if job.RecruitmentKey != "" {
-		e.Judge0Token = judge0.IdempotentToken(job.RecruitmentKey)
-		if err := ss.stores.Executions.SaveAttemptToken(ctx, e.ID, e.Attempt, e.Judge0Token); err != nil {
-			return false, err
-		}
-	}
 	job.CallbackURL = ss.judge0.CallbackURL(e.ID, e.Attempt)
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{job})
 	if len(results) == 1 && results[0].Token != "" {
 		return true, ss.stores.Executions.SaveAttemptToken(ctx, e.ID, e.Attempt, results[0].Token)
 	}
-	if len(results) == 1 && (errors.Is(results[0].Error, judge0.ErrDispatchRejected) || errors.Is(results[0].Error, judge0.ErrIdempotencyUnsupported)) {
+	if len(results) == 1 && errors.Is(results[0].Error, judge0.ErrDispatchRejected) {
 		return false, ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: e.Judge0Token, Status: "judge_error"})
 	}
 	return false, err

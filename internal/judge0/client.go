@@ -24,7 +24,6 @@ import (
 )
 
 type Client struct {
-	idempotent     bool
 	baseURL        string
 	authToken      string
 	callbackBase   string
@@ -48,7 +47,6 @@ func NewClient() *Client {
 	}
 
 	return &Client{
-		idempotent:     os.Getenv("JUDGE0_IDEMPOTENT_DISPATCH") == "true",
 		baseURL:        strings.TrimRight(os.Getenv("JUDGE0_URL"), "/"),
 		authToken:      os.Getenv("JUDGE0_AUTH_TOKEN"),
 		callbackBase:   callbackBase,
@@ -58,9 +56,6 @@ func NewClient() *Client {
 		},
 	}
 }
-
-func (c *Client) IdempotentDispatchEnabled() bool { return c != nil && c.idempotent }
-func IdempotentToken(key string) string           { return "recruitment-" + key }
 
 func (c *Client) Timeout() time.Duration {
 	if c == nil || c.httpClient == nil || c.httpClient.Timeout <= 0 {
@@ -120,19 +115,6 @@ func (c *Client) CreateBatch(ctx context.Context, jobs []SubmissionRequest) ([]S
 	if len(jobs) == 0 {
 		return []SubmissionResult{}, nil
 	}
-	keyed := c.IdempotentDispatchEnabled()
-	for _, job := range jobs {
-		keyed = keyed || job.RecruitmentKey != ""
-	}
-	if keyed {
-		jobs = append([]SubmissionRequest(nil), jobs...)
-		for i := range jobs {
-			if jobs[i].RecruitmentKey == "" {
-				jobs[i].RecruitmentKey = uuid.NewString()
-			}
-		}
-	}
-
 	results := make([]SubmissionResult, len(jobs))
 	if c.baseURL == "" {
 		err := fmt.Errorf("%w: JUDGE0_URL is not set", ErrDispatchRejected)
@@ -228,12 +210,7 @@ func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]Sub
 		return nil, err
 	}
 
-	path := "/submissions/batch"
-	keyed := len(jobs) > 0 && jobs[0].RecruitmentKey != ""
-	if keyed {
-		path = "/recruitment/submissions/batch"
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path+"?base64_encoded=true", bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/submissions/batch?base64_encoded=true", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid Judge0 URL", ErrDispatchRejected)
 	}
@@ -260,16 +237,10 @@ func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]Sub
 			(resp.StatusCode == http.StatusServiceUnavailable && bytes.Equal(bytes.TrimSpace(body), []byte(`{"error":"queue is full"}`))) {
 			failure = ErrDispatchRejected
 		}
-		if keyed && resp.StatusCode == http.StatusServiceUnavailable {
-			failure = ErrUnavailable
-		}
 		return nil, fmt.Errorf("%w: status %d: %s", failure, resp.StatusCode, string(body))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
-	}
-	if keyed && resp.Header.Get("X-Recruitment-Idempotency") != "1" {
-		return nil, ErrIdempotencyUnsupported
 	}
 
 	var entries []json.RawMessage
@@ -297,17 +268,10 @@ func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]Sub
 					failure = ErrDispatchRejected
 				}
 			}
-			if keyed && bytes.Contains(entries[i], []byte("queue is full")) {
-				failure = ErrUnavailable
-			}
 			results[i] = SubmissionResult{Error: failure}
 			continue
 		}
-		if keyed && token.Token != IdempotentToken(jobs[i].RecruitmentKey) {
-			results[i] = SubmissionResult{Error: ErrIdempotencyUnsupported}
-		} else {
-			results[i] = SubmissionResult{Token: token.Token}
-		}
+		results[i] = SubmissionResult{Token: token.Token}
 	}
 	return results, nil
 }

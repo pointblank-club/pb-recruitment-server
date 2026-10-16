@@ -175,6 +175,14 @@ func TestRecoveryWorkerCrashAndAmbiguousDispatchPostgres(t *testing.T) {
 	readyExecutions(t, db, sub)
 	services.NewSubmissionService(storage, nil, client).RecoverJudge0(ctx) // ambiguous second dispatch
 	assertSubmission(t, db, sub, "pending", 0, 0)
+	var graceSeconds float64
+	if err := db.QueryRow(`SELECT extract(epoch FROM next_recovery_at-now()) FROM submission_executions WHERE id=$1`, executions[0].ID).Scan(&graceSeconds); err != nil || graceSeconds < 29 || graceSeconds > 31 {
+		t.Fatal("missing callback grace period", graceSeconds, err)
+	}
+	services.NewSubmissionService(storage, nil, client).RecoverJudge0(ctx)
+	if posts.Load() != 1 {
+		t.Fatal("retried before callback grace expired", posts.Load())
+	}
 	readyExecutions(t, db, sub)
 	services.NewSubmissionService(storage, nil, client).RecoverJudge0(ctx) // third attempt receives token
 	if posts.Load() != 2 {
@@ -202,6 +210,55 @@ func TestRecoveryWorkerCrashAndAmbiguousDispatchPostgres(t *testing.T) {
 		}
 	}
 	assertSubmission(t, db, sub, "accepted", 25, 1024)
+}
+
+func TestLostDispatchResponseCallbackDuringGracePostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, sub, _ := executionFixture(t, db, 0)
+	storage := stores.NewStorage(db)
+	ctx := context.Background()
+	jobs := []judge0.SubmissionRequest{{SourceCode: "print(1)", LanguageID: 71}}
+	executions, err := storage.Executions.InsertBatch(ctx, sub, []int{0}, jobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := executions[0]
+	var posts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		conn.Close() // Judge0 accepted the job, but its response was lost.
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	client := judge0.NewClient()
+	if _, err := client.CreateBatch(ctx, jobs); err == nil {
+		t.Fatal("expected a lost dispatch response")
+	}
+	services.NewSubmissionService(storage, nil, client).RecoverJudge0(ctx)
+	if posts.Load() != 1 {
+		t.Fatal("initial grace period did not prevent retry", posts.Load())
+	}
+	ss := services.NewSubmissionService(storage, nil, client)
+	for range 2 {
+		if err := ss.HandleJudge0Callback(ctx, e.ID, judge0.CallbackResult{Attempt: e.Attempt, Token: "original", Status: judge0.StatusResponse{ID: 3}, Time: json.RawMessage(`"0.025"`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readyExecutions(t, db, sub)
+	services.NewSubmissionService(stores.NewStorage(db), nil, client).RecoverJudge0(ctx)
+	if posts.Load() != 1 {
+		t.Fatal("callback completion was redispatched", posts.Load())
+	}
+	assertSubmission(t, db, sub, "accepted", 25, 0)
+	var score int
+	if err := db.QueryRow(`SELECT score FROM rankings WHERE user_id=$1 AND contest_id=$2`, user, contest).Scan(&score); err != nil || score != 10 {
+		t.Fatal(score, err)
+	}
 }
 
 func TestRecoveryExhaustionAndReplicaSweepsPostgres(t *testing.T) {
@@ -461,113 +518,5 @@ func TestPreparedDispatchSnapshotPostgres(t *testing.T) {
 		if claim.DispatchCount != 2 || claim.Attempt == executions[claim.TestCaseIndex].Attempt {
 			t.Fatal("initial attempt was not fenced", claim)
 		}
-	}
-}
-
-func TestIdempotentLostResponseAcrossReplicasPostgres(t *testing.T) {
-	db := postgresTestDB(t)
-	user, contest, _, sub, executions := executionFixture(t, db, 1)
-	t.Setenv("JUDGE0_IDEMPOTENT_DISPATCH", "true")
-	const key = "e6fe09a3-f468-4181-a920-82584634b1a0"
-	job := judge0.SubmissionRequest{RecruitmentKey: key, SourceCode: "print(66)", LanguageID: 71}
-	payload, _ := json.Marshal(job)
-	if _, err := db.Exec(`UPDATE submission_executions SET dispatch_payload=$2 WHERE submission_id=$1`, sub, payload); err != nil {
-		t.Fatal(err)
-	}
-	var accepted, posts atomic.Int32
-	var visible atomic.Bool
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			if !visible.Load() {
-				w.Write([]byte(`{"submissions":[null]}`))
-				return
-			}
-			fmt.Fprintf(w, `{"submissions":[{"token":%q,"status":{"id":3},"time":"0.025","memory":1024}]}`, judge0.IdempotentToken(key))
-			return
-		}
-		var token string
-		if err := db.QueryRow(`SELECT coalesce(judge0_token,'') FROM submission_executions WHERE id=$1`, executions[0].ID).Scan(&token); err != nil || token != judge0.IdempotentToken(key) {
-			t.Errorf("token must precede HTTP: %q %v", token, err)
-		}
-		var body struct {
-			Submissions []judge0.SubmissionRequest `json:"submissions"`
-		}
-		json.NewDecoder(r.Body).Decode(&body)
-		if body.Submissions[0].RecruitmentKey != key {
-			t.Error("replay changed key")
-		}
-		accepted.CompareAndSwap(0, 1) // The provider's durable unique key keeps one job.
-		if posts.Add(1) == 1 {
-			conn, _, err := w.(http.Hijacker).Hijack()
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			conn.Close()
-			return
-		}
-		w.Header().Set("X-Recruitment-Idempotency", "1")
-		w.WriteHeader(201)
-		fmt.Fprintf(w, `[{"token":%q}]`, judge0.IdempotentToken(key))
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	for range 2 {
-		readyExecutions(t, db, sub)
-		var wg sync.WaitGroup
-		for range 8 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()).RecoverJudge0(context.Background())
-			}()
-		}
-		wg.Wait()
-	}
-	if posts.Load() != 2 || accepted.Load() != 1 {
-		t.Fatal(posts.Load(), accepted.Load())
-	}
-	var attempt string
-	if err := db.QueryRow(`SELECT dispatch_attempt FROM submission_executions WHERE id=$1`, executions[0].ID).Scan(&attempt); err != nil {
-		t.Fatal(err)
-	}
-	visible.Store(true)
-	readyExecutions(t, db, sub)
-	services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()).RecoverJudge0(context.Background())
-	assertSubmission(t, db, sub, "accepted", 25, 1024)
-	for range 4 {
-		if err := stores.NewExecutionStore(db).ProcessFinal(context.Background(), stores.FinalExecutionResult{ExecutionID: executions[0].ID, Attempt: attempt, Token: judge0.IdempotentToken(key), Status: "accepted", Runtime: 900}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var score int
-	if err := db.QueryRow(`SELECT score FROM rankings WHERE user_id=$1 AND contest_id=$2`, user, contest).Scan(&score); err != nil || score != 10 {
-		t.Fatal(score, err)
-	}
-	assertSubmission(t, db, sub, "accepted", 25, 1024)
-}
-
-func TestKeyAndTokenCommitTogetherPostgres(t *testing.T) {
-	db := postgresTestDB(t)
-	_, _, _, sub, _ := executionFixture(t, db, 0)
-	const key = "e6fe09a3-f468-4181-a920-82584634b1a0"
-	store := stores.NewExecutionStore(db)
-	items, err := store.InsertBatch(context.Background(), sub, []int{0}, []judge0.SubmissionRequest{{RecruitmentKey: key, SourceCode: "pass", LanguageID: 71}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var token string
-	var payload []byte
-	if err := db.QueryRow(`SELECT judge0_token,dispatch_payload FROM submission_executions WHERE id=$1`, items[0].ID).Scan(&token, &payload); err != nil {
-		t.Fatal(err)
-	}
-	var job judge0.SubmissionRequest
-	if err := json.Unmarshal(payload, &job); err != nil || token != judge0.IdempotentToken(key) || job.RecruitmentKey != key || items[0].Judge0Token != token {
-		t.Fatal(token, job, err)
-	}
-	readyExecutions(t, db, sub)
-	claims, err := store.ClaimRecovery(context.Background(), 1)
-	if err != nil || len(claims) != 1 || claims[0].Attempt != items[0].Attempt || claims[0].DispatchCount != 1 {
-		t.Fatal(claims, err)
 	}
 }

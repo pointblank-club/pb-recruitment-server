@@ -48,7 +48,6 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 	ids := make([]string, len(indexes))
 	created := make([]int64, len(indexes))
 	payloads, attempts := make([]string, len(indexes)), make([]string, len(indexes))
-	tokens := make([]string, len(indexes))
 	if len(jobs) > 0 && len(jobs[0]) != len(indexes) {
 		return nil, fmt.Errorf("execution job count mismatch")
 	}
@@ -64,9 +63,6 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 				return nil, err
 			}
 			payloads[i], attempts[i] = string(payload), uuid.NewString()
-			if key := jobs[0][i].RecruitmentKey; key != "" {
-				tokens[i] = judge0.IdempotentToken(key)
-			}
 		}
 		executions[i] = models.Execution{
 			ID:            id,
@@ -75,18 +71,17 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 			Status:        "pending",
 			CreatedAt:     now,
 			Attempt:       attempts[i],
-			Judge0Token:   tokens[i],
 		}
 	}
 
 	const q = `
-		INSERT INTO submission_executions (id, submission_id, test_case_index, status, created_at, dispatch_payload, dispatch_attempt, dispatch_count, claim_until, judge0_token)
+		INSERT INTO submission_executions (id, submission_id, test_case_index, status, created_at, dispatch_payload, dispatch_attempt, dispatch_count, claim_until)
 		SELECT id, $2, idx, 'pending', created, convert_to(NULLIF(payload,'null'),'UTF8'), attempt,
-		CASE WHEN attempt='' THEN 0 ELSE 1 END, now()+interval '30 seconds',NULLIF(token,'')
-		FROM unnest($1::uuid[],$3::int[],$4::bigint[],$5::text[],$6::text[],$7::text[]) AS x(id,idx,created,payload,attempt,token)
+		CASE WHEN attempt='' THEN 0 ELSE 1 END, now()+interval '30 seconds'
+		FROM unnest($1::uuid[],$3::int[],$4::bigint[],$5::text[],$6::text[]) AS x(id,idx,created,payload,attempt)
 	`
 
-	_, err := s.db.ExecContext(ctx, q, pq.Array(ids), submissionID, pq.Array(indexes), pq.Array(created), pq.Array(payloads), pq.Array(attempts), pq.Array(tokens))
+	_, err := s.db.ExecContext(ctx, q, pq.Array(ids), submissionID, pq.Array(indexes), pq.Array(created), pq.Array(payloads), pq.Array(attempts))
 	if err != nil {
 		return nil, fmt.Errorf("insert executions: %w", err)
 	}

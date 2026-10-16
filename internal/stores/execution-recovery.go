@@ -57,7 +57,7 @@ func (s *ExecutionStore) SaveRecoveryPayload(ctx context.Context, e models.Execu
 
 func (s *ExecutionStore) ReleaseRecovery(ctx context.Context, e models.Execution, healthy bool) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE submission_executions SET claim_until='-infinity',
-		next_recovery_at=now()+interval '15 seconds' * LEAST(8, CASE WHEN $3 THEN 1 ELSE recovery_failures END),
+		next_recovery_at=now()+interval '15 seconds' * LEAST(8, CASE WHEN judge0_token IS NULL THEN GREATEST(2,recovery_failures) WHEN $3 THEN 1 ELSE recovery_failures END),
 		recovery_failures=CASE WHEN $3 THEN 0 ELSE recovery_failures END
 		WHERE id=$1 AND recovery_claim=$2 AND status='pending'`, e.ID, e.Claim, healthy)
 	return err
