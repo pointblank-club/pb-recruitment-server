@@ -25,9 +25,10 @@ import (
 )
 
 type SubmissionService struct {
-	stores *stores.Storage
-	s3     *s3.S3
-	judge0 *judge0.Client
+	stores    *stores.Storage
+	s3        *s3.S3
+	judge0    *judge0.Client
+	testcases testcaseCache
 }
 
 func NewSubmissionService(stores *stores.Storage, s3 *s3.S3, judge0Client *judge0.Client) *SubmissionService {
@@ -581,7 +582,13 @@ func (ss *SubmissionService) loadTestcases(ctx context.Context, contestID, probl
 	if testcasesKey == "" {
 		testcasesKey = fmt.Sprintf("problems/%s/%s/testcases.json", contestID, problemID)
 	}
-	answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+	return ss.testcases.load(ctx, testcasesKey, func(ctx context.Context) ([]string, []string, error) {
+		return ss.readTestcases(ctx, testcasesKey)
+	})
+}
+
+func (ss *SubmissionService) readTestcases(ctx context.Context, testcasesKey string) ([]string, []string, error) {
+	answersKey := testcaseAnswersKey(testcasesKey)
 
 	tcRaw, err := ss.s3.GetObject(ctx, testcasesKey)
 	if err != nil {
