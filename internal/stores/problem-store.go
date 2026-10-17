@@ -86,7 +86,7 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 			options = $7,
 			has_multiple_answers = $8,
 			description = $9,
-			testcases = $10,
+			testcases = COALESCE(NULLIF($10, ''), testcases),
 			time_limit = $11,
 			memory_limit = $12
         WHERE id = $1 AND contest_id = $2
