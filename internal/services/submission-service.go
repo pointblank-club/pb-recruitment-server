@@ -237,22 +237,24 @@ func finalJudgeResult(executionID, status string, payload judge0.SubmissionStatu
 
 const judgeOutputLimit = 4096
 
+// Malformed diagnostics must not prevent persisting a verdict.
 func judgeOutputText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
+	text, _ := decodeJudgeOutput(raw)
+	return text
+}
+
+func decodeJudgeOutput(raw json.RawMessage) (string, error) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return ""
+		return "", err
 	}
 	// Judge0 1.13.1 callbacks always Base64-encode output fields, and
-	// recovery requests base64_encoded=true. Malformed data is discarded rather
-	// than treated as plain text, which could corrupt valid-looking Base64.
+	// polling requests base64_encoded=true. Never interpret malformed data as plain text.
 	decoded, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return truncateJudgeOutput(sanitizeJudgeOutput(string(decoded)))
+	return truncateJudgeOutput(sanitizeJudgeOutput(string(decoded))), nil
 }
 
 // sanitizeJudgeOutput replaces invalid UTF-8 sequences with U+FFFD and

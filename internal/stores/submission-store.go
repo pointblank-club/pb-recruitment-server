@@ -441,16 +441,15 @@ func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID s
 		return nil
 	}
 
-	now := time.Now().Unix()
 	const q = `
 		INSERT INTO submission_rate_limits (user_id, last_submission_at)
-		VALUES ($1, $2)
+		VALUES ($1, floor(extract(epoch from clock_timestamp()))::bigint)
 		ON CONFLICT (user_id) DO UPDATE
 		SET last_submission_at = EXCLUDED.last_submission_at
-		WHERE EXCLUDED.last_submission_at - submission_rate_limits.last_submission_at >= $3
+		WHERE EXCLUDED.last_submission_at - submission_rate_limits.last_submission_at >= $2
 	`
 
-	res, err := s.db.ExecContext(ctx, q, userID, now, cooldownSeconds)
+	res, err := s.db.ExecContext(ctx, q, userID, cooldownSeconds)
 	if err != nil {
 		return fmt.Errorf("check submission rate limit: %w", err)
 	}

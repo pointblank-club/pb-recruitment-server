@@ -13,6 +13,7 @@ func AddSubmissionRoutes(
 	authClient *auth.Client,
 	submissionController *controllers.SubmissionController,
 ) {
+	e.POST("/submission/run", submissionController.Run, middleware.RequireFirebaseAuth(authClient))
 	e.PUT("/internal/judge0/callback/:execution_id", submissionController.Judge0Callback)
 	// // Get the status of a specific submission
 	// // The authenticated user can only get the status of their own submissions
