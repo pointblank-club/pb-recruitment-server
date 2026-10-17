@@ -200,7 +200,8 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		return nil, err
 	}
 
-	var testcasesKey string = meta.TestcasesKey
+	// An empty key leaves the current database reference unchanged.
+	var testcasesKey string
 
 	if req.Type == "code" && len(req.Testcases) > 0 {
 
@@ -361,6 +362,19 @@ func (cs *ContestService) GetContestProblem(ctx context.Context, contestID strin
 				log.Errorf("failed to parse testcases for problem %s: %v", problemID, err)
 			} else {
 				if includeAdminFields {
+					answers, err := cs.readProblemAnswers(ctx, meta.TestcasesKey)
+					if err != nil {
+						return nil, err
+					}
+					if len(answers) != len(tcArr) {
+						return nil, common.ErrNoTestcases
+					}
+					for i, tc := range tcArr {
+						if tc.Index < 0 || tc.Index >= len(answers) {
+							return nil, common.ErrNoTestcases
+						}
+						tcArr[i].ExpectedOutput = answers[tc.Index]
+					}
 					meta.Testcases = tcArr
 				} else {
 					sampleCases := []dto.TestCaseResponse{}
@@ -373,18 +387,12 @@ func (cs *ContestService) GetContestProblem(ctx context.Context, contestID strin
 					// output, which lives in answers.json. Hidden cases keep theirs
 					// server-side.
 					if len(sampleCases) > 0 {
-						answersKey := testcaseAnswersKey(meta.TestcasesKey)
-						if raw, err := cs.s3.GetObject(ctx, answersKey); err != nil {
+						if answers, err := cs.readProblemAnswers(ctx, meta.TestcasesKey); err != nil {
 							log.Errorf("failed to load answers for problem %s: %v", problemID, err)
 						} else {
-							var answers []string
-							if err := json.Unmarshal([]byte(raw), &answers); err != nil {
-								log.Errorf("failed to parse answers for problem %s: %v", problemID, err)
-							} else {
-								for i, tc := range sampleCases {
-									if tc.Index >= 0 && tc.Index < len(answers) {
-										sampleCases[i].ExpectedOutput = answers[tc.Index]
-									}
+							for i, tc := range sampleCases {
+								if tc.Index >= 0 && tc.Index < len(answers) {
+									sampleCases[i].ExpectedOutput = answers[tc.Index]
 								}
 							}
 						}
@@ -459,9 +467,11 @@ func (cs *ContestService) GetProblemAnswers(ctx context.Context, contestID, prob
 		return []string{}, nil
 	}
 
-	answersKey := testcaseAnswersKey(meta.TestcasesKey)
+	return cs.readProblemAnswers(ctx, meta.TestcasesKey)
+}
 
-	raw, err := cs.s3.GetObject(ctx, answersKey)
+func (cs *ContestService) readProblemAnswers(ctx context.Context, testcasesKey string) ([]string, error) {
+	raw, err := cs.s3.GetObject(ctx, testcaseAnswersKey(testcasesKey))
 	if err != nil {
 		return nil, err
 	}

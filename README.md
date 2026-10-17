@@ -74,11 +74,22 @@ Correcting a started contest requires controlled regrading and score reconciliat
 ### Testcase caching
 
 Testcase/answer pairs share concurrent loads and cache successful reads per replica:
-64 entries, 32 MiB, five-minute TTL. Failures and oversized results are not cached.
+64 entries, 32 MiB of accounted key/slice/string data, five-minute TTL from loading.
+Expiry is checked on access; eviction removes the oldest load. These limits do not
+bound in-flight downloads or total process memory. Failures and oversized results
+are not cached. Shared loads have a five-second timeout independent of each caller;
+callers can cancel their own wait. Returned slice containers are copied.
 Problem edits publish both objects under a new version directory before updating the
 problem key, so replicas cannot mix old inputs with new answers. Hidden cases remain
 server-side. Old versions remain until problem deletion; legacy objects overwritten
 outside the edit API may stay cached for five minutes.
+
+Keep problem editing paused until all backend replicas and the website editor are
+updated. Reload open admin tabs before resuming edits. Older backends read answers
+from the canonical path and cannot safely serve
+versioned edits. After any versioned edit, rollback must retain version-aware readers
+or migrate references and both objects while traffic is stopped. Deploy the backend
+before the website editor, which now consumes inputs and answers from one response.
 
 ## PostgreSQL tests
 

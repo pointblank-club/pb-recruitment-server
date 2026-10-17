@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"path"
+	"slices"
 	"sync"
 	"time"
 
@@ -36,7 +37,10 @@ func (c *testcaseCache) load(ctx context.Context, key string, fetch func(context
 		if ok && time.Since(entry.loaded) < 5*time.Minute {
 			return entry, nil
 		}
-		inputs, outputs, err := fetch(ctx)
+		// One caller leaving must not cancel the load shared by other submissions.
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		inputs, outputs, err := fetch(loadCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -76,6 +80,6 @@ func (c *testcaseCache) load(ctx context.Context, key string, fetch func(context
 			return nil, nil, r.Err
 		}
 		entry := r.Val.(testcaseEntry)
-		return entry.inputs, entry.outputs, nil
+		return slices.Clone(entry.inputs), slices.Clone(entry.outputs), nil
 	}
 }

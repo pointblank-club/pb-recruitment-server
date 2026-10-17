@@ -45,6 +45,6 @@ type CreateTestCaseRequest struct {
 type TestCaseResponse struct {
 	Index          int    `json:"index"`
 	Input          string `json:"input"`
-	ExpectedOutput string `json:"expected_output,omitempty"`
+	ExpectedOutput string `json:"expected_output"`
 	IsSample       bool   `json:"is_sample"`
 }

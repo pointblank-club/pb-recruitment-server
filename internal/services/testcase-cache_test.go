@@ -7,6 +7,7 @@ import (
 	"app/internal/s3"
 	"app/internal/stores"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -54,6 +55,87 @@ func TestTestcaseCacheConcurrentStorageLoads(t *testing.T) {
 	wg.Wait()
 	if reads.Load() != 2 {
 		t.Fatalf("unchanged objects fetched %d times", reads.Load())
+	}
+}
+
+type cacheWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *cacheWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func TestTestcaseCacheCancellation(t *testing.T) {
+	for _, cancelLeader := range []bool{true, false} {
+		t.Run(fmt.Sprint("cancel leader: ", cancelLeader), func(t *testing.T) {
+			var cache testcaseCache
+			leader, stopLeader := context.WithCancel(context.Background())
+			defer stopLeader()
+			follower, stopFollower := context.WithCancel(context.Background())
+			defer stopFollower()
+			started, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			defer unblock()
+			fetch := func(ctx context.Context) ([]string, []string, error) {
+				close(started)
+				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+					t.Error("shared fetch must have a finite five-second deadline")
+				}
+				select {
+				case <-release:
+					return []string{"input"}, []string{"answer"}, nil
+				case <-ctx.Done():
+					return nil, nil, ctx.Err()
+				}
+			}
+			first, second := make(chan error, 1), make(chan error, 1)
+			go func() { _, _, err := cache.load(leader, "key", fetch); first <- err }()
+			<-started
+			waiter := &cacheWaitContext{Context: follower, waiting: make(chan struct{})}
+			go func() { _, _, err := cache.load(waiter, "key", fetch); second <- err }()
+			<-waiter.waiting // DoChan has registered the follower before cancellation.
+			canceled, live := second, first
+			if cancelLeader {
+				stopLeader()
+				canceled, live = first, second
+			} else {
+				stopFollower()
+			}
+			if err := <-canceled; !errors.Is(err, context.Canceled) {
+				t.Fatalf("canceled caller: %v", err)
+			}
+			unblock()
+			if err := <-live; err != nil {
+				t.Fatalf("unrelated caller failed: %v", err)
+			}
+			if _, _, err := cache.load(context.Background(), "key", func(context.Context) ([]string, []string, error) {
+				t.Error("successful shared load was not cached")
+				return nil, nil, errors.New("unexpected fetch")
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTestcaseCacheReturnsIndependentSlices(t *testing.T) {
+	var cache testcaseCache
+	fetch := func(context.Context) ([]string, []string, error) {
+		return []string{"input"}, []string{"answer"}, nil
+	}
+	inputs, outputs, err := cache.load(context.Background(), "key", fetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs[0], outputs[0] = "changed", "changed"
+	inputs, outputs, err = cache.load(context.Background(), "key", fetch)
+	if err != nil || inputs[0] != "input" || outputs[0] != "answer" {
+		t.Fatalf("caller mutated cached cases: %v %v %v", inputs, outputs, err)
 	}
 }
 func TestTestcaseCacheBoundsAndFailures(t *testing.T) {
@@ -116,7 +198,9 @@ func (s *versionProblemStore) GetProblem(context.Context, string, string) (*dto.
 	return &dto.GetProblemStatementResponse{Type: models.Code, TestcasesKey: s.key}, nil
 }
 func (s *versionProblemStore) UpdateProblem(_ context.Context, p *models.Problem) error {
-	s.key = p.Testcases
+	if p.Testcases != "" {
+		s.key = p.Testcases
+	}
 	return nil
 }
 func TestProblemEditVersionsCacheAcrossReplicas(t *testing.T) {
@@ -168,9 +252,53 @@ func TestProblemEditVersionsCacheAcrossReplicas(t *testing.T) {
 	if err != nil || answers[1] != "secret answer" {
 		t.Fatal(answers, err)
 	}
+	admin, err := contestService.GetContestProblem(context.Background(), "c", "p", true)
+	if err != nil || len(admin.Testcases) != 2 || admin.Testcases[1].ExpectedOutput != "secret answer" {
+		t.Fatal(admin, err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if objects["/test/"+testcaseAnswersKey(oldKey)] != `["old answer","hidden answer"]` {
 		t.Fatal("old testcase version overwritten")
+	}
+}
+
+func TestAdminProblemAnswersFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name, answers string
+		valid         bool
+	}{
+		{"blank answer", `[""]`, true},
+		{"missing answer", `[]`, false},
+		{"malformed answer", `{`, false},
+		{"storage failure", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := objectTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "testcases.json") {
+					io.WriteString(w, `[{"index":0,"input":"legacy input"}]`)
+				} else if tc.answers == "" {
+					w.WriteHeader(http.StatusNotFound)
+				} else {
+					io.WriteString(w, tc.answers)
+				}
+			})
+			store := &versionProblemStore{key: "problems/c/p/version/testcases.json"}
+			service := NewContestService(&stores.Storage{Problems: store}, objects)
+			problem, err := service.GetContestProblem(context.Background(), "c", "p", true)
+			if !tc.valid {
+				if err == nil {
+					t.Fatal("unsafe editor response", problem)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(problem)
+			if err != nil || !strings.Contains(string(raw), `"expected_output":""`) {
+				t.Fatalf("blank answer omitted: %s %v", raw, err)
+			}
+		})
 	}
 }
