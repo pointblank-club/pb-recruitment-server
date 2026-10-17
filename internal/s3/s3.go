@@ -40,7 +40,6 @@ func NewS3Client() *S3 {
 	}
 }
 
-
 func (s *S3) PutObject(context context.Context, key string, contents string) error {
 	_, err := s.client.PutObject(context, &s3.PutObjectInput{
 		Bucket:      aws.String(s.Bucket),
@@ -106,21 +105,22 @@ func (s *S3) DeleteObject(ctx context.Context, key string) error {
 }
 
 func (s *S3) DeletePrefix(ctx context.Context, prefix string) error {
-	out, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+	pages := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.Bucket),
 		Prefix: aws.String(prefix),
 	})
-	if err != nil {
-		return err
-	}
-
-	for _, obj := range out.Contents {
-		_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
-			Bucket: aws.String(s.Bucket),
-			Key:    obj.Key,
-		})
+	for pages.HasMorePages() {
+		out, err := pages.NextPage(ctx)
 		if err != nil {
 			return err
+		}
+		for _, obj := range out.Contents {
+			if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+				Bucket: aws.String(s.Bucket),
+				Key:    obj.Key,
+			}); err != nil {
+				return err
+			}
 		}
 	}
 

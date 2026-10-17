@@ -41,7 +41,7 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 	if sc.judge0Client == nil || !sc.judge0Client.CallbacksEnabled() || !sc.judge0Client.VerifyCallback(id, c.QueryParam("sig"), attempt) {
 		return c.NoContent(http.StatusUnauthorized)
 	}
-	var payload judge0.CallbackResult
+	var payload judge0.SubmissionStatusResponse
 	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
 		return c.NoContent(http.StatusBadRequest)
 	}

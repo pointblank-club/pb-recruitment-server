@@ -7,7 +7,6 @@ import (
 	"app/internal/models/dto"
 	"app/internal/s3"
 	"app/internal/stores"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -17,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -25,9 +25,10 @@ import (
 )
 
 type SubmissionService struct {
-	stores *stores.Storage
-	s3     *s3.S3
-	judge0 *judge0.Client
+	stores    *stores.Storage
+	s3        *s3.S3
+	judge0    *judge0.Client
+	testcases testcaseCache
 }
 
 func NewSubmissionService(stores *stores.Storage, s3 *s3.S3, judge0Client *judge0.Client) *SubmissionService {
@@ -76,13 +77,6 @@ func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) 
 		}
 	}
 
-	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, cooldown)
-}
-
-func (ss *SubmissionService) CheckRateLimitWithCooldown(ctx context.Context, userID string, cooldown int64) error {
-	if ss == nil || ss.stores == nil || ss.stores.Submissions == nil {
-		return nil
-	}
 	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, cooldown)
 }
 
@@ -210,7 +204,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 
 }
 
-func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, executionID string, payload judge0.CallbackResult) error {
+func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, executionID string, payload judge0.SubmissionStatusResponse) error {
 	status, final := mapJudgeStatus(payload.Status.ID)
 	if !final {
 		if payload.Token == "" {
@@ -218,45 +212,49 @@ func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, execution
 		}
 		return ss.stores.Executions.SaveAttemptToken(ctx, executionID, payload.Attempt, payload.Token)
 	}
-	runtime, err := judgeRuntimeMillis(payload.Time)
+	result, err := finalJudgeResult(executionID, status, payload)
 	if err != nil {
 		return err
+	}
+	return ss.stores.Executions.ProcessFinal(ctx, result)
+}
+
+func finalJudgeResult(executionID, status string, payload judge0.SubmissionStatusResponse) (stores.FinalExecutionResult, error) {
+	runtime, err := judgeRuntimeMillis(payload.Time)
+	if err != nil {
+		return stores.FinalExecutionResult{}, err
 	}
 	memory := int64(0)
 	if payload.Memory != nil {
 		memory = *payload.Memory
 	}
-	return ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{
-		ExecutionID:   executionID,
-		Attempt:       payload.Attempt,
-		Stdout:        payload.Stdout,
-		Token:         payload.Token,
-		Status:        status,
-		Runtime:       runtime,
-		Memory:        memory,
-		CompileOutput: judgeOutputText(payload.CompileOutput),
-		Stderr:        judgeOutputText(payload.Stderr),
-	})
+	return stores.FinalExecutionResult{
+		ExecutionID: executionID, Attempt: payload.Attempt, Token: payload.Token, Status: status,
+		Stdout: payload.Stdout, Runtime: runtime, Memory: memory,
+		CompileOutput: judgeOutputText(payload.CompileOutput), Stderr: judgeOutputText(payload.Stderr),
+	}, nil
 }
 
 const judgeOutputLimit = 4096
 
+// Malformed diagnostics must not prevent persisting a verdict.
 func judgeOutputText(raw json.RawMessage) string {
-	if len(raw) == 0 || string(raw) == "null" {
-		return ""
-	}
+	text, _ := decodeJudgeOutput(raw)
+	return text
+}
+
+func decodeJudgeOutput(raw json.RawMessage) (string, error) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return ""
+		return "", err
 	}
 	// Judge0 1.13.1 callbacks always Base64-encode output fields, and
-	// recovery requests base64_encoded=true. Malformed data is discarded rather
-	// than treated as plain text, which could corrupt valid-looking Base64.
+	// polling requests base64_encoded=true. Never interpret malformed data as plain text.
 	decoded, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return truncateJudgeOutput(sanitizeJudgeOutput(string(decoded)))
+	return truncateJudgeOutput(sanitizeJudgeOutput(string(decoded))), nil
 }
 
 // sanitizeJudgeOutput replaces invalid UTF-8 sequences with U+FFFD and
@@ -355,30 +353,80 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 			log.Errorf("reconcile Judge0 result: %v", err)
 		}
 	}
-	// Claim only as much work as this sweep can service before its lease expires.
-	for ctx.Err() == nil {
-		items, err := ss.stores.Executions.ClaimRecovery(ctx, 1)
-		if err != nil {
-			log.Errorf("claim Judge0 recovery: %v", err)
-			return
+	// Slow tokenless dispatches must not delay polling healthy jobs.
+	var workers sync.WaitGroup
+	for _, withToken := range []bool{true, false} {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			limit := 1
+			if withToken {
+				limit = ss.judge0.BatchSize()
+			}
+			for ctx.Err() == nil {
+				items, err := ss.stores.Executions.ClaimRecovery(ctx, limit, withToken)
+				if err != nil {
+					log.Errorf("claim Judge0 recovery: %v", err)
+					return
+				}
+				if len(items) == 0 {
+					return
+				}
+				ss.recoverBatch(ctx, items)
+			}
+		}()
+	}
+	workers.Wait()
+}
+
+func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Execution) {
+	// Leave five seconds for releases before the thirty-second claims expire.
+	workCtx, cancelWork := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelWork()
+	var results []*judge0.SubmissionStatusResponse
+	var fetchErr error
+	if items[0].Judge0Token != "" {
+		tokens := make([]string, len(items))
+		for i, e := range items {
+			tokens[i] = e.Judge0Token
 		}
-		if len(items) == 0 {
-			return
-		}
-		e := items[0]
-		healthy, err := ss.recoverExecution(ctx, e)
-		if err != nil {
-			log.Errorf("recover execution %s: %v", e.ID, err)
-		}
-		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		if err := ss.stores.Executions.ReleaseRecovery(dbCtx, e, healthy); err != nil {
-			log.Errorf("release recovery: %v", err)
-		}
-		cancel()
+		callCtx, cancelCall := context.WithTimeout(workCtx, ss.judge0.Timeout())
+		results, fetchErr = ss.judge0.GetSubmissions(callCtx, tokens)
+		cancelCall()
+	}
+	healthy := make([]bool, len(items))
+	for i, result := range results {
+		// A healthy observation remains healthy if shutdown prevents applying it.
+		healthy[i] = fetchErr == nil && result != nil && result.Status.ID < 13
+	}
+	var batch sync.WaitGroup
+	for i, e := range items {
+		batch.Add(1)
+		go func(i int, e models.Execution) {
+			defer batch.Done()
+			if workCtx.Err() != nil {
+				return
+			}
+			var result *judge0.SubmissionStatusResponse
+			if i < len(results) {
+				result = results[i]
+			}
+			var err error
+			healthy[i], err = ss.recoverExecution(workCtx, e, result, fetchErr)
+			if err != nil {
+				log.Errorf("recover execution %s: %v", e.ID, err)
+			}
+		}(i, e)
+	}
+	batch.Wait()
+	dbCtx, cancelDB := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelDB()
+	if err := ss.stores.Executions.ReleaseRecovery(dbCtx, items, healthy); err != nil {
+		log.Errorf("release recovery: %v", err)
 	}
 }
 
-func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Execution) (bool, error) {
+func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Execution, result *judge0.SubmissionStatusResponse, fetchErr error) (bool, error) {
 	finalize := func(status string) error {
 		return ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: e.Judge0Token, Status: status})
 	}
@@ -395,49 +443,58 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 		// shortcut: a lost response and delayed callback can duplicate execution; use provider idempotency if CPU duplication becomes unacceptable.
 		return ss.dispatchRecovery(callCtx, e, job)
 	}
-	results, err := ss.judge0.GetSubmissions(callCtx, []string{e.Judge0Token})
-	if err != nil || results[0] == nil || results[0].Status.ID >= 13 {
+	if fetchErr != nil || result == nil || result.Status.ID >= 13 {
 		if e.RecoveryFailures >= maxJudgeRetries {
 			return false, finalize("judge_error")
 		}
-		return false, err
+		return false, fetchErr
 	}
-	result := results[0]
 	status, final := mapJudgeStatus(result.Status.ID)
 	// A real queued/running job is not evidence of abandonment.
 	if !final {
 		return true, nil
 	}
-	if status == "wrong_answer" && bytes.Equal(bytes.TrimSpace(result.Stdout), []byte("null")) && len(e.DispatchPayload) == 0 {
-		if _, err := ss.recoveryJob(callCtx, e); err != nil {
+	if status == "wrong_answer" {
+		var err error
+		// Non-null stdout rules out the defect without loading legacy inputs.
+		if len(e.DispatchPayload) == 0 {
+			result.Stdout, err = ss.judge0.GetSubmissionStdout(callCtx, e.Judge0Token)
+		}
+		if err == nil && (len(e.DispatchPayload) > 0 || strings.TrimSpace(string(result.Stdout)) == "null") {
+			var job judge0.SubmissionRequest
+			job, err = ss.recoveryJob(callCtx, e)
+			if err == nil && len(result.Stdout) == 0 && job.ExpectedOutput != nil && strings.Trim(*job.ExpectedOutput, " \t\n\r\v\f\x00") == "" {
+				result.Stdout, err = ss.judge0.GetSubmissionStdout(callCtx, e.Judge0Token)
+			}
+		}
+		if err != nil {
 			if e.RecoveryFailures >= maxJudgeRetries {
 				return false, finalize("judge_error")
 			}
 			return false, err
 		}
 	}
-	runtime, err := judgeRuntimeMillis(result.Time)
+	finalResult, err := finalJudgeResult(e.ID, status, *result)
 	if err != nil {
 		if e.RecoveryFailures >= maxJudgeRetries {
 			return false, finalize("judge_error")
 		}
 		return false, err
 	}
-	memory := int64(0)
-	if result.Memory != nil {
-		memory = *result.Memory
-	}
-	return true, ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: result.Token, Status: status, Stdout: result.Stdout, Runtime: runtime, Memory: memory, CompileOutput: judgeOutputText(result.CompileOutput), Stderr: judgeOutputText(result.Stderr)})
+	finalResult.Attempt, finalResult.Claim = e.Attempt, e.Claim
+	return true, ss.stores.Executions.ProcessFinal(ctx, finalResult)
 }
 
 func (ss *SubmissionService) dispatchRecovery(ctx context.Context, e models.Execution, job judge0.SubmissionRequest) (bool, error) {
 	job.CallbackURL = ss.judge0.CallbackURL(e.ID, e.Attempt)
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{job})
+	dbCtx, cancelDB := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelDB()
 	if len(results) == 1 && results[0].Token != "" {
-		return true, ss.stores.Executions.SaveAttemptToken(ctx, e.ID, e.Attempt, results[0].Token)
+		return true, ss.stores.Executions.SaveAttemptToken(dbCtx, e.ID, e.Attempt, results[0].Token)
 	}
 	if len(results) == 1 && errors.Is(results[0].Error, judge0.ErrDispatchRejected) {
-		return false, ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: e.Judge0Token, Status: "judge_error"})
+		return false, ss.stores.Executions.ProcessFinal(dbCtx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: e.Judge0Token, Status: "judge_error"})
 	}
 	return false, err
 }
@@ -527,7 +584,13 @@ func (ss *SubmissionService) loadTestcases(ctx context.Context, contestID, probl
 	if testcasesKey == "" {
 		testcasesKey = fmt.Sprintf("problems/%s/%s/testcases.json", contestID, problemID)
 	}
-	answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problemID)
+	return ss.testcases.load(ctx, testcasesKey, func(ctx context.Context) ([]string, []string, error) {
+		return ss.readTestcases(ctx, testcasesKey)
+	})
+}
+
+func (ss *SubmissionService) readTestcases(ctx context.Context, testcasesKey string) ([]string, []string, error) {
+	answersKey := testcaseAnswersKey(testcasesKey)
 
 	tcRaw, err := ss.s3.GetObject(ctx, testcasesKey)
 	if err != nil {
@@ -573,10 +636,13 @@ func decodeSource(code string) (string, error) {
 		return "", common.ErrInvalidCode
 	}
 	decoded, err := base64.StdEncoding.DecodeString(trimmed)
-	if err != nil {
-		return code, nil
+	if err == nil {
+		code = string(decoded)
 	}
-	return string(decoded), nil
+	if !utf8.ValidString(code) {
+		return "", common.ErrInvalidCode
+	}
+	return code, nil
 }
 
 func mapObjectReadError(err error) error {

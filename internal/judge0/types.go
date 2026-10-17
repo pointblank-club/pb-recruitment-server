@@ -25,22 +25,12 @@ type batchTokenResponse struct {
 	Token string `json:"token"`
 }
 
-type CallbackResult struct {
-	Attempt       string          `json:"-"`
-	Stdout        json.RawMessage `json:"stdout"`
-	Token         string          `json:"token"`
-	Time          json.RawMessage `json:"time"`
-	Memory        *int64          `json:"memory"`
-	CompileOutput json.RawMessage `json:"compile_output"`
-	Stderr        json.RawMessage `json:"stderr"`
-	Status        StatusResponse  `json:"status"`
-}
-
 type StatusResponse struct {
 	ID          int    `json:"id"`
 	Description string `json:"description"`
 }
 type SubmissionStatusResponse struct {
+	Attempt       string          `json:"-"`
 	Stdout        json.RawMessage `json:"stdout"`
 	Token         string          `json:"token"`
 	Time          json.RawMessage `json:"time"`

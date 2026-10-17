@@ -23,9 +23,9 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000030`: submission cooldowns
+- The current schema requires migrations through `000031`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
-  and Judge0 recovery state (`000030`).
+  Judge0 recovery state (`000030`), and ordered recovery claims (`000031`).
   `make migrate-up` applies only pending migrations; do not force the version or
   roll back a production database.
 
@@ -71,47 +71,84 @@ verdicts and leaderboard scores. Finish any in-flight edits before opening the r
 The start time cannot be changed once the contest starts; end-time extensions remain allowed.
 Correcting a started contest requires controlled regrading and score reconciliation.
 
+### Testcase caching
+
+Testcase/answer pairs share concurrent loads and cache successful reads per replica:
+64 entries, 32 MiB of accounted key/slice/string data, five-minute TTL from loading.
+Expiry is checked on access; eviction removes the oldest load. These limits do not
+bound in-flight downloads or total process memory. Failures and oversized results
+are not cached. Shared loads have a five-second timeout independent of each caller;
+callers can cancel their own wait. Returned slice containers are copied.
+Problem edits publish both objects under a new version directory before updating the
+problem key, so replicas cannot mix old inputs with new answers. Hidden cases remain
+server-side. Old versions remain until problem deletion; legacy objects overwritten
+outside the edit API may stay cached for five minutes.
+
+Keep problem editing paused until all backend replicas and the website editor are
+updated. Reload open admin tabs before resuming edits. Older backends read answers
+from the canonical path and cannot safely serve
+versioned edits. After any versioned edit, rollback must retain version-aware readers
+or migrate references and both objects while traffic is stopped. Deploy the backend
+before the website editor, which now consumes inputs and answers from one response.
+
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
-all migrations through `000030`, and clean up afterward. They skip when
+all migrations through `000031`, and clean up afterward. They skip when
 `TEST_DATABASE_URL` is unset.
 
 ```bash
 TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test -race ./internal/stores -count=1
 ```
 
+The opt-in contest load test starts 600 simultaneous submission requests with ten
+testcases each, then checks polling and duplicate callbacks racing three recovery
+workers. It uses real PostgreSQL and simulated S3/Judge0; it does not certify the
+production Judge0 fleet. It uses the configured database pool (defaults: 25 open/idle).
+
+```bash
+RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/test_db' \
+  go test -race ./internal/stores -run '^TestJudge0ContestLoadPostgres$' -count=1 -v
+```
+
 ## Judge0 deployment & Environment configuration
 
-- Apply migrations through `000030` to the target database before deploying this build; use PostgreSQL 12+.
+- Apply migrations through `000031` to the target database before deploying this build; use PostgreSQL 12+.
 - Set `SUBMISSION_RATE_LIMIT_SECONDS` (default: 5s) and `LEADERBOARD_CACHE_TTL_SECONDS` (default: 3s, max: 60s) identically across backend replicas.
 - Set `JUDGE0_URL` and `JUDGE0_AUTH_TOKEN`. Keep the Judge0 API inaccessible to contestants.
+- Use localhost or a private network for production Judge0 traffic. SSH forwarding is for local verification.
 - Enable callbacks with `JUDGE0_CALLBACK_BASE_URL` and the same `JUDGE0_CALLBACK_SECRET`
   on every backend replica. Verify a signed callback reaches the backend from Judge0.
 - For a local backend without an inbound callback address, leave both callback
   settings empty. The existing recovery worker fetches results every 15 seconds;
   callbacks are not required for this local setup.
-- With Vivek, load-test queue capacity for 500–600 contestants. The instance checked
-  on 11 October has `max_queue_size=100` and `max_memory_limit=512000` KB; our default
-  256 MiB is 262144 KB. Raising the queue limit also requires enough workers.
-- Execution inputs are saved before dispatch. Recovery uses short PostgreSQL claims
-  (`FOR UPDATE SKIP LOCKED`), then makes network requests outside the transaction.
-  Leases expire after 30 seconds; sweeps run every 15 seconds. Retry state is shared
-  across replicas: at most three tokenless dispatch attempts or three consecutive
-  failed result observations, with backoff, before `judge_error`.
-- Queued/running responses reset the failure counter. Wrong answers, compilation,
-  runtime and time-limit errors finalize immediately. Recovery ignores `/workers`
-  and job age; persistently queued jobs require operator investigation.
-- Callback signatures bind the dispatch attempt. Stale callbacks and expired claims
-  cannot replace newer results or award duplicate scores. Replace old backend replicas
-  together after migration `000030`; keep callback secrets identical.
-- Use the stock Judge0 API and workers. The initial 30-second lease gives callbacks
-  time to arrive before retrying a tokenless dispatch; subsequent tokenless retries
-  wait at least 30 seconds, with backoff. A callback received during this grace
-  period can complete the execution without another POST.
-- shortcut: an accepted request with a lost response and no timely callback may
-  execute twice on retry; add provider-supported idempotency only if duplicate CPU
-  work becomes unacceptable. Attempts are bounded and scoring remains idempotent.
+- Size the Judge0 queue and worker fleet for participants × testcases × submission waves,
+  plus existing backlog. For 600 contestants with ten testcases, one wave is 6,000 jobs;
+  the inspected queue limit of 100 cannot absorb that burst. Measure completion time on staging.
+- Source must decode to valid UTF-8; malformed source returns HTTP 400 before submission creation.
+- Execution inputs are saved before dispatch. Recovery claims rows with PostgreSQL
+  `FOR UPDATE SKIP LOCKED` and makes network requests after releasing the locks.
+  Claims last 30 seconds; sweeps run every 15 seconds. Polling and tokenless dispatch
+  run independently, so a slow POST cannot block healthy results.
+- Retry budgets are shared across replicas: three dispatch reservations or three consecutive
+  failed result observations before `judge_error`. Crashes and initially unsent chunks can
+  consume dispatch reservations. The initial reservation gives callbacks 30 seconds to arrive;
+  subsequent ambiguous attempts wait at least 30 seconds after dispatch, with backoff.
+- Saving the first token resets the observation budget; duplicate deliveries do not.
+  Queued/running observations reset failures. Contestant errors finalize immediately.
+  Recovery ignores `/workers` and job age; persistently queued jobs need operator investigation.
+- Polling uses `JUDGE0_BATCH_SIZE` (default 20) and applies each batch's results concurrently.
+  Keep `DB_MAX_OPEN_CONNS=25` and `DB_MAX_IDLE_CONNS=25`; update older five-idle configurations
+  and account for every replica's pool when sizing PostgreSQL's connection limit.
+- Routine polling omits stdout and preserves compiler/stderr diagnostics. Only Wrong Answer
+  jobs that might match the blank-output defect fetch stdout. Responses are bounded at 12 MiB
+  per job for two stock 4 MiB diagnostic files plus Base64/JSON; increase the bound if provider
+  file limits grow.
+- Callback signatures bind the dispatch attempt. Stale callbacks and replaced claims cannot
+  overwrite newer results or award duplicate scores. Replace old replicas together after
+  migrations through `000031`; keep callback secrets identical.
+- Use stock Judge0 API and workers. A lost response without a timely callback can cause
+  duplicate physical execution on retry. The budget bounds this; scoring remains idempotent.
 - Keep callback signatures out of proxy and load-balancer logs as well as application
   logs. The signature is in the callback URL query string.
 
@@ -154,14 +191,18 @@ field is capped at 4096 UTF-8 bytes. Invalid input returns 400, oversized bodies
 unavailable judge 502, polling timeout 504. A failed response may leave a job running;
 no Run token is retained, so the UI must not automatically retry. Website wiring is #29.
 
+The per-user cooldown is not an aggregate capacity limit: 600 users can nominally
+admit 120 jobs/second, and 600 pending requests can generate 3000 polls/second.
+Validate shared judging capacity before enabling Run for a contest. These job
+limits apply to runtime; compilation uses Judge0's server-wide limits and queued
+or compiling jobs can outlive the backend's waiting deadline.
+
 ### Local connection to the EC2 judge
 
-The judge at `ubuntu@13.205.163.28` is reachable over SSH on port `6622`.
-Its HTTP port `2358` was not directly reachable from the development machine on
-14 October 2026. Forward it to localhost and keep the tunnel running:
+Forward the judge's private HTTP port over SSH for local verification:
 
 ```bash
-ssh -NT -p 6622 \
+ssh -CNT -p 6622 \
   -o ExitOnForwardFailure=yes \
   -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
   -L 127.0.0.1:2358:127.0.0.1:2358 ubuntu@13.205.163.28
@@ -180,27 +221,15 @@ SUBMISSION_RATE_LIMIT_SECONDS=5
 LEADERBOARD_CACHE_TTL_SECONDS=3
 ```
 
-The empty API token matches the inspected Judge0 configuration; access in this
-setup is through SSH. If Judge0 authentication is enabled, supply its matching
-token. Do not expose an unauthenticated Judge0 API publicly. A deployed backend
-must use its own reachable Judge0 address or maintained tunnel; localhost here
-refers only to the development machine running the SSH forward.
+Supply `JUDGE0_AUTH_TOKEN` if API authentication is enabled. Keep the API private;
+`localhost` above refers to the machine running the tunnel. Deployed backends need
+an address reachable from their own network.
 
-Check the connection before starting the backend:
+Check the API version, then run the live tests above to verify worker execution:
 
 ```bash
 curl --fail http://127.0.0.1:2358/about
-curl --fail http://127.0.0.1:2358/workers
 ```
 
-On 14 October 2026, the inspected judge ran version `1.13.1` with a batch limit
-of 20, queue limit of 100, and maximum memory limit of 512000 KB. An empty
-`/workers` list does not prove workers have stopped: this Judge0 endpoint lists
-registered queues. Verify an actual execution before treating the judge as ready.
-Python and C++17 smoke executions both returned `Accepted` through the SSH tunnel
-on that date. `/workers` then reported zero available workers despite those
-successful executions. Recovery therefore ignores these statistics.
-
-The database referenced by the local `DB_ADDR` was checked on 14 October 2026:
-its migration version was `29`, `dirty=false`, and migration `up` reported
-`no change`. Verify the migration version again for each deployment.
+An empty `/workers` response does not prove execution is unavailable. Verify the
+target database's migration version before each deployment.

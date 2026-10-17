@@ -66,7 +66,7 @@ func TestLiveJudge0Smoke(t *testing.T) {
 		tokens[i] = result.Token
 	}
 	for {
-		results, err := client.GetSubmissions(ctx, tokens)
+		results, err := client.GetSubmissionsWithOutput(ctx, tokens)
 		if err != nil {
 			t.Fatal(err)
 		}

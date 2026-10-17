@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -150,10 +151,13 @@ func TestTerminalBlankOutputCallbacksPostgres(t *testing.T) {
 
 func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 	for _, tc := range []struct {
-		name, expected, want string
-		storageFailure       bool
+		name, expected, stdout, want string
+		storageFailure               bool
 	}{
-		{"blank", "\n", "accepted", false}, {"real wrong answer", "required", "wrong_answer", false}, {"storage outage", "\n", "judge_error", true},
+		{"blank", "\n", "", "accepted", false},
+		{"real wrong answer", "required", "", "wrong_answer", false},
+		{"storage outage", "\n", "", "judge_error", true},
+		{"non-null output during storage outage", "\n", "d3Jvbmc=", "wrong_answer", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := postgresTestDB(t)
@@ -161,7 +165,9 @@ func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 			if _, err := db.Exec(`UPDATE submissions SET language='python' WHERE id=$1`, sub); err != nil {
 				t.Fatal(err)
 			}
+			var objectReads, stdoutReads atomic.Int32
 			objects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				objectReads.Add(1)
 				if tc.storageFailure {
 					w.Header().Set("Content-Type", "application/xml")
 					w.WriteHeader(403)
@@ -189,7 +195,15 @@ func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 				if r.Method != http.MethodGet {
 					t.Error("legacy token must not be redispatched")
 				}
-				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{map[string]any{"token": token, "stdout": nil, "status": map[string]int{"id": 4}, "time": "0.01", "memory": 1024}}})
+				result := map[string]any{"token": token, "status": map[string]int{"id": 4}, "time": "0.01", "memory": 1024}
+				if strings.Contains(r.URL.Query().Get("fields"), "stdout") {
+					stdoutReads.Add(1)
+					result["stdout"] = nil
+					if tc.stdout != "" {
+						result["stdout"] = tc.stdout
+					}
+				}
+				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{result}})
 			}))
 			defer judge.Close()
 			t.Setenv("JUDGE0_URL", judge.URL)
@@ -198,9 +212,13 @@ func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 			storage := stores.NewStorage(db)
 			client := judge0.NewClient()
 			service := services.NewSubmissionService(storage, s3.NewS3Client(), client)
-			payload := judge0.CallbackResult{Token: token, Stdout: json.RawMessage("null"), Time: json.RawMessage(`"0.01"`)}
-			payload.Status.ID = 4
-			if err := service.HandleJudge0Callback(context.Background(), items[0].ID, payload); err != nil {
+			if tc.stdout == "" {
+				payload := judge0.SubmissionStatusResponse{Token: token, Stdout: json.RawMessage("null"), Time: json.RawMessage(`"0.01"`)}
+				payload.Status.ID = 4
+				if err := service.HandleJudge0Callback(context.Background(), items[0].ID, payload); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := storage.Executions.SaveAttemptToken(context.Background(), items[0].ID, items[0].Attempt, token); err != nil {
 				t.Fatal(err)
 			}
 			assertSubmission(t, db, sub, "pending", 0, 0)
@@ -209,21 +227,25 @@ func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 				t.Fatal("callback token lost", savedToken, err)
 			}
 			passes := 1
-			if tc.storageFailure {
+			exhausted := tc.storageFailure && tc.stdout == ""
+			if exhausted {
 				passes = 3
 			}
 			for i := range passes {
 				readyExecutions(t, db, sub)
 				service.RecoverJudge0(context.Background())
-				if tc.storageFailure && i < 2 {
+				if exhausted && i < 2 {
 					assertSubmission(t, db, sub, "pending", 0, 0)
 				}
 			}
 			runtime, memory := int64(10), int64(1024)
-			if tc.storageFailure {
+			if exhausted {
 				runtime, memory = 0, 0
 			}
 			assertSubmission(t, db, sub, tc.want, runtime, memory)
+			if tc.stdout != "" && (objectReads.Load() != 0 || stdoutReads.Load() != 1) {
+				t.Fatalf("genuine wrong answer should fetch stdout once without storage: objects=%d stdout=%d", objectReads.Load(), stdoutReads.Load())
+			}
 		})
 	}
 }

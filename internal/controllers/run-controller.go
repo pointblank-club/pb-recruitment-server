@@ -4,11 +4,13 @@ import (
 	"app/internal/common"
 	"app/internal/models/dto"
 	"app/internal/services"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 )
@@ -34,22 +36,24 @@ func (sc *SubmissionController) Run(c echo.Context) error {
 	if userID == "" {
 		return c.NoContent(http.StatusUnauthorized)
 	}
-	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20)
-	decoder := json.NewDecoder(c.Request().Body)
-	decoder.DisallowUnknownFields()
-	var req dto.RunRequest
-	if err := decoder.Decode(&req); err != nil {
+	body, err := io.ReadAll(http.MaxBytesReader(c.Response(), c.Request().Body, 1<<20))
+	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request too large"})
 		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid run request"})
 	}
+	if !utf8.Valid(body) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid UTF-8 run request"})
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	var req dto.RunRequest
+	if err := decoder.Decode(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid run request"})
+	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request too large"})
-		}
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected one JSON object"})
 	}
 	result, err := sc.submissionService.Run(c.Request().Context(), userID, req)

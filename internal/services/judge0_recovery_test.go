@@ -10,38 +10,63 @@ import (
 	"go.uber.org/fx"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type recoveryTestStore struct {
 	*stores.ExecutionStore
-	items   []models.Execution
-	finals  []stores.FinalExecutionResult
-	healthy []bool
-	tokens  map[string]string
+	mu           sync.Mutex
+	items        []models.Execution
+	finals       []stores.FinalExecutionResult
+	healthy      []bool
+	tokens       map[string]string
+	saveToken    func(context.Context, string, string, string) error
+	processFinal func(context.Context, stores.FinalExecutionResult) error
 }
 
 func (*recoveryTestStore) TerminalPendingParents(context.Context, int) ([]stores.FinalExecutionResult, error) {
 	return nil, nil
 }
-func (s *recoveryTestStore) ClaimRecovery(context.Context, int) ([]models.Execution, error) {
-	if len(s.items) == 0 {
-		return nil, nil
+func (s *recoveryTestStore) ClaimRecovery(_ context.Context, limit int, withToken bool) ([]models.Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var claimed, remaining []models.Execution
+	for _, e := range s.items {
+		if (e.Judge0Token != "") == withToken && len(claimed) < limit {
+			claimed = append(claimed, e)
+		} else {
+			remaining = append(remaining, e)
+		}
 	}
-	e := s.items[0]
-	s.items = s.items[1:]
-	return []models.Execution{e}, nil
+	s.items = remaining
+	return claimed, nil
 }
-func (s *recoveryTestStore) ReleaseRecovery(_ context.Context, _ models.Execution, healthy bool) error {
-	s.healthy = append(s.healthy, healthy)
+
+func (s *recoveryTestStore) ReleaseRecovery(_ context.Context, _ []models.Execution, healthy []bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.healthy = append(s.healthy, healthy...)
 	return nil
 }
-func (s *recoveryTestStore) ProcessFinal(_ context.Context, r stores.FinalExecutionResult) error {
+func (s *recoveryTestStore) ProcessFinal(ctx context.Context, r stores.FinalExecutionResult) error {
+	if s.processFinal != nil {
+		return s.processFinal(ctx, r)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.finals = append(s.finals, r)
 	return nil
 }
-func (s *recoveryTestStore) SaveAttemptToken(_ context.Context, id, attempt, token string) error {
+func (s *recoveryTestStore) SaveAttemptToken(ctx context.Context, id, attempt, token string) error {
+	if s.saveToken != nil {
+		return s.saveToken(ctx, id, attempt, token)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.tokens == nil {
 		s.tokens = map[string]string{}
 	}
@@ -81,7 +106,8 @@ func TestRecoveryOutcomes(t *testing.T) {
 			}))
 			defer server.Close()
 			t.Setenv("JUDGE0_URL", server.URL)
-			store := &recoveryTestStore{items: []models.Execution{{ID: "exec", Judge0Token: "job", Attempt: "attempt", Claim: "claim", RecoveryFailures: tc.failures}}}
+			payload := []byte(`{"source_code":"pass","expected_output":"required"}`)
+			store := &recoveryTestStore{items: []models.Execution{{ID: "exec", Judge0Token: "job", Attempt: "attempt", Claim: "claim", RecoveryFailures: tc.failures, DispatchPayload: payload}}}
 			ss := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient())
 			ss.RecoverJudge0(context.Background())
 			if len(store.healthy) != 1 || store.healthy[0] != tc.healthy {
@@ -159,5 +185,147 @@ func TestJudge0StatusAndRuntime(t *testing.T) {
 		if (err != nil) != tc.invalid || err == nil && got != tc.want {
 			t.Fatalf("runtime %s = %d, %v", tc.raw, got, err)
 		}
+	}
+}
+
+func TestRecoveryPollsInBatches(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
+		if len(tokens) > 20 {
+			t.Error("batch exceeds Judge0 limit")
+		}
+		requests.Add(1)
+		results := make([]judge0.SubmissionStatusResponse, len(tokens))
+		for i, token := range tokens {
+			results[i] = judge0.SubmissionStatusResponse{Token: token, Status: judge0.StatusResponse{ID: 3}}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	t.Setenv("JUDGE0_BATCH_SIZE", "20")
+	store := &recoveryTestStore{}
+	for i := range 121 {
+		id := fmt.Sprint(i)
+		store.items = append(store.items, models.Execution{ID: id, Judge0Token: id, Attempt: "attempt", Claim: "claim"})
+	}
+	NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).RecoverJudge0(context.Background())
+	if len(store.finals) != 121 || requests.Load() != 7 {
+		t.Fatalf("finals=%d requests=%d, want121 finals in7 requests", len(store.finals), requests.Load())
+	}
+	for _, r := range store.finals {
+		if r.ExecutionID != r.Token || r.Attempt != "attempt" || r.Claim != "claim" {
+			t.Fatal("result mapping/fence lost", r)
+		}
+	}
+}
+
+func TestRecoveryPersistsKnownTokenAfterCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(201)
+		w.Write([]byte(`[{"token":"known"}]`))
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	saved := false
+	store := &recoveryTestStore{saveToken: func(persistCtx context.Context, id, attempt, token string) error {
+		cancel() // Shutdown starts just as the successful response reaches persistence.
+		if err := persistCtx.Err(); err != nil {
+			return err
+		}
+		if deadline, ok := persistCtx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {
+			t.Error("token persistence must have its own bounded context")
+		}
+		saved = id == "exec" && attempt == "attempt" && token == "known"
+		return nil
+	}}
+	healthy, err := NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).dispatchRecovery(ctx, models.Execution{ID: "exec", Attempt: "attempt"}, judge0.SubmissionRequest{SourceCode: "pass", LanguageID: 71})
+	if err != nil || !healthy || !saved {
+		t.Fatalf("known token lost: saved=%v healthy=%v error=%v", saved, healthy, err)
+	}
+}
+
+func TestRecoveryCancellationPreservesHealthyObservations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"submissions":[{"token":"a","status":{"id":3}},{"token":"b","status":{"id":2}}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := &recoveryTestStore{
+		items: []models.Execution{{ID: "a", Judge0Token: "a"}, {ID: "b", Judge0Token: "b"}},
+		processFinal: func(ctx context.Context, _ stores.FinalExecutionResult) error {
+			cancel()
+			return ctx.Err()
+		},
+	}
+	NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).RecoverJudge0(ctx)
+	if len(store.healthy) != 2 || !store.healthy[0] || !store.healthy[1] {
+		t.Fatal("shutdown counted valid observations as failures", store.healthy)
+	}
+}
+
+func TestRecoveryFetchesStdoutOnlyForBlankWrongAnswers(t *testing.T) {
+	for _, tc := range []struct {
+		name, expected, stdout      string
+		status, failures, wantCalls int
+		wantFinal, wantHealthy      bool
+	}{
+		{"accepted large output", "", `"bGFyZ2U="`, 3, 1, 1, true, true},
+		{"nonblank expected", "required", `null`, 4, 1, 1, true, true},
+		{"significant Unicode whitespace", "\u00a0", `null`, 4, 1, 1, true, true},
+		{"verified null output", " \t\n\x00", `null`, 4, 1, 2, true, true},
+		{"actual wrong output", "", `"d3Jvbmc="`, 4, 1, 2, true, true},
+		{"missing stdout is not evidence", "", "", 4, 1, 2, false, false},
+		{"evidence fetch unavailable", "", "outage", 4, 1, 2, false, false},
+		{"evidence fetch exhausted", "", "outage", 4, 3, 2, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				out := map[string]any{"token": "job", "status": map[string]int{"id": tc.status}, "stderr": "d2FybmluZw=="}
+				if strings.Contains(r.URL.Query().Get("fields"), "stdout") {
+					if tc.stdout == "outage" {
+						w.WriteHeader(503)
+						return
+					}
+					if tc.stdout != "" {
+						out["stdout"] = json.RawMessage(tc.stdout)
+					}
+				}
+				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{out}})
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			payload, _ := json.Marshal(judge0.SubmissionRequest{SourceCode: "pass", ExpectedOutput: &tc.expected})
+			store := &recoveryTestStore{items: []models.Execution{{ID: "exec", Judge0Token: "job", Attempt: "attempt", Claim: "claim", DispatchPayload: payload, RecoveryFailures: tc.failures}}}
+			NewSubmissionService(&stores.Storage{Executions: store}, nil, judge0.NewClient()).RecoverJudge0(context.Background())
+			if int(calls.Load()) != tc.wantCalls || (len(store.finals) > 0) != tc.wantFinal || len(store.healthy) != 1 || store.healthy[0] != tc.wantHealthy {
+				t.Fatalf("calls=%d finals=%+v healthy=%v", calls.Load(), store.finals, store.healthy)
+			}
+			if len(store.finals) > 0 {
+				r := store.finals[0]
+				if r.Attempt != "attempt" || r.Claim != "claim" || r.Token != "job" {
+					t.Fatal("fence changed", r)
+				}
+				if tc.stdout == "outage" {
+					if r.Status != "judge_error" {
+						t.Fatal(r)
+					}
+				} else {
+					if r.Stderr != "warning" {
+						t.Fatal("diagnostic lost", r)
+					}
+					if tc.wantCalls == 2 && string(r.Stdout) != tc.stdout {
+						t.Fatal("stdout evidence lost", r)
+					}
+				}
+			}
+		})
 	}
 }

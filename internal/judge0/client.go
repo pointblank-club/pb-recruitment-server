@@ -34,6 +34,9 @@ type Client struct {
 // Dispatch leaves ten seconds for DB bookkeeping within the browser's thirty-second timeout.
 const maxDispatchTimeout = 10 * time.Second
 
+// shortcut: covers two stock Judge0 4 MiB files with Base64/JSON; raise if provider file limits grow.
+const maxResultBytesPerSubmission = 12 << 20
+
 func NewClient() *Client {
 	callbackBase, callbackSecret := strings.TrimRight(os.Getenv("JUDGE0_CALLBACK_BASE_URL"), "/"), os.Getenv("JUDGE0_CALLBACK_SECRET")
 	if (callbackBase == "") != (callbackSecret == "") {
@@ -153,13 +156,33 @@ func (c *Client) CreateBatch(ctx context.Context, jobs []SubmissionRequest) ([]S
 }
 
 func (c *Client) GetSubmissions(ctx context.Context, tokens []string) ([]*SubmissionStatusResponse, error) {
+	// Scoring polls only need stdout when verifying Judge0's blank-output defect.
+	return c.getSubmissions(ctx, tokens, "token,time,memory,status,compile_output,stderr")
+}
+
+func (c *Client) GetSubmissionsWithOutput(ctx context.Context, tokens []string) ([]*SubmissionStatusResponse, error) {
+	return c.getSubmissions(ctx, tokens, "token,time,memory,status,stdout,compile_output,stderr")
+}
+
+func (c *Client) GetSubmissionStdout(ctx context.Context, token string) (json.RawMessage, error) {
+	results, err := c.getSubmissions(ctx, []string{token}, "token,status,stdout")
+	if err != nil {
+		return nil, err
+	}
+	if results[0] == nil || results[0].Status.ID != 4 || len(results[0].Stdout) == 0 {
+		return nil, ErrInvalidResponse
+	}
+	return results[0].Stdout, nil
+}
+
+func (c *Client) getSubmissions(ctx context.Context, tokens []string, fields string) ([]*SubmissionStatusResponse, error) {
 	if len(tokens) == 0 {
 		return nil, nil
 	}
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("%w: JUDGE0_URL is not set", ErrUnavailable)
 	}
-	query := url.Values{"tokens": {strings.Join(tokens, ",")}, "base64_encoded": {"true"}, "fields": {"token,time,memory,status,stdout,compile_output,stderr"}}
+	query := url.Values{"tokens": {strings.Join(tokens, ",")}, "base64_encoded": {"true"}, "fields": {fields}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/submissions/batch?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
@@ -178,7 +201,8 @@ func (c *Client) GetSubmissions(ctx context.Context, tokens []string) ([]*Submis
 	var out struct {
 		Submissions []*SubmissionStatusResponse `json:"submissions"`
 	}
-	if err = json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out); err != nil {
+	// Keep the response bound proportional to the requested batch.
+	if err = json.NewDecoder(io.LimitReader(resp.Body, int64(len(tokens))*maxResultBytesPerSubmission)).Decode(&out); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
 	if len(out.Submissions) != len(tokens) {

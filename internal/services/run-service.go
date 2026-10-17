@@ -19,8 +19,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	if len(req.Code) > 64<<10 || len(req.Stdin) > 64<<10 || !utf8.ValidString(req.Code) || !utf8.ValidString(req.Stdin) {
 		return nil, ErrInvalidRun
 	}
-	source := req.Code
-	if strings.TrimSpace(source) == "" {
+	if strings.TrimSpace(req.Code) == "" {
 		return nil, ErrInvalidRun
 	}
 	language, err := judge0.LanguageID(req.Language)
@@ -38,7 +37,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 		return nil, err
 	}
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{{
-		SourceCode: source, LanguageID: language, Stdin: req.Stdin, CPUTimeLimit: 2, WallTimeLimit: 5,
+		SourceCode: req.Code, LanguageID: language, Stdin: req.Stdin, CPUTimeLimit: 2, WallTimeLimit: 5,
 		MemoryLimit: 256 * 1024, MaxFileSize: 64, CompilerOptions: judge0.CompilerOptions(language),
 	}})
 	if err != nil {
@@ -50,7 +49,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		statuses, err := ss.judge0.GetSubmissions(ctx, []string{results[0].Token})
+		statuses, err := ss.judge0.GetSubmissionsWithOutput(ctx, []string{results[0].Token})
 		if err != nil {
 			return nil, err
 		}
@@ -68,7 +67,13 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 			if result.Memory != nil {
 				memory = *result.Memory
 			}
-			return &dto.RunResponse{Status: status, Stdout: judgeOutputText(result.Stdout), Stderr: judgeOutputText(result.Stderr), CompileOutput: judgeOutputText(result.CompileOutput), Runtime: runtime, Memory: memory}, nil
+			stdout, stdoutErr := decodeJudgeOutput(result.Stdout)
+			stderr, stderrErr := decodeJudgeOutput(result.Stderr)
+			compileOutput, compileErr := decodeJudgeOutput(result.CompileOutput)
+			if stdoutErr != nil || stderrErr != nil || compileErr != nil {
+				return nil, judge0.ErrInvalidResponse
+			}
+			return &dto.RunResponse{Status: status, Stdout: stdout, Stderr: stderr, CompileOutput: compileOutput, Runtime: runtime, Memory: memory}, nil
 		}
 		select {
 		case <-ctx.Done():

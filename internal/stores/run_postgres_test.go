@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,7 +60,14 @@ func TestRunPostgresReplicaLimitsAndNoContestWrites(t *testing.T) {
 			w.Write([]byte(`{"submissions":[{"token":"run-job","status":{"id":2}}]}`))
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"submissions": []any{map[string]any{"token": "run-job", "status": map[string]int{"id": 3}, "time": "0.125", "memory": 2048, "stdout": base64.StdEncoding.EncodeToString([]byte(output)), "stderr": base64.StdEncoding.EncodeToString([]byte("warning\x00")), "compile_output": base64.StdEncoding.EncodeToString([]byte("compiler\n"))}}})
+		result := map[string]any{"token": "run-job", "status": map[string]int{"id": 3}, "time": "0.125", "memory": 2048, "stdout": base64.StdEncoding.EncodeToString([]byte(output)), "stderr": base64.StdEncoding.EncodeToString([]byte("warning\x00")), "compile_output": base64.StdEncoding.EncodeToString([]byte("compiler\n"))}
+		fields := strings.Split(r.URL.Query().Get("fields"), ",")
+		for field := range result {
+			if !slices.Contains(fields, field) {
+				delete(result, field)
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"submissions": []any{result}})
 	}))
 	defer server.Close()
 	t.Setenv("JUDGE0_URL", server.URL)
@@ -103,7 +111,7 @@ func TestRunPostgresReplicaLimitsAndNoContestWrites(t *testing.T) {
 		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 			t.Fatal(err)
 		}
-		if result.Status != "accepted" || result.Runtime != 125 || result.Memory != 2048 || result.CompileOutput != "compiler\n" || result.Stderr != "warning" || len(result.Stdout) > 4096 || !utf8.ValidString(result.Stdout) || strings.ContainsRune(result.Stdout, 0) {
+		if result.Status != "accepted" || result.Runtime != 125 || result.Memory != 2048 || result.CompileOutput != "compiler\n" || result.Stderr != "warning" || len(result.Stdout) < 4093 || len(result.Stdout) > 4096 || !utf8.ValidString(result.Stdout) || strings.ContainsRune(result.Stdout, 0) {
 			t.Fatalf("invalid run result: %+v", result)
 		}
 	}
@@ -138,6 +146,8 @@ func TestRunAuthenticationAndInvalidInput(t *testing.T) {
 		{`{`, 400}, {`null`, 400}, {`{"language":"ruby","code":"puts(1)"}`, 400}, {`{"language":"python","code":" "}`, 400}, {`{"language":"python","code":"print(1)","stdin":32}`, 400}, {`{"language":"python","code":"print(1)","network":true}`, 400}, {`{} {}`, 400},
 		{`{"language":"python","code":"` + strings.Repeat("x", 65537) + `"}`, 400},
 		{`{"language":"python","code":"print(1)","stdin":"` + strings.Repeat("x", 65537) + `"}`, 400},
+		{`{"language":"python","code":"` + string([]byte{0xff}) + `"}`, 400},
+		{`{"language":"python","code":"pass","stdin":"` + string([]byte{0xff}) + `"}`, 400},
 		{strings.Repeat(" ", 1<<20) + `{}`, 413},
 		{`{"language":"python","code":"pass"}` + strings.Repeat(" ", 1<<20), 413},
 	} {
@@ -161,7 +171,7 @@ func TestRunPollingDeadlineAndCompilationPostgres(t *testing.T) {
 					return
 				}
 				if terminal {
-					w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":6},"compile_output":"ZXJyb3I="}]}`))
+					w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":6},"stdout":null,"stderr":null,"compile_output":"ZXJyb3I="}]}`))
 				} else {
 					w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":2}}]}`))
 				}
@@ -189,6 +199,44 @@ func TestRunPollingDeadlineAndCompilationPostgres(t *testing.T) {
 				}
 			} else if w.Code != 504 || time.Since(start) > time.Second {
 				t.Fatal(w.Code, w.Body.String(), time.Since(start))
+			}
+		})
+	}
+}
+
+func TestRunRejectsMalformedOutputPostgres(t *testing.T) {
+	for _, field := range []string{"stdout", "stderr", "compile_output", "missing stdout"} {
+		t.Run(field, func(t *testing.T) {
+			db := postgresTestDB(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					w.WriteHeader(http.StatusCreated)
+					w.Write([]byte(`[{"token":"job"}]`))
+					return
+				}
+				result := map[string]any{"token": "job", "status": map[string]int{"id": 3}, "stdout": nil, "stderr": nil, "compile_output": nil}
+				if field == "missing stdout" {
+					delete(result, "stdout")
+				} else {
+					result[field] = "%%%invalid"
+				}
+				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{result}})
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			client := judge0.NewClient()
+			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, client), nil, client)
+			w := httptest.NewRecorder()
+			c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), w)
+			c.Set(common.AUTH_USER_ID, "runner")
+			if err := controller.Run(c); err != nil || w.Code != http.StatusBadGateway {
+				t.Fatalf("malformed %s: HTTP %d, %s, %v", field, w.Code, w.Body.String(), err)
+			}
+			for _, table := range []string{"submissions", "submission_executions", "test_case_results", "rankings"} {
+				var count int
+				if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("Run wrote %s: %d %v", table, count, err)
+				}
 			}
 		})
 	}

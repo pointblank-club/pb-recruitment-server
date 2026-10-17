@@ -27,6 +27,7 @@ func TestBatchRejections(t *testing.T) {
 		{"mixed validation", 201, `[{"token":"accepted"},{"memory_limit":["exceeds maximum"]}]`, []error{nil, ErrDispatchRejected}},
 		{"empty entry", 201, `[{"token":"accepted"},{}]`, []error{nil, ErrInvalidResponse}},
 		{"missing entry", 201, `[{"token":"accepted"}]`, []error{nil, ErrInvalidResponse}},
+		{"malformed response", 201, `[{`, []error{ErrInvalidResponse, ErrInvalidResponse}},
 		{"internal error", 500, `{}`, []error{ErrUnavailable, ErrUnavailable}},
 		{"bad gateway", 502, `{}`, []error{ErrUnavailable, ErrUnavailable}},
 		{"gateway timeout", 504, `{}`, []error{ErrUnavailable, ErrUnavailable}},
@@ -49,6 +50,26 @@ func TestBatchRejections(t *testing.T) {
 				}
 				if want == nil && results[i].Token != "accepted" {
 					t.Errorf("accepted token lost: %+v", results[i])
+				}
+			}
+		})
+	}
+}
+
+func TestUnsentDispatchIsRejected(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	for name, endpoint := range map[string]string{"unset URL": "", "connection refused": server.URL} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("JUDGE0_URL", endpoint)
+			t.Setenv("JUDGE0_BATCH_SIZE", "20")
+			results, err := NewClient().CreateBatch(context.Background(), make([]SubmissionRequest, 2))
+			if !errors.Is(err, ErrDispatchRejected) || len(results) != 2 {
+				t.Fatal(results, err)
+			}
+			for _, result := range results {
+				if result.Token != "" || !errors.Is(result.Error, ErrDispatchRejected) {
+					t.Fatal(result)
 				}
 			}
 		})
@@ -149,6 +170,9 @@ func TestGetSubmissionsRequestsBase64(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("base64_encoded"); got != "true" {
 			t.Errorf("base64_encoded = %q, want %q", got, "true")
+		}
+		if fields := r.URL.Query().Get("fields"); strings.Contains(fields, "stdout") || !strings.Contains(fields, "stderr") || !strings.Contains(fields, "compile_output") {
+			t.Errorf("routine polls must omit stdout and preserve diagnostics: %q", fields)
 		}
 		w.Write([]byte(`{"submissions":[{"token":"a","status":{"id":3}}]}`))
 	}))
@@ -273,5 +297,41 @@ func TestCallbackAttemptAuthentication(t *testing.T) {
 	u, _ := url.Parse(c.CallbackURL(id, "attempt"))
 	if u.Query().Get("attempt") != "attempt" || !c.VerifyCallback(id, u.Query().Get("sig"), "attempt") || c.VerifyCallback(id, u.Query().Get("sig"), "other") || c.VerifyCallback(id, u.Query().Get("sig")) {
 		t.Fatal("attempt signature not fenced")
+	}
+}
+
+func TestPollingLargeDiagnosticsBatch(t *testing.T) {
+	for _, tc := range []struct {
+		name                           string
+		count, compilerBytes, errBytes int
+		tooLarge                       bool
+	}{
+		{"maximum warnings and stderr", 1, 4 << 20, 4 << 20, false},
+		{"batch diagnostics", 20, 0, 256 << 10, false},
+		{"oversized response", 1, 9 << 20, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := make([]string, tc.count)
+			results := make([]SubmissionStatusResponse, len(tokens))
+			compiler, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", tc.compilerBytes))))
+			stderr, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", tc.errBytes))))
+			for i := range tokens {
+				tokens[i] = fmt.Sprint(i)
+				results[i] = SubmissionStatusResponse{Token: tokens[i], CompileOutput: compiler, Stderr: stderr, Status: StatusResponse{ID: 3}}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"submissions": results})
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			got, err := NewClient().GetSubmissions(context.Background(), tokens)
+			if tc.tooLarge {
+				if !errors.Is(err, ErrInvalidResponse) {
+					t.Fatalf("oversized response error=%v", err)
+				}
+			} else if err != nil || len(got) != len(tokens) || string(got[0].CompileOutput) != string(compiler) || string(got[0].Stderr) != string(stderr) {
+				t.Fatalf("valid output batch rejected or changed: results=%d error=%v", len(got), err)
+			}
+		})
 	}
 }

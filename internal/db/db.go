@@ -23,7 +23,7 @@ type DBConfig struct {
 // LoadDBConfig loads database configuration from environment variables
 func LoadDBConfig() *DBConfig {
 	maxOpenConns, _ := strconv.Atoi(getEnv("DB_MAX_OPEN_CONNS", "25"))
-	maxIdleConns, _ := strconv.Atoi(getEnv("DB_MAX_IDLE_CONNS", "5"))
+	maxIdleConns, _ := strconv.Atoi(getEnv("DB_MAX_IDLE_CONNS", "25"))
 	connMaxLifetime, _ := time.ParseDuration(getEnv("DB_CONN_MAX_LIFETIME", "5m"))
 
 	return &DBConfig{

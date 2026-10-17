@@ -23,8 +23,7 @@ type FinalExecutionResult struct {
 	CompileOutput, Stderr      string
 }
 type executionChild struct {
-	id, status    string
-	testCaseIndex int
+	id, status string
 }
 
 type ExecutionStore struct {
@@ -46,7 +45,6 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 	now := time.Now().Unix()
 	executions := make([]models.Execution, len(indexes))
 	ids := make([]string, len(indexes))
-	created := make([]int64, len(indexes))
 	payloads, attempts := make([]string, len(indexes)), make([]string, len(indexes))
 	if len(jobs) > 0 && len(jobs[0]) != len(indexes) {
 		return nil, fmt.Errorf("execution job count mismatch")
@@ -55,7 +53,6 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 	for i, idx := range indexes {
 		id := uuid.NewString()
 		ids[i] = id
-		created[i] = now
 		payloads[i] = "null"
 		if len(jobs) > 0 {
 			payload, err := json.Marshal(jobs[0][i])
@@ -68,20 +65,18 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 			ID:            id,
 			SubmissionID:  submissionID,
 			TestCaseIndex: idx,
-			Status:        "pending",
-			CreatedAt:     now,
 			Attempt:       attempts[i],
 		}
 	}
 
 	const q = `
 		INSERT INTO submission_executions (id, submission_id, test_case_index, status, created_at, dispatch_payload, dispatch_attempt, dispatch_count, claim_until)
-		SELECT id, $2, idx, 'pending', created, convert_to(NULLIF(payload,'null'),'UTF8'), attempt,
+		SELECT id, $2, idx, 'pending', $4, convert_to(NULLIF(payload,'null'),'UTF8'), attempt,
 		CASE WHEN attempt='' THEN 0 ELSE 1 END, now()+interval '30 seconds'
-		FROM unnest($1::uuid[],$3::int[],$4::bigint[],$5::text[],$6::text[]) AS x(id,idx,created,payload,attempt)
+		FROM unnest($1::uuid[],$3::int[],$5::text[],$6::text[]) AS x(id,idx,payload,attempt)
 	`
 
-	_, err := s.db.ExecContext(ctx, q, pq.Array(ids), submissionID, pq.Array(indexes), pq.Array(created), pq.Array(payloads), pq.Array(attempts))
+	_, err := s.db.ExecContext(ctx, q, pq.Array(ids), submissionID, pq.Array(indexes), now, pq.Array(payloads), pq.Array(attempts))
 	if err != nil {
 		return nil, fmt.Errorf("insert executions: %w", err)
 	}
@@ -136,8 +131,8 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 		return fmt.Errorf("conflicting Judge0 token")
 	}
 	alreadyTerminal := currentStatus != "pending"
-	if !alreadyTerminal && r.Token != "" {
-		_, err = tx.ExecContext(ctx, `UPDATE submission_executions SET judge0_token=$2 WHERE id=$1 AND (judge0_token IS NULL OR judge0_token=$2)`, r.ExecutionID, r.Token)
+	if !alreadyTerminal && currentToken == "" && r.Token != "" {
+		_, err = tx.ExecContext(ctx, `UPDATE submission_executions SET judge0_token=$2,recovery_failures=0 WHERE id=$1 AND judge0_token IS NULL`, r.ExecutionID, r.Token)
 		if err != nil {
 			return err
 		}
