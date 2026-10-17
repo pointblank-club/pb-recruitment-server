@@ -35,6 +35,19 @@ func TestJudgeOutputTextNullAndEmpty(t *testing.T) {
 	}
 }
 
+func TestDecodeJudgeOutputValidation(t *testing.T) {
+	for _, raw := range []string{"", `42`, `{}`, `"%%%invalid"`} {
+		if _, err := decodeJudgeOutput(json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted malformed output %q", raw)
+		}
+	}
+	for _, raw := range []string{`null`, `""`} {
+		if text, err := decodeJudgeOutput(json.RawMessage(raw)); err != nil || text != "" {
+			t.Errorf("empty output %q: %q %v", raw, text, err)
+		}
+	}
+}
+
 func TestSanitizeJudgeOutputRemovesNUL(t *testing.T) {
 	// NUL bytes in stderr cause PostgreSQL SQLSTATE 22021 on TEXT columns.
 	input := "error\x00: segfault\x00"

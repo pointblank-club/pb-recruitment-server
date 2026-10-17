@@ -1769,6 +1769,99 @@ const docTemplate = `{
                 }
             }
         },
+        "/submission/run": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Submissions"
+                ],
+                "summary": "Run code with custom stdin",
+                "parameters": [
+                    {
+                        "description": "Language, code (64 KiB), stdin (64 KiB)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.RunRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.RunResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "504": {
+                        "description": "Gateway Timeout",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/submission/submit": {
             "post": {
                 "security": [
@@ -2835,6 +2928,49 @@ const docTemplate = `{
                 "RegisterAction",
                 "UnregisterAction"
             ]
+        },
+        "app_internal_models_dto.RunRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "language"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "stdin": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.RunResponse": {
+            "type": "object",
+            "properties": {
+                "compile_output": {
+                    "type": "string"
+                },
+                "memory": {
+                    "description": "KiB",
+                    "type": "integer"
+                },
+                "runtime": {
+                    "description": "milliseconds",
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "stderr": {
+                    "type": "string"
+                },
+                "stdout": {
+                    "type": "string"
+                }
+            }
         },
         "app_internal_models_dto.SignupRequest": {
             "type": "object",

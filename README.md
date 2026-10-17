@@ -166,6 +166,37 @@ For live verification, supply `LIVE_JUDGE0_URL` and a disposable `TEST_DATABASE_
 to `go test -race ./internal/stores -run TestLiveJudge0 -count=1`. Callback checks also
 need `LIVE_JUDGE0_CALLBACK_BASE_URL` routed from the worker to `127.0.0.1:23582`.
 
+### Run API (website issue #29)
+
+`POST /submission/run` requires the existing Firebase bearer token and accepts raw UTF-8:
+
+```json
+{"language":"python","code":"print(input())\n","stdin":"hello\n"}
+```
+
+Languages match submit. Code and stdin are each limited to 64 KiB; the JSON body to 1 MiB.
+One job runs without expected output or callback: 2s CPU, 5s wall time, 256 MiB memory,
+64 KiB file size, network disabled. PostgreSQL enforces one run per user every five
+seconds, separately from submit (`429`, `Retry-After: 5`). Run creates no contest rows,
+storage objects or ranking changes.
+
+The backend polls every 200 ms for at most 15 seconds, without `wait=true`. HTTP 200:
+
+```json
+{"status":"accepted","stdout":"hello\n","stderr":"","compile_output":"","runtime":125,"memory":2048}
+```
+
+Statuses match submit; runtime is milliseconds and memory is KiB. Each sanitized output
+field is capped at 4096 UTF-8 bytes. Invalid input returns 400, oversized bodies 413,
+unavailable judge 502, polling timeout 504. A failed response may leave a job running;
+no Run token is retained, so the UI must not automatically retry. Website wiring is #29.
+
+The per-user cooldown is not an aggregate capacity limit: 600 users can nominally
+admit 120 jobs/second, and 600 pending requests can generate 3000 polls/second.
+Validate shared judging capacity before enabling Run for a contest. These job
+limits apply to runtime; compilation uses Judge0's server-wide limits and queued
+or compiling jobs can outlive the backend's waiting deadline.
+
 ### Local connection to the EC2 judge
 
 Forward the judge's private HTTP port over SSH for local verification:

@@ -156,8 +156,12 @@ func (c *Client) CreateBatch(ctx context.Context, jobs []SubmissionRequest) ([]S
 }
 
 func (c *Client) GetSubmissions(ctx context.Context, tokens []string) ([]*SubmissionStatusResponse, error) {
-	// Stdout is only needed to verify Judge0's blank-output Wrong Answer defect.
+	// Scoring polls only need stdout when verifying Judge0's blank-output defect.
 	return c.getSubmissions(ctx, tokens, "token,time,memory,status,compile_output,stderr")
+}
+
+func (c *Client) GetSubmissionsWithOutput(ctx context.Context, tokens []string) ([]*SubmissionStatusResponse, error) {
+	return c.getSubmissions(ctx, tokens, "token,time,memory,status,stdout,compile_output,stderr")
 }
 
 func (c *Client) GetSubmissionStdout(ctx context.Context, token string) (json.RawMessage, error) {
