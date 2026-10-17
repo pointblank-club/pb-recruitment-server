@@ -1,8 +1,8 @@
 package dto
 
 type RunRequest struct {
-	Language string `json:"language"`
-	Code     string `json:"code"`
+	Language string `json:"language" validate:"required"`
+	Code     string `json:"code" validate:"required"`
 	Stdin    string `json:"stdin"`
 }
 

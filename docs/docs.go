@@ -2931,6 +2931,10 @@ const docTemplate = `{
         },
         "app_internal_models_dto.RunRequest": {
             "type": "object",
+            "required": [
+                "code",
+                "language"
+            ],
             "properties": {
                 "code": {
                     "type": "string"
