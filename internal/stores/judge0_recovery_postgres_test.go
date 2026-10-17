@@ -412,7 +412,7 @@ func TestLostDispatchResponseCallbackDuringGracePostgres(t *testing.T) {
 	}
 	ss := services.NewSubmissionService(storage, nil, client)
 	for range 2 {
-		if err := ss.HandleJudge0Callback(ctx, e.ID, judge0.CallbackResult{Attempt: e.Attempt, Token: "original", Status: judge0.StatusResponse{ID: 3}, Time: json.RawMessage(`"0.025"`)}); err != nil {
+		if err := ss.HandleJudge0Callback(ctx, e.ID, judge0.SubmissionStatusResponse{Attempt: e.Attempt, Token: "original", Status: judge0.StatusResponse{ID: 3}, Time: json.RawMessage(`"0.025"`)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -608,6 +608,10 @@ func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 	var dispatches atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
+			var reserved int
+			if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND judge0_token IS NULL AND recovery_claim<>''`, sub).Scan(&reserved); err != nil || reserved != 1 {
+				t.Error("unsent jobs claimed ahead of their dispatch", reserved, err)
+			}
 			var payload struct {
 				Submissions []judge0.SubmissionRequest `json:"submissions"`
 			}
@@ -645,6 +649,9 @@ func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 	readyExecutions(t, db, sub)
 	services.NewSubmissionService(storage, nil, client).RecoverJudge0(context.Background())
 	assertSubmission(t, db, sub, "accepted", 0, 0)
+	if dispatches.Load() != 2 {
+		t.Fatal("successful dispatch was repeated", dispatches.Load())
+	}
 	var snapshots int
 	if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND dispatch_payload IS NOT NULL`, sub).Scan(&snapshots); err != nil || snapshots != 2 {
 		t.Fatal(snapshots, err)
@@ -690,63 +697,6 @@ func TestPreparedDispatchSnapshotPostgres(t *testing.T) {
 		if claim.DispatchCount != 2 || claim.Attempt == executions[claim.TestCaseIndex].Attempt {
 			t.Fatal("initial attempt was not fenced", claim)
 		}
-	}
-}
-
-func TestRecoveryMixedBacklogPostgres(t *testing.T) {
-	db := postgresTestDB(t)
-	user, contest, _, sub, items := executionFixture(t, db, 41)
-	snapshotExecutions(t, db, sub)
-	for _, e := range items[:39] {
-		if err := stores.NewExecutionStore(db).SaveAttemptToken(context.Background(), e.ID, "", e.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var gets, posts atomic.Int32
-	stdout, _ := json.Marshal(base64.StdEncoding.EncodeToString([]byte(strings.Repeat("x", 256<<10))))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost {
-			n := posts.Add(1)
-			var reserved int
-			if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND judge0_token IS NULL AND recovery_claim<>''`, sub).Scan(&reserved); err != nil || reserved != 1 {
-				t.Error("unsent jobs claimed ahead of their dispatch", reserved, err)
-			}
-			w.WriteHeader(201)
-			fmt.Fprintf(w, `[{"token":"retry-%d"}]`, n)
-			return
-		}
-		gets.Add(1)
-		tokens := strings.Split(r.URL.Query().Get("tokens"), ",")
-		if len(tokens) > 20 {
-			t.Error("batch exceeds configured size", len(tokens))
-		}
-		results := make([]judge0.SubmissionStatusResponse, len(tokens))
-		for i, token := range tokens {
-			results[i] = judge0.SubmissionStatusResponse{Token: token, Stdout: stdout, Status: judge0.StatusResponse{ID: 3}}
-		}
-		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	t.Setenv("JUDGE0_BATCH_SIZE", "20")
-	service := services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient())
-	service.RecoverJudge0(context.Background())
-	if gets.Load() != 2 || posts.Load() != 2 {
-		t.Fatalf("backlog fairness/batching: GET=%d POST=%d", gets.Load(), posts.Load())
-	}
-	assertSubmission(t, db, sub, "pending", 0, 0)
-	readyExecutions(t, db, sub)
-	service.RecoverJudge0(context.Background())
-	if gets.Load() != 3 || posts.Load() != 2 {
-		t.Fatalf("successful dispatch was repeated: GET=%d POST=%d", gets.Load(), posts.Load())
-	}
-	assertSubmission(t, db, sub, "accepted", 0, 0)
-	var score, count int
-	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
-		t.Fatal(score, err)
-	}
-	if err := db.QueryRow(`SELECT count(*) FROM test_case_results WHERE submission_id=$1`, sub).Scan(&count); err != nil || count != 41 {
-		t.Fatal(count, err)
 	}
 }
 

@@ -27,6 +27,7 @@ func TestBatchRejections(t *testing.T) {
 		{"mixed validation", 201, `[{"token":"accepted"},{"memory_limit":["exceeds maximum"]}]`, []error{nil, ErrDispatchRejected}},
 		{"empty entry", 201, `[{"token":"accepted"},{}]`, []error{nil, ErrInvalidResponse}},
 		{"missing entry", 201, `[{"token":"accepted"}]`, []error{nil, ErrInvalidResponse}},
+		{"malformed response", 201, `[{`, []error{ErrInvalidResponse, ErrInvalidResponse}},
 		{"internal error", 500, `{}`, []error{ErrUnavailable, ErrUnavailable}},
 		{"bad gateway", 502, `{}`, []error{ErrUnavailable, ErrUnavailable}},
 		{"gateway timeout", 504, `{}`, []error{ErrUnavailable, ErrUnavailable}},
@@ -49,6 +50,26 @@ func TestBatchRejections(t *testing.T) {
 				}
 				if want == nil && results[i].Token != "accepted" {
 					t.Errorf("accepted token lost: %+v", results[i])
+				}
+			}
+		})
+	}
+}
+
+func TestUnsentDispatchIsRejected(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	for name, endpoint := range map[string]string{"unset URL": "", "connection refused": server.URL} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("JUDGE0_URL", endpoint)
+			t.Setenv("JUDGE0_BATCH_SIZE", "20")
+			results, err := NewClient().CreateBatch(context.Background(), make([]SubmissionRequest, 2))
+			if !errors.Is(err, ErrDispatchRejected) || len(results) != 2 {
+				t.Fatal(results, err)
+			}
+			for _, result := range results {
+				if result.Token != "" || !errors.Is(result.Error, ErrDispatchRejected) {
+					t.Fatal(result)
 				}
 			}
 		})

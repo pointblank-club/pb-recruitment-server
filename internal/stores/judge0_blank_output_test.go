@@ -213,7 +213,7 @@ func TestLegacyBlankOutputRecoveryPostgres(t *testing.T) {
 			client := judge0.NewClient()
 			service := services.NewSubmissionService(storage, s3.NewS3Client(), client)
 			if tc.stdout == "" {
-				payload := judge0.CallbackResult{Token: token, Stdout: json.RawMessage("null"), Time: json.RawMessage(`"0.01"`)}
+				payload := judge0.SubmissionStatusResponse{Token: token, Stdout: json.RawMessage("null"), Time: json.RawMessage(`"0.01"`)}
 				payload.Status.ID = 4
 				if err := service.HandleJudge0Callback(context.Background(), items[0].ID, payload); err != nil {
 					t.Fatal(err)

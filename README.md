@@ -102,46 +102,33 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
 - For a local backend without an inbound callback address, leave both callback
   settings empty. The existing recovery worker fetches results every 15 seconds;
   callbacks are not required for this local setup.
-- With Vivek, load-test queue capacity for 500–600 contestants. The instance checked
-  on 16 October still has `max_queue_size=100` and `max_memory_limit=512000` KB; our default
-  256 MiB is 262144 KB. This queue cannot absorb a simultaneous contest burst: size it for
-  participants × testcases per submission × submission waves, plus existing backlog.
-  For 600 contestants and ten testcases, one wave is 6,000 execution jobs. Raising the queue
-  limit also requires measuring worker throughput and acceptable completion time on staging.
+- Size the Judge0 queue and worker fleet for participants × testcases × submission waves,
+  plus existing backlog. For 600 contestants with ten testcases, one wave is 6,000 jobs;
+  the inspected queue limit of 100 cannot absorb that burst. Measure completion time on staging.
 - Source must decode to valid UTF-8; malformed source returns HTTP 400 before submission creation.
-- Execution inputs are saved before dispatch. Recovery uses short PostgreSQL claims
-  (`FOR UPDATE SKIP LOCKED`), then makes network requests outside the transaction.
-  Leases expire after 30 seconds; sweeps run every 15 seconds. Token-bearing jobs
-  are polled in batches respecting `JUDGE0_BATCH_SIZE`; tokenless jobs are claimed
-  one at a time so slow dispatches cannot consume other jobs' leases. Retry state is shared
-  across replicas: at most three tokenless dispatch attempts or three consecutive
-  failed result observations, with backoff, before `judge_error`.
-- Polling and tokenless dispatch run independently within each sweep, so a slow POST
-  cannot hold up healthy results. Saving the first token atomically starts a fresh
-  result-observation budget; duplicate token deliveries do not reset polling failures.
-- Each claimed polling batch applies results concurrently before releasing its claims.
-  Keep the default batch size of 20 with `DB_MAX_OPEN_CONNS=25` and `DB_MAX_IDLE_CONNS=25`;
-  update existing configurations that still retain only five idle connections, to avoid
-  opening connections again on each batch. Account for
-  every replica's pool when sizing PostgreSQL's connection limit. Routine polling omits
-  stdout and retains stderr/compiler diagnostics. Only Wrong Answer jobs with blank
-  expected output fetch stdout to verify the Judge0 defect before correcting the verdict.
-  Polling responses are bounded at 12 MiB per job, allowing two stock Judge0 4 MiB
-  diagnostic files with Base64 and JSON overhead. Raise this bound before increasing
-  the provider's file limits beyond that allowance.
-- Queued/running responses reset the failure counter. Wrong answers, compilation,
-  runtime and time-limit errors finalize immediately. Recovery ignores `/workers`
-  and job age; persistently queued jobs require operator investigation.
-- Callback signatures bind the dispatch attempt. Stale callbacks and expired claims
-  cannot replace newer results or award duplicate scores. Replace old backend replicas
-  together after migrations through `000031`; keep callback secrets identical.
-- Use the stock Judge0 API and workers. The initial 30-second lease gives callbacks
-  time to arrive before retrying a tokenless dispatch; subsequent tokenless retries
-  wait at least 30 seconds, with backoff. A callback received during this grace
-  period can complete the execution without another POST.
-- shortcut: an accepted request with a lost response and no timely callback may
-  execute twice on retry; add provider-supported idempotency only if duplicate CPU
-  work becomes unacceptable. Attempts are bounded and scoring remains idempotent.
+- Execution inputs are saved before dispatch. Recovery claims rows with PostgreSQL
+  `FOR UPDATE SKIP LOCKED` and makes network requests after releasing the locks.
+  Claims last 30 seconds; sweeps run every 15 seconds. Polling and tokenless dispatch
+  run independently, so a slow POST cannot block healthy results.
+- Retry budgets are shared across replicas: three dispatch reservations or three consecutive
+  failed result observations before `judge_error`. Crashes and initially unsent chunks can
+  consume dispatch reservations. The initial reservation gives callbacks 30 seconds to arrive;
+  subsequent ambiguous attempts wait at least 30 seconds after dispatch, with backoff.
+- Saving the first token resets the observation budget; duplicate deliveries do not.
+  Queued/running observations reset failures. Contestant errors finalize immediately.
+  Recovery ignores `/workers` and job age; persistently queued jobs need operator investigation.
+- Polling uses `JUDGE0_BATCH_SIZE` (default 20) and applies each batch's results concurrently.
+  Keep `DB_MAX_OPEN_CONNS=25` and `DB_MAX_IDLE_CONNS=25`; update older five-idle configurations
+  and account for every replica's pool when sizing PostgreSQL's connection limit.
+- Routine polling omits stdout and preserves compiler/stderr diagnostics. Only Wrong Answer
+  jobs that might match the blank-output defect fetch stdout. Responses are bounded at 12 MiB
+  per job for two stock 4 MiB diagnostic files plus Base64/JSON; increase the bound if provider
+  file limits grow.
+- Callback signatures bind the dispatch attempt. Stale callbacks and replaced claims cannot
+  overwrite newer results or award duplicate scores. Replace old replicas together after
+  migrations through `000031`; keep callback secrets identical.
+- Use stock Judge0 API and workers. A lost response without a timely callback can cause
+  duplicate physical execution on retry. The budget bounds this; scoring remains idempotent.
 - Keep callback signatures out of proxy and load-balancer logs as well as application
   logs. The signature is in the callback URL query string.
 
@@ -161,10 +148,7 @@ need `LIVE_JUDGE0_CALLBACK_BASE_URL` routed from the worker to `127.0.0.1:23582`
 
 ### Local connection to the EC2 judge
 
-The judge at `ubuntu@13.205.163.28` is reachable over SSH on port `6622`.
-Its HTTP port `2358` was not directly reachable from the development machine on
-14 October 2026. Compression helps larger requests and results fit the client's
-ten-second timeout. Forward it to localhost and keep the tunnel running:
+Forward the judge's private HTTP port over SSH for local verification:
 
 ```bash
 ssh -CNT -p 6622 \
@@ -186,27 +170,15 @@ SUBMISSION_RATE_LIMIT_SECONDS=5
 LEADERBOARD_CACHE_TTL_SECONDS=3
 ```
 
-The empty API token matches the inspected Judge0 configuration; access in this
-setup is through SSH. If Judge0 authentication is enabled, supply its matching
-token. Do not expose an unauthenticated Judge0 API publicly. A deployed backend
-must use its own reachable Judge0 address or maintained tunnel; localhost here
-refers only to the development machine running the SSH forward.
+Supply `JUDGE0_AUTH_TOKEN` if API authentication is enabled. Keep the API private;
+`localhost` above refers to the machine running the tunnel. Deployed backends need
+an address reachable from their own network.
 
-Check the connection before starting the backend:
+Check the API version, then run the live tests above to verify worker execution:
 
 ```bash
 curl --fail http://127.0.0.1:2358/about
-curl --fail http://127.0.0.1:2358/workers
 ```
 
-On 14 October 2026, the inspected judge ran version `1.13.1` with a batch limit
-of 20, queue limit of 100, and maximum memory limit of 512000 KB. An empty
-`/workers` list does not prove workers have stopped: this Judge0 endpoint lists
-registered queues. Verify an actual execution before treating the judge as ready.
-Python and C++17 smoke executions both returned `Accepted` through the SSH tunnel
-on that date. `/workers` then reported zero available workers despite those
-successful executions. Recovery therefore ignores these statistics.
-
-The database referenced by the local `DB_ADDR` was checked on 14 October 2026:
-its migration version was `29`, `dirty=false`, and migration `up` reported
-`no change`. Verify the migration version again for each deployment.
+An empty `/workers` response does not prove execution is unavailable. Verify the
+target database's migration version before each deployment.

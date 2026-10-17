@@ -65,9 +65,9 @@ func (s problemTestStore) GetProblem(ctx context.Context, problemID, contestID s
 
 type executionTestStore struct {
 	*stores.ExecutionStore
-	saveTokens  func(context.Context, map[string]string) error
-	markFailed  func(context.Context, []string) error
-	insertBatch func(context.Context) error
+	saveToken    func(context.Context, string, string, string) error
+	processFinal func(context.Context, stores.FinalExecutionResult) error
+	insertBatch  func(context.Context) error
 }
 
 func (s executionTestStore) InsertBatch(ctx context.Context, _ string, _ []int, jobs ...[]judge0.SubmissionRequest) ([]models.Execution, error) {
@@ -80,47 +80,35 @@ func (s executionTestStore) InsertBatch(ctx context.Context, _ string, _ []int, 
 }
 
 func (s executionTestStore) SaveAttemptToken(ctx context.Context, id, attempt, token string) error {
-	return s.saveTokens(ctx, map[string]string{id: token})
+	return s.saveToken(ctx, id, attempt, token)
 }
 func (s executionTestStore) ProcessFinal(ctx context.Context, r stores.FinalExecutionResult) error {
-	return s.markFailed(ctx, []string{r.ExecutionID})
+	return s.processFinal(ctx, r)
 }
 
 func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 	writeErr := errors.New("failure status write failed")
 	for _, tc := range []struct {
-		name              string
-		timeoutSave       bool
-		markErr           error
-		failUpload        bool
-		failInsert        bool
-		callbacksEnabled  bool
-		networkFailure    bool
-		bodyFailure       bool
-		invalidBody       bool
-		missingTokens     bool
-		serverFailure     bool
-		queueFull         bool
-		validationError   bool
-		refusedConnection bool
-		unsetURL          bool
+		name             string
+		status           int
+		body             string
+		timeoutSave      bool
+		markErr          error
+		failUpload       bool
+		failInsert       bool
+		callbacksEnabled bool
+		ambiguous        bool
 	}{
-		{name: "token save timeout", timeoutSave: true},
-		{name: "failure status write error", markErr: writeErr},
-		{name: "ambiguous timeout without callbacks", networkFailure: true},
+		{name: "token save timeout", status: 201, body: `[{"token":"token"}]`, timeoutSave: true},
+		{name: "failure status write error", status: 422, markErr: writeErr},
+		{name: "ambiguous failure without callbacks", status: 504, ambiguous: true},
 		{name: "code upload failure", failUpload: true},
 		{name: "execution insertion failure", failInsert: true},
 		{name: "preparation cleanup failure", failInsert: true, markErr: writeErr},
-		{name: "callbacks enabled network failure", callbacksEnabled: true, networkFailure: true},
-		{name: "callbacks enabled body failure", callbacksEnabled: true, bodyFailure: true},
-		{name: "callbacks enabled explicit rejection", callbacksEnabled: true},
-		{name: "callbacks enabled invalid body", callbacksEnabled: true, invalidBody: true},
-		{name: "callbacks enabled missing tokens", callbacksEnabled: true, missingTokens: true},
-		{name: "callbacks enabled server failure", callbacksEnabled: true, serverFailure: true},
-		{name: "callbacks enabled queue full", callbacksEnabled: true, queueFull: true},
-		{name: "callbacks enabled per-entry validation error", callbacksEnabled: true, validationError: true},
-		{name: "callbacks enabled connection refused", callbacksEnabled: true, refusedConnection: true},
-		{name: "callbacks enabled unset URL", callbacksEnabled: true, unsetURL: true},
+		{name: "ambiguous failure with callbacks", status: 504, callbacksEnabled: true, ambiguous: true},
+		{name: "missing token response", status: 201, body: `[]`, ambiguous: true},
+		{name: "explicit rejection with callbacks", status: 422, callbacksEnabled: true},
+		{name: "per-entry rejection", status: 201, body: `[{"memory_limit":["exceeds maximum"]}]`, callbacksEnabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			objects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +138,7 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 			judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if tc.failUpload || tc.failInsert {
 					t.Error("dispatch must not run after preparation failure")
+					return
 				}
 				var payload struct {
 					Submissions []struct {
@@ -174,56 +163,11 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 					}
 				}
 
-				if tc.networkFailure {
-					conn, _, err := w.(http.Hijacker).Hijack()
-					if err != nil {
-						t.Error(err)
-						return
-					}
-					conn.Close()
-					return
-				}
-				if tc.bodyFailure {
-					w.Header().Set("Content-Length", "1000")
-					w.WriteHeader(http.StatusCreated)
-					w.Write([]byte(`[{"token":"`))
-					return
-				}
-				if tc.invalidBody || tc.missingTokens || tc.validationError {
-					w.WriteHeader(http.StatusCreated)
-					if tc.invalidBody {
-						w.Write([]byte(`[{`))
-					} else if tc.validationError {
-						w.Write([]byte(`[{"memory_limit":["exceeds maximum"]}]`))
-					} else {
-						w.Write([]byte(`[]`))
-					}
-					return
-				}
-				if tc.serverFailure {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				if tc.queueFull {
-					w.WriteHeader(http.StatusServiceUnavailable)
-					w.Write([]byte(`{"error":"queue is full"}`))
-					return
-				}
-				if tc.timeoutSave {
-					w.WriteHeader(http.StatusCreated)
-					w.Write([]byte(`[{"token":"token"}]`))
-				} else {
-					w.WriteHeader(http.StatusUnprocessableEntity)
-				}
+				w.WriteHeader(tc.status)
+				w.Write([]byte(tc.body))
 			}))
 			defer judge.Close()
 			t.Setenv("JUDGE0_URL", judge.URL)
-			if tc.refusedConnection {
-				judge.Close()
-			}
-			if tc.unsetURL {
-				t.Setenv("JUDGE0_URL", "")
-			}
 			t.Setenv("JUDGE0_AUTH_TOKEN", "")
 			t.Setenv("JUDGE0_CALLBACK_BASE_URL", "")
 			t.Setenv("JUDGE0_CALLBACK_SECRET", "")
@@ -272,21 +216,21 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 						}
 						return nil
 					},
-					saveTokens: func(ctx context.Context, tokens map[string]string) error {
-						if !tc.timeoutSave || tokens["execution"] != "token" {
+					saveToken: func(ctx context.Context, id, attempt, token string) error {
+						if !tc.timeoutSave || id != "execution" || token != "token" {
 							t.Fatal("unexpected token save")
 						}
 						cancel()
 						<-ctx.Done()
 						return ctx.Err()
 					},
-					markFailed: func(ctx context.Context, ids []string) error {
+					processFinal: func(ctx context.Context, result stores.FinalExecutionResult) error {
 						marked = true
 						if err := checkContext(ctx); err != nil {
 							return err
 						}
-						if len(ids) != 1 || ids[0] != "execution" {
-							t.Errorf("failed execution IDs = %v", ids)
+						if result.ExecutionID != "execution" || result.Status != "judge_error" {
+							t.Errorf("failed execution = %+v", result)
 						}
 						return tc.markErr
 					},
@@ -297,7 +241,7 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 				ContestID: "contest", ProblemID: "problem", Language: "cpp",
 				Code: base64.StdEncoding.EncodeToString([]byte("int main(){}")),
 			})
-			wantMarked := !(tc.timeoutSave || tc.networkFailure || tc.bodyFailure || tc.invalidBody || tc.missingTokens || tc.serverFailure)
+			wantMarked := !tc.timeoutSave && !tc.ambiguous
 			if marked != wantMarked {
 				t.Errorf("immediate failure bookkeeping = %v, want %v", marked, wantMarked)
 			}

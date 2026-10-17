@@ -203,7 +203,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 
 }
 
-func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, executionID string, payload judge0.CallbackResult) error {
+func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, executionID string, payload judge0.SubmissionStatusResponse) error {
 	status, final := mapJudgeStatus(payload.Status.ID)
 	if !final {
 		if payload.Token == "" {
@@ -211,25 +211,27 @@ func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, execution
 		}
 		return ss.stores.Executions.SaveAttemptToken(ctx, executionID, payload.Attempt, payload.Token)
 	}
-	runtime, err := judgeRuntimeMillis(payload.Time)
+	result, err := finalJudgeResult(executionID, status, payload)
 	if err != nil {
 		return err
+	}
+	return ss.stores.Executions.ProcessFinal(ctx, result)
+}
+
+func finalJudgeResult(executionID, status string, payload judge0.SubmissionStatusResponse) (stores.FinalExecutionResult, error) {
+	runtime, err := judgeRuntimeMillis(payload.Time)
+	if err != nil {
+		return stores.FinalExecutionResult{}, err
 	}
 	memory := int64(0)
 	if payload.Memory != nil {
 		memory = *payload.Memory
 	}
-	return ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{
-		ExecutionID:   executionID,
-		Attempt:       payload.Attempt,
-		Stdout:        payload.Stdout,
-		Token:         payload.Token,
-		Status:        status,
-		Runtime:       runtime,
-		Memory:        memory,
-		CompileOutput: judgeOutputText(payload.CompileOutput),
-		Stderr:        judgeOutputText(payload.Stderr),
-	})
+	return stores.FinalExecutionResult{
+		ExecutionID: executionID, Attempt: payload.Attempt, Token: payload.Token, Status: status,
+		Stdout: payload.Stdout, Runtime: runtime, Memory: memory,
+		CompileOutput: judgeOutputText(payload.CompileOutput), Stderr: judgeOutputText(payload.Stderr),
+	}, nil
 }
 
 const judgeOutputLimit = 4096
@@ -469,18 +471,15 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 			return false, err
 		}
 	}
-	runtime, err := judgeRuntimeMillis(result.Time)
+	finalResult, err := finalJudgeResult(e.ID, status, *result)
 	if err != nil {
 		if e.RecoveryFailures >= maxJudgeRetries {
 			return false, finalize("judge_error")
 		}
 		return false, err
 	}
-	memory := int64(0)
-	if result.Memory != nil {
-		memory = *result.Memory
-	}
-	return true, ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: result.Token, Status: status, Stdout: result.Stdout, Runtime: runtime, Memory: memory, CompileOutput: judgeOutputText(result.CompileOutput), Stderr: judgeOutputText(result.Stderr)})
+	finalResult.Attempt, finalResult.Claim = e.Attempt, e.Claim
+	return true, ss.stores.Executions.ProcessFinal(ctx, finalResult)
 }
 
 func (ss *SubmissionService) dispatchRecovery(ctx context.Context, e models.Execution, job judge0.SubmissionRequest) (bool, error) {
