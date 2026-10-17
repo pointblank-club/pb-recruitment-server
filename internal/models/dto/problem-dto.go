@@ -1,6 +1,10 @@
 package dto
 
-import "app/internal/models"
+import (
+	"app/internal/models"
+	"encoding/json"
+	"errors"
+)
 
 type ProblemOverview struct {
 	ID    string                `json:"id"`
@@ -37,9 +41,26 @@ type CreateProblemRequest struct {
 }
 
 type CreateTestCaseRequest struct {
-	Input          string `json:"input" validate:"required"`
-	ExpectedOutput string `json:"expected_output" validate:"required"`
+	Input          string `json:"input" binding:"required"`
+	ExpectedOutput string `json:"expected_output" binding:"required"`
 	IsSample       bool   `json:"is_sample"`
+}
+
+// Check presence during decoding to allow blank data; binding tags describe required JSON fields in Swagger.
+func (tc *CreateTestCaseRequest) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Input          *string `json:"input"`
+		ExpectedOutput *string `json:"expected_output"`
+		IsSample       bool    `json:"is_sample"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if fields.Input == nil || fields.ExpectedOutput == nil {
+		return errors.New("testcase input and expected_output must be strings; use an empty string for blank data")
+	}
+	*tc = CreateTestCaseRequest{Input: *fields.Input, ExpectedOutput: *fields.ExpectedOutput, IsSample: fields.IsSample}
+	return nil
 }
 
 type TestCaseResponse struct {
