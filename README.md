@@ -23,9 +23,10 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000031`: submission cooldowns
+- The current schema requires migrations through `000032`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
-  Judge0 recovery state (`000030`), and ordered recovery claims (`000031`).
+  Judge0 recovery state (`000030`), ordered recovery claims (`000031`), and a
+  single recovery deadline with the superseded polling index removed (`000032`).
   `make migrate-up` applies only pending migrations; do not force the version or
   roll back a production database.
 
@@ -94,7 +95,7 @@ before the website editor, which now consumes inputs and answers from one respon
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
-all migrations through `000031`, and clean up afterward. They skip when
+all migrations through `000032`, and clean up afterward. They skip when
 `TEST_DATABASE_URL` is unset.
 
 ```bash
@@ -103,7 +104,11 @@ TEST_DATABASE_URL='postgres://user:password@localhost/test_db' go test -race ./i
 
 The opt-in contest load test starts 600 simultaneous submission requests with ten
 testcases each, then checks polling and duplicate callbacks racing three recovery
-workers. It uses real PostgreSQL and simulated S3/Judge0; it does not certify the
+workers. Recovery repeats 30-second sweeps, waiting 15 seconds between unfinished
+sweeps, with a 90-second total drain deadline. A third scenario holds a 100-job
+queue during the initial burst, then completes recovery jobs after 10 ms to exercise capacity deferral.
+Cancellation can require another poll of an unfinished batch. It uses real
+PostgreSQL and simulated S3/Judge0; it does not certify the
 production Judge0 fleet. It uses the configured database pool (defaults: 25 open/idle).
 
 ```bash
@@ -113,7 +118,10 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
 
 ## Judge0 deployment & Environment configuration
 
-- Apply migrations through `000031` to the target database before deploying this build; use PostgreSQL 12+.
+- Stop old backend replicas before applying migrations through `000032`, then start
+  this build; use PostgreSQL 12+. Migration 32 preserves active deadlines but removes
+  `claim_until`, so backends expecting that column cannot run against the new schema.
+  For a rollback to a migration-31 build, stop replicas and revert migration 32 first.
 - Set `SUBMISSION_RATE_LIMIT_SECONDS` (default: 5s) and `LEADERBOARD_CACHE_TTL_SECONDS` (default: 3s, max: 60s) identically across backend replicas.
 - Set `JUDGE0_URL` and `JUDGE0_AUTH_TOKEN`. Keep the Judge0 API inaccessible to contestants.
 - Use localhost or a private network for production Judge0 traffic. SSH forwarding is for local verification.
@@ -124,20 +132,28 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
   callbacks are not required for this local setup.
 - Size the Judge0 queue and worker fleet for participants × testcases × submission waves,
   plus existing backlog. For 600 contestants with ten testcases, one wave is 6,000 jobs;
-  the inspected queue limit of 100 cannot absorb that burst. Measure completion time on staging.
+  the inspected queue limit of 100 cannot absorb that burst directly. Explicit queue-full
+  responses leave scored work pending in PostgreSQL. Recovery pauses its tokenless
+  dispatch lane for one second before retrying within the existing sweep budget;
+  polling continues. Definitive rejections need no ambiguous-dispatch callback grace.
+  Queue-full responses and chunks never sent do not consume the dispatch retry budget.
+  This prevents false verdicts, not queueing delays. Measure completion time on staging.
 - Source must decode to valid UTF-8; malformed source returns HTTP 400 before submission creation.
 - Execution inputs are saved before dispatch. Recovery claims rows with PostgreSQL
   `FOR UPDATE SKIP LOCKED` and makes network requests after releasing the locks.
   Claims last 30 seconds; sweeps run every 15 seconds. Polling and tokenless dispatch
   run independently, so a slow POST cannot block healthy results.
 - Retry budgets are shared across replicas: three dispatch reservations or three consecutive
-  failed result observations before `judge_error`. Crashes and initially unsent chunks can
-  consume dispatch reservations. The initial reservation gives callbacks 30 seconds to arrive;
+  failed result observations before `judge_error`. Crashes can consume dispatch reservations.
+  Definitively unaccepted work refunds only its own reservation and claim increment;
+  earlier ambiguous failures retain their budgets. The initial reservation gives callbacks 30 seconds to arrive;
   subsequent ambiguous attempts wait at least 30 seconds after dispatch, with backoff.
 - Saving the first token resets the observation budget; duplicate deliveries do not.
   Queued/running observations reset failures. Contestant errors finalize immediately.
   Recovery ignores `/workers` and job age; persistently queued jobs need operator investigation.
-- Polling uses `JUDGE0_BATCH_SIZE` (default 20) and applies each batch's results concurrently.
+- Both recovery lanes claim up to `JUDGE0_BATCH_SIZE` jobs per replica (default 20), processing
+  each batch concurrently. Tokenless recovery uses separate bounded POSTs, while
+  known-token observations share one batch GET.
   Keep `DB_MAX_OPEN_CONNS=25` and `DB_MAX_IDLE_CONNS=25`; update older five-idle configurations
   and account for every replica's pool when sizing PostgreSQL's connection limit.
 - Routine polling omits stdout and preserves compiler/stderr diagnostics. Only Wrong Answer
@@ -146,7 +162,7 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
   file limits grow.
 - Callback signatures bind the dispatch attempt. Stale callbacks and replaced claims cannot
   overwrite newer results or award duplicate scores. Replace old replicas together after
-  migrations through `000031`; keep callback secrets identical.
+  migrations through `000032`; keep callback secrets identical.
 - Use stock Judge0 API and workers. A lost response without a timely callback can cause
   duplicate physical execution on retry. The budget bounds this; scoring remains idempotent.
 - Keep callback signatures out of proxy and load-balancer logs as well as application
@@ -168,6 +184,10 @@ need `LIVE_JUDGE0_CALLBACK_BASE_URL` routed from the worker to `127.0.0.1:23582`
 
 ### Run API (website issue #29)
 
+Run is disabled by default: `/submission/run` returns 404 unless `ENABLE_RUN=true`
+is set before backend startup. Keep it disabled until mixed Run/Submit capacity is
+measured on the shared judge. This switch applies at the API, including direct calls.
+
 `POST /submission/run` requires the existing Firebase bearer token and accepts raw UTF-8:
 
 ```json
@@ -176,9 +196,12 @@ need `LIVE_JUDGE0_CALLBACK_BASE_URL` routed from the worker to `127.0.0.1:23582`
 
 Languages match submit. Code and stdin are each limited to 64 KiB; the JSON body to 1 MiB.
 One job runs without expected output or callback: 2s CPU, 5s wall time, 256 MiB memory,
-64 KiB file size, network disabled. PostgreSQL enforces one run per user every five
-seconds, separately from submit (`429`, `Retry-After: 5`). Run creates no contest rows,
-storage objects or ranking changes.
+64 KiB file size, network disabled. PostgreSQL enforces one attempt per user every five
+seconds and at most one Run admission per database clock second across all replicas,
+using the existing cooldown table. After reserving that admission, it rejects Run if
+any scored code submission is pending, including parents without execution snapshots.
+Rejections return `429`, `Retry-After: 5`; explicit Judge0 queue-full responses do too.
+Run creates no contest rows, storage objects or ranking changes.
 
 The backend polls every 200 ms for at most 15 seconds, without `wait=true`. HTTP 200:
 
@@ -191,11 +214,22 @@ field is capped at 4096 UTF-8 bytes. Invalid input returns 400, oversized bodies
 unavailable judge 502, polling timeout 504. A failed response may leave a job running;
 no Run token is retained, so the UI must not automatically retry. Website wiring is #29.
 
-The per-user cooldown is not an aggregate capacity limit: 600 users can nominally
-admit 120 jobs/second, and 600 pending requests can generate 3000 polls/second.
-Validate shared judging capacity before enabling Run for a contest. These job
-limits apply to runtime; compilation uses Judge0's server-wide limits and queued
-or compiling jobs can outlive the backend's waiting deadline.
+The fleet limit also bounds backlog checks to one per database clock second. A Run
+admitted just before a scored submission can still finish; subsequent Runs stop
+until the scored backlog drains. This is bounded optional traffic, not strict Judge0
+scheduling priority. At most 16 admitted requests can overlap their 15-second waits;
+queued or compiling jobs can outlive those waits. Compilation uses Judge0's server-wide
+limits. Measure real mixed workload completion times before enabling Run for a contest.
+
+### Before opening a 600-person contest
+
+Use a stable HTTPS endpoint; the temporary Quick Tunnel allows only 200 in-flight
+requests. Apply the coordinated backend/migration/editor rollout above, update old
+five-idle database pool settings, and keep Run disabled during initial validation.
+Test 600 clients with the actual testcase counts, representative languages, bursty
+submissions and delayed results. Check time to drain, rejected requests, CPU/memory,
+database waits and final scores; then repeat with Run before enabling it. Synthetic
+S3/Judge0 tests and increasing the queue cap alone cannot establish fleet capacity.
 
 ### Local connection to the EC2 judge
 

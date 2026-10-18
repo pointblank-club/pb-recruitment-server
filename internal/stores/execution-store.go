@@ -70,7 +70,7 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 	}
 
 	const q = `
-		INSERT INTO submission_executions (id, submission_id, test_case_index, status, created_at, dispatch_payload, dispatch_attempt, dispatch_count, claim_until)
+		INSERT INTO submission_executions (id, submission_id, test_case_index, status, created_at, dispatch_payload, dispatch_attempt, dispatch_count, next_recovery_at)
 		SELECT id, $2, idx, 'pending', $4, convert_to(NULLIF(payload,'null'),'UTF8'), attempt,
 		CASE WHEN attempt='' THEN 0 ELSE 1 END, now()+interval '30 seconds'
 		FROM unnest($1::uuid[],$3::int[],$5::text[],$6::text[]) AS x(id,idx,payload,attempt)

@@ -22,7 +22,8 @@ func TestBatchRejections(t *testing.T) {
 		body   string
 		want   []error
 	}{
-		{"queue full", 503, `{"error":"queue is full"}`, []error{ErrDispatchRejected, ErrDispatchRejected}},
+		{"queue full", 503, `{"error":"queue is full"}`, []error{ErrQueueFull, ErrQueueFull}},
+		{"proxy unavailable", 503, `{"error":"upstream unavailable"}`, []error{ErrUnavailable, ErrUnavailable}},
 		{"invalid request", 422, `[{"memory_limit":["exceeds maximum"]}]`, []error{ErrDispatchRejected, ErrDispatchRejected}},
 		{"mixed validation", 201, `[{"token":"accepted"},{"memory_limit":["exceeds maximum"]}]`, []error{nil, ErrDispatchRejected}},
 		{"empty entry", 201, `[{"token":"accepted"},{}]`, []error{nil, ErrInvalidResponse}},

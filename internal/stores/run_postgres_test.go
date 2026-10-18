@@ -9,6 +9,7 @@ import (
 	"app/internal/services"
 	"app/internal/stores"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -23,6 +24,27 @@ import (
 
 	"github.com/labstack/echo/v4"
 )
+
+func runRequest(t *testing.T, controller *controllers.SubmissionController, request *http.Request, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	c := echo.New().NewContext(request, w)
+	c.Set(common.AUTH_USER_ID, userID)
+	if err := controller.Run(c); err != nil {
+		t.Error(err)
+	}
+	return w
+}
+
+func assertNoRunWrites(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"submissions", "submission_executions", "test_case_results", "rankings"} {
+		var count int
+		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("Run wrote %s: %d %v", table, count, err)
+		}
+	}
+}
 
 func TestRunPostgresReplicaLimitsAndNoContestWrites(t *testing.T) {
 	db := postgresTestDB(t)
@@ -84,13 +106,7 @@ func TestRunPostgresReplicaLimitsAndNoContestWrites(t *testing.T) {
 			storage := stores.NewStorage(db)
 			client := judge0.NewClient()
 			controller := controllers.NewSubmissionController(services.NewSubmissionService(storage, nil, client), nil, client)
-			recorder := httptest.NewRecorder()
-			c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(string(body))), recorder)
-			c.Set(common.AUTH_USER_ID, "runner")
-			if err := controller.Run(c); err != nil {
-				t.Error(err)
-			}
-			responses[i] = recorder
+			responses[i] = runRequest(t, controller, httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(string(body))), "runner")
 		}(i)
 	}
 	close(start)
@@ -118,12 +134,7 @@ func TestRunPostgresReplicaLimitsAndNoContestWrites(t *testing.T) {
 	if success != 1 || dispatches.Load() != 1 {
 		t.Fatalf("replica throttle: successes=%d dispatches=%d", success, dispatches.Load())
 	}
-	for _, table := range []string{"submissions", "submission_executions", "test_case_results", "rankings"} {
-		var count int
-		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("Run wrote %s: %d %v", table, count, err)
-		}
-	}
+	assertNoRunWrites(t, db)
 	// Running does not consume the contest submission cooldown.
 	if err := stores.NewSubmissionStore(db).CheckSubmissionRateLimit(context.Background(), "runner", 5); err != nil {
 		t.Fatal(err)
@@ -131,12 +142,19 @@ func TestRunPostgresReplicaLimitsAndNoContestWrites(t *testing.T) {
 }
 
 func TestRunAuthenticationAndInvalidInput(t *testing.T) {
-	e := echo.New()
-	routes.AddSubmissionRoutes(e, nil, controllers.NewSubmissionController(nil, nil, nil))
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/submission/run", nil))
-	if w.Code != 401 {
-		t.Fatal("unauthenticated route", w.Code)
+	for _, setting := range []string{"", "false", "true"} {
+		t.Setenv("ENABLE_RUN", setting)
+		e := echo.New()
+		routes.AddSubmissionRoutes(e, nil, controllers.NewSubmissionController(nil, nil, nil))
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/submission/run", nil))
+		want := http.StatusNotFound
+		if setting == "true" {
+			want = http.StatusUnauthorized
+		}
+		if w.Code != want {
+			t.Fatalf("ENABLE_RUN=%q: status=%d want=%d", setting, w.Code, want)
+		}
 	}
 	controller := controllers.NewSubmissionController(services.NewSubmissionService(nil, nil, nil), nil, nil)
 	for _, tc := range []struct {
@@ -151,93 +169,153 @@ func TestRunAuthenticationAndInvalidInput(t *testing.T) {
 		{strings.Repeat(" ", 1<<20) + `{}`, 413},
 		{`{"language":"python","code":"pass"}` + strings.Repeat(" ", 1<<20), 413},
 	} {
-		w := httptest.NewRecorder()
-		c := e.NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(tc.body)), w)
-		c.Set(common.AUTH_USER_ID, "runner")
-		if err := controller.Run(c); err != nil || w.Code != tc.want {
-			t.Fatalf("input length=%d HTTP %d want %d err=%v", len(tc.body), w.Code, tc.want, err)
+		w := runRequest(t, controller, httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(tc.body)), "runner")
+		if w.Code != tc.want {
+			t.Fatalf("input length=%d HTTP %d want %d", len(tc.body), w.Code, tc.want)
 		}
 	}
 }
 
-func TestRunPollingDeadlineAndCompilationPostgres(t *testing.T) {
-	for _, terminal := range []bool{false, true} {
-		t.Run(map[bool]string{false: "deadline", true: "compilation"}[terminal], func(t *testing.T) {
-			db := postgresTestDB(t)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost {
-					w.WriteHeader(201)
-					w.Write([]byte(`[{"token":"job"}]`))
-					return
-				}
-				if terminal {
-					w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":6},"stdout":null,"stderr":null,"compile_output":"ZXJyb3I="}]}`))
-				} else {
-					w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":2}}]}`))
-				}
-			}))
-			defer server.Close()
-			t.Setenv("JUDGE0_URL", server.URL)
-			client := judge0.NewClient()
-			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, client), nil, client)
-			w := httptest.NewRecorder()
-			r := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"print(1)"}`))
-			ctx, cancel := context.WithTimeout(r.Context(), 80*time.Millisecond)
-			defer cancel()
-			r = r.WithContext(ctx)
-			c := echo.New().NewContext(r, w)
-			c.Set(common.AUTH_USER_ID, "runner")
-			start := time.Now()
-			if err := controller.Run(c); err != nil {
-				t.Fatal(err)
+func TestRunCapacityAcrossUsersAndBacklogPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	var dispatches atomic.Int32
+	started, finish := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if dispatches.Add(1) == 1 {
+				close(started)
 			}
-			if terminal {
-				var result dto.RunResponse
-				json.Unmarshal(w.Body.Bytes(), &result)
-				if w.Code != 200 || result.Status != "failed_to_process" || result.CompileOutput != "error" {
-					t.Fatal(w.Code, result)
-				}
-			} else if w.Code != 504 || time.Since(start) > time.Second {
-				t.Fatal(w.Code, w.Body.String(), time.Since(start))
-			}
-		})
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`[{"token":"run-job"}]`))
+			return
+		}
+		select {
+		case <-finish:
+		case <-r.Context().Done():
+			return
+		}
+		w.Write([]byte(`{"submissions":[{"token":"run-job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":null}]}`))
+	}))
+	defer func() {
+		release.Do(func() { close(finish) })
+		server.Close()
+	}()
+	t.Setenv("JUDGE0_URL", server.URL)
+	request := func(user string) *httptest.ResponseRecorder {
+		controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
+		w := httptest.NewRecorder()
+		c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), w)
+		c.Set(common.AUTH_USER_ID, user)
+		if err := controller.Run(c); err != nil {
+			t.Error(err)
+		}
+		return w
+	}
+	setCapacity := func(value string) {
+		t.Helper()
+		if _, err := db.Exec(`UPDATE submission_rate_limits SET last_submission_at=` + value + ` WHERE user_id='run:capacity'`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- request("alice") }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Run did not dispatch")
+	}
+	// Freeze the cooldown so a slow race-enabled test cannot cross its second boundary.
+	setCapacity("floor(extract(epoch from clock_timestamp()))::bigint+60")
+	if w := request("bob"); w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "5" {
+		t.Fatal("second replica bypassed fleet limit", w.Code, w.Body.String())
+	}
+	_, _, _, sub, _ := executionFixture(t, db, 0)
+	setCapacity("0")
+	if w := request("carol"); w.Code != http.StatusTooManyRequests || dispatches.Load() != 1 {
+		t.Fatal("Run bypassed pending parent without executions", w.Code, dispatches.Load())
+	}
+	if _, err := db.Exec(`UPDATE submissions SET status='accepted' WHERE id=$1`, sub); err != nil {
+		t.Fatal(err)
+	}
+	release.Do(func() { close(finish) })
+	if w := <-first; w.Code != http.StatusOK {
+		t.Fatal("admitted Run lost its response", w.Code, w.Body.String())
+	}
+	setCapacity("0")
+	if w := request("dave"); w.Code != http.StatusOK || dispatches.Load() != 2 {
+		t.Fatal("Run did not resume after backlog drained", w.Code, dispatches.Load())
+	}
+	setCapacity("0")
+	if w := request("dave"); w.Code != http.StatusTooManyRequests || dispatches.Load() != 2 {
+		t.Fatal("per-user cooldown bypassed", w.Code, dispatches.Load())
 	}
 }
 
-func TestRunRejectsMalformedOutputPostgres(t *testing.T) {
-	for _, field := range []string{"stdout", "stderr", "compile_output", "missing stdout"} {
-		t.Run(field, func(t *testing.T) {
-			db := postgresTestDB(t)
+func TestRunQueueFullPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"queue is full"}`))
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
+	w := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), w)
+	c.Set(common.AUTH_USER_ID, "runner")
+	if err := controller.Run(c); err != nil || w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "5" {
+		t.Fatal("explicit rejection must be retryable", w.Code, err)
+	}
+}
+
+func TestRunResultsPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	for _, tc := range []struct {
+		name, result string
+		want         int
+	}{
+		{"deadline", `{"token":"job","status":{"id":2}}`, 504},
+		{"compilation", `{"token":"job","status":{"id":6},"stdout":null,"stderr":null,"compile_output":"ZXJyb3I="}`, 200},
+		{"malformed stdout", `{"token":"job","status":{"id":3},"stdout":"%%%invalid","stderr":null,"compile_output":null}`, 502},
+		{"malformed stderr", `{"token":"job","status":{"id":3},"stdout":null,"stderr":"%%%invalid","compile_output":null}`, 502},
+		{"malformed compile output", `{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":"%%%invalid"}`, 502},
+		{"missing stdout", `{"token":"job","status":{"id":3},"stderr":null,"compile_output":null}`, 502},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := db.Exec(`DELETE FROM submission_rate_limits WHERE user_id='run:capacity'`); err != nil {
+				t.Fatal(err)
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
 					w.WriteHeader(http.StatusCreated)
 					w.Write([]byte(`[{"token":"job"}]`))
 					return
 				}
-				result := map[string]any{"token": "job", "status": map[string]int{"id": 3}, "stdout": nil, "stderr": nil, "compile_output": nil}
-				if field == "missing stdout" {
-					delete(result, "stdout")
-				} else {
-					result[field] = "%%%invalid"
-				}
-				json.NewEncoder(w).Encode(map[string]any{"submissions": []any{result}})
+				w.Write([]byte(`{"submissions":[` + tc.result + `]}`))
 			}))
 			defer server.Close()
 			t.Setenv("JUDGE0_URL", server.URL)
 			client := judge0.NewClient()
 			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, client), nil, client)
-			w := httptest.NewRecorder()
-			c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), w)
-			c.Set(common.AUTH_USER_ID, "runner")
-			if err := controller.Run(c); err != nil || w.Code != http.StatusBadGateway {
-				t.Fatalf("malformed %s: HTTP %d, %s, %v", field, w.Code, w.Body.String(), err)
+			r := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`))
+			if tc.want == http.StatusGatewayTimeout {
+				ctx, cancel := context.WithTimeout(r.Context(), 80*time.Millisecond)
+				defer cancel()
+				r = r.WithContext(ctx)
 			}
-			for _, table := range []string{"submissions", "submission_executions", "test_case_results", "rankings"} {
-				var count int
-				if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("Run wrote %s: %d %v", table, count, err)
+			start := time.Now()
+			w := runRequest(t, controller, r, tc.name)
+			if w.Code != tc.want || tc.want == http.StatusGatewayTimeout && time.Since(start) > time.Second {
+				t.Fatal(w.Code, w.Body.String(), time.Since(start))
+			}
+			if w.Code == http.StatusOK {
+				var result dto.RunResponse
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Status != "failed_to_process" || result.CompileOutput != "error" {
+					t.Fatal(result, err)
 				}
 			}
+			assertNoRunWrites(t, db)
 		})
 	}
 }

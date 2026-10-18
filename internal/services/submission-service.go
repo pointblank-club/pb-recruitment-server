@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -193,6 +194,10 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 			if err := ss.stores.Executions.SaveAttemptToken(dbCtx, exec.ID, exec.Attempt, result.Token); err != nil {
 				log.Errorf("save Judge0 token for execution %s: %v", exec.ID, err)
 			}
+		} else if errors.Is(result.Error, judge0.ErrQueueFull) || errors.Is(result.Error, judge0.ErrDispatchNotSent) {
+			if err := ss.stores.Executions.DeferDispatch(dbCtx, exec); err != nil {
+				log.Errorf("defer Judge0 dispatch for execution %s: %v", exec.ID, err)
+			}
 		} else if errors.Is(result.Error, judge0.ErrDispatchRejected) {
 			if err := ss.stores.Executions.ProcessFinal(dbCtx, stores.FinalExecutionResult{ExecutionID: exec.ID, Attempt: exec.Attempt, Status: "judge_error"}); err != nil {
 				return "", err
@@ -359,10 +364,7 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			limit := 1
-			if withToken {
-				limit = ss.judge0.BatchSize()
-			}
+			limit := ss.judge0.BatchSize()
 			for ctx.Err() == nil {
 				items, err := ss.stores.Executions.ClaimRecovery(ctx, limit, withToken)
 				if err != nil {
@@ -372,14 +374,20 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 				if len(items) == 0 {
 					return
 				}
-				ss.recoverBatch(ctx, items)
+				if ss.recoverBatch(ctx, items) {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(time.Second):
+					}
+				}
 			}
 		}()
 	}
 	workers.Wait()
 }
 
-func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Execution) {
+func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Execution) bool {
 	// Leave five seconds for releases before the thirty-second claims expire.
 	workCtx, cancelWork := context.WithTimeout(ctx, 20*time.Second)
 	defer cancelWork()
@@ -400,6 +408,7 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 		healthy[i] = fetchErr == nil && result != nil && result.Status.ID < 13
 	}
 	var batch sync.WaitGroup
+	var queueFull atomic.Bool
 	for i, e := range items {
 		batch.Add(1)
 		go func(i int, e models.Execution) {
@@ -413,6 +422,9 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 			}
 			var err error
 			healthy[i], err = ss.recoverExecution(workCtx, e, result, fetchErr)
+			if errors.Is(err, judge0.ErrQueueFull) {
+				queueFull.Store(true)
+			}
 			if err != nil {
 				log.Errorf("recover execution %s: %v", e.ID, err)
 			}
@@ -424,6 +436,7 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 	if err := ss.stores.Executions.ReleaseRecovery(dbCtx, items, healthy); err != nil {
 		log.Errorf("release recovery: %v", err)
 	}
+	return queueFull.Load()
 }
 
 func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Execution, result *judge0.SubmissionStatusResponse, fetchErr error) (bool, error) {
@@ -492,6 +505,9 @@ func (ss *SubmissionService) dispatchRecovery(ctx context.Context, e models.Exec
 	defer cancelDB()
 	if len(results) == 1 && results[0].Token != "" {
 		return true, ss.stores.Executions.SaveAttemptToken(dbCtx, e.ID, e.Attempt, results[0].Token)
+	}
+	if errors.Is(err, judge0.ErrQueueFull) {
+		return false, errors.Join(err, ss.stores.Executions.DeferDispatch(dbCtx, e))
 	}
 	if len(results) == 1 && errors.Is(results[0].Error, judge0.ErrDispatchRejected) {
 		return false, ss.stores.Executions.ProcessFinal(dbCtx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: e.Judge0Token, Status: "judge_error"})

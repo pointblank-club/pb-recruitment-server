@@ -1776,7 +1776,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
+                "description": "Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1822,6 +1822,9 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "404": {
+                        "description": "Run is disabled"
                     },
                     "413": {
                         "description": "Request Entity Too Large",

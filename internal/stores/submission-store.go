@@ -465,3 +465,22 @@ func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID s
 
 	return nil
 }
+
+func (s *SubmissionStore) CheckRunCapacity(ctx context.Context) error {
+	if s == nil || s.db == nil {
+		return errors.New("run capacity database unavailable")
+	}
+	// Reserve before checking backlog so a Run burst checks it at most once per second.
+	// shortcut: admitted Runs may finish ahead of new submits; measure judge capacity before raising this limit.
+	if err := s.CheckSubmissionRateLimit(ctx, "run:capacity", 1); err != nil {
+		return err
+	}
+	var pending bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending')`).Scan(&pending); err != nil {
+		return fmt.Errorf("check run capacity: %w", err)
+	}
+	if pending {
+		return common.ErrRateLimitExceeded
+	}
+	return nil
+}

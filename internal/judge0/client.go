@@ -256,9 +256,10 @@ func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]Sub
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
 		failure := ErrUnavailable
-		// A proxy's 503 is ambiguous; only Judge0's explicit queue rejection is definitive.
-		if (resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout) ||
-			(resp.StatusCode == http.StatusServiceUnavailable && bytes.Equal(bytes.TrimSpace(body), []byte(`{"error":"queue is full"}`))) {
+		// Proxy 503s remain ambiguous.
+		if resp.StatusCode == http.StatusServiceUnavailable && bytes.Equal(bytes.TrimSpace(body), []byte(`{"error":"queue is full"}`)) {
+			failure = ErrQueueFull
+		} else if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusRequestTimeout {
 			failure = ErrDispatchRejected
 		}
 		return nil, fmt.Errorf("%w: status %d: %s", failure, resp.StatusCode, string(body))

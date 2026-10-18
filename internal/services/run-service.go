@@ -1,6 +1,7 @@
 package services
 
 import (
+	"app/internal/common"
 	"app/internal/judge0"
 	"app/internal/models/dto"
 	"context"
@@ -33,13 +34,19 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	if ss.stores == nil || ss.stores.Submissions == nil {
 		return nil, judge0.ErrUnavailable
 	}
-	if err := ss.stores.Submissions.CheckSubmissionRateLimit(ctx, "run:"+userID, 5); err != nil {
+	if err := ss.stores.Submissions.CheckSubmissionRateLimit(ctx, "run:user:"+userID, 5); err != nil {
+		return nil, err
+	}
+	if err := ss.stores.Submissions.CheckRunCapacity(ctx); err != nil {
 		return nil, err
 	}
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{{
 		SourceCode: req.Code, LanguageID: language, Stdin: req.Stdin, CPUTimeLimit: 2, WallTimeLimit: 5,
 		MemoryLimit: 256 * 1024, MaxFileSize: 64, CompilerOptions: judge0.CompilerOptions(language),
 	}})
+	if errors.Is(err, judge0.ErrQueueFull) {
+		return nil, common.ErrRateLimitExceeded
+	}
 	if err != nil {
 		return nil, err
 	}

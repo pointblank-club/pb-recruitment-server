@@ -25,7 +25,7 @@ import (
 
 func readyExecutions(t *testing.T, db *sql.DB, sub string) {
 	t.Helper()
-	if _, err := db.Exec(`UPDATE submission_executions SET claim_until='-infinity',next_recovery_at='-infinity' WHERE submission_id=$1`, sub); err != nil {
+	if _, err := db.Exec(`UPDATE submission_executions SET next_recovery_at='-infinity' WHERE submission_id=$1`, sub); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -198,9 +198,9 @@ func TestRecoveryPollingProgressDuringBlockedDispatchPostgres(t *testing.T) {
 	}
 	cancel()
 	<-done
-	var active bool
-	if err := db.QueryRow(`SELECT claim_until>now() FROM submission_executions WHERE id=$1`, items[40].ID).Scan(&active); err != nil || active {
-		t.Fatalf("shutdown left dispatch lease active=%v error=%v", active, err)
+	var delayed bool
+	if err := db.QueryRow(`SELECT next_recovery_at>now() FROM submission_executions WHERE id=$1`, items[40].ID).Scan(&delayed); err != nil || !delayed {
+		t.Fatalf("shutdown lost dispatch backoff: delayed=%v error=%v", delayed, err)
 	}
 }
 
@@ -582,6 +582,7 @@ func TestRecoveryResumesAfterOutagePostgres(t *testing.T) {
 }
 
 func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
+	t.Setenv("JUDGE0_BATCH_SIZE", "2")
 	db := postgresTestDB(t)
 	_, _, _, sub, _ := executionFixture(t, db, 2)
 	if _, err := db.Exec(`UPDATE submissions SET language='python' WHERE id=$1`, sub); err != nil {
@@ -609,8 +610,8 @@ func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var reserved int
-			if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND judge0_token IS NULL AND recovery_claim<>''`, sub).Scan(&reserved); err != nil || reserved != 1 {
-				t.Error("unsent jobs claimed ahead of their dispatch", reserved, err)
+			if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND judge0_token IS NULL AND recovery_claim<>''`, sub).Scan(&reserved); err != nil || reserved < 1 || reserved > 2 {
+				t.Error("recovery claims exceeded the batch bound", reserved, err)
 			}
 			var payload struct {
 				Submissions []judge0.SubmissionRequest `json:"submissions"`
@@ -719,7 +720,7 @@ func TestBulkRecoveryReleaseFencingPostgres(t *testing.T) {
 		t.Fatal(claims, err)
 	}
 	// Replace one claim while the old batch is still applying its observations.
-	if _, err := db.Exec(`UPDATE submission_executions SET claim_until='-infinity',next_recovery_at='-infinity' WHERE id=$1`, claims[0].ID); err != nil {
+	if _, err := db.Exec(`UPDATE submission_executions SET next_recovery_at='-infinity' WHERE id=$1`, claims[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	replacement, err := store.ClaimRecovery(ctx, 1, true)
@@ -732,23 +733,22 @@ func TestBulkRecoveryReleaseFencingPostgres(t *testing.T) {
 	}
 	for i, e := range claims {
 		var failures int
-		var active bool
 		var claim string
 		var delay float64
-		if err := db.QueryRow(`SELECT recovery_failures,claim_until>now(),recovery_claim,extract(epoch FROM next_recovery_at-now()) FROM submission_executions WHERE id=$1`, e.ID).Scan(&failures, &active, &claim, &delay); err != nil {
+		if err := db.QueryRow(`SELECT recovery_failures,recovery_claim,extract(epoch FROM next_recovery_at-now()) FROM submission_executions WHERE id=$1`, e.ID).Scan(&failures, &claim, &delay); err != nil {
 			t.Fatal(err)
 		}
 		if i == 0 {
-			if failures != 4 || !active || claim != replacement[0].Claim {
-				t.Fatal("stale bulk release changed replacement", failures, active, claim)
+			if failures != 4 || delay < 28 || delay > 30 || claim != replacement[0].Claim {
+				t.Fatal("stale bulk release changed replacement", failures, delay, claim)
 			}
 		} else {
 			wantFailures, wantDelay := 3, 45.0
 			if outcomes[i] {
 				wantFailures, wantDelay = 0, 15
 			}
-			if failures != wantFailures || active || delay < wantDelay-2 || delay > wantDelay {
-				t.Fatal("outcome assigned to wrong execution", i, failures, active, delay)
+			if failures != wantFailures || delay < wantDelay-2 || delay > wantDelay {
+				t.Fatal("outcome assigned to wrong execution", i, failures, delay)
 			}
 		}
 	}

@@ -13,12 +13,12 @@ import (
 func (s *ExecutionStore) ClaimRecovery(ctx context.Context, limit int, withToken bool) ([]models.Execution, error) {
 	rows, err := s.db.QueryContext(ctx, `WITH due AS (
 		SELECT e.id FROM submission_executions e
-		WHERE e.status='pending' AND e.next_recovery_at<=now() AND e.claim_until<=now()
+		WHERE e.status='pending' AND e.next_recovery_at<=now()
 		AND (e.judge0_token IS NOT NULL)=$2
 		AND EXISTS(SELECT 1 FROM submissions s WHERE s.id=e.submission_id AND s.status='pending')
 		ORDER BY e.next_recovery_at,e.id LIMIT $1 FOR UPDATE SKIP LOCKED
 	) UPDATE submission_executions e SET recovery_claim=gen_random_uuid()::text,
-		claim_until=now()+interval '30 seconds', next_recovery_at=now()+interval '30 seconds',
+		next_recovery_at=now()+interval '30 seconds',
 		recovery_failures=e.recovery_failures+1,
 		dispatch_attempt=CASE WHEN e.judge0_token IS NULL THEN gen_random_uuid()::text ELSE e.dispatch_attempt END,
 		dispatch_count=e.dispatch_count+CASE WHEN e.judge0_token IS NULL THEN 1 ELSE 0 END
@@ -49,6 +49,17 @@ func (s *ExecutionStore) SaveAttemptToken(ctx context.Context, id, attempt, toke
 	return err
 }
 
+// Invalidate the refused attempt so duplicate releases cannot refund it twice.
+func (s *ExecutionStore) DeferDispatch(ctx context.Context, e models.Execution) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE submission_executions
+		SET dispatch_count=dispatch_count-1,dispatch_attempt=gen_random_uuid()::text,recovery_claim='',
+		recovery_failures=GREATEST(0,recovery_failures-CASE WHEN $3='' THEN 0 ELSE 1 END),
+		next_recovery_at=now()+interval '1 second'
+		WHERE id=$1 AND dispatch_attempt=$2 AND ($3='' OR recovery_claim=$3)
+		AND status='pending' AND judge0_token IS NULL AND dispatch_count>0`, e.ID, e.Attempt, e.Claim)
+	return err
+}
+
 func (s *ExecutionStore) SaveRecoveryPayload(ctx context.Context, e models.Execution, job judge0.SubmissionRequest) error {
 	data, err := json.Marshal(job)
 	if err != nil {
@@ -75,8 +86,7 @@ func (s *ExecutionStore) ReleaseRecovery(ctx context.Context, items []models.Exe
 		JOIN submission_executions e ON e.id=outcome.id
 		WHERE e.recovery_claim=outcome.claim AND e.status='pending'
 		ORDER BY e.id FOR UPDATE OF e
-	) UPDATE submission_executions e SET claim_until='-infinity',
-		next_recovery_at=now()+interval '15 seconds' * LEAST(8, CASE WHEN judge0_token IS NULL THEN GREATEST(2,recovery_failures) WHEN current.healthy THEN 1 ELSE recovery_failures END),
+	) UPDATE submission_executions e SET next_recovery_at=now()+interval '15 seconds' * LEAST(8, CASE WHEN judge0_token IS NULL THEN GREATEST(2,recovery_failures) WHEN current.healthy THEN 1 ELSE recovery_failures END),
 		recovery_failures=CASE WHEN current.healthy THEN 0 ELSE recovery_failures END
 		FROM current WHERE e.id=current.id`, pq.Array(ids), pq.Array(claims), pq.Array(healthy))
 	return err

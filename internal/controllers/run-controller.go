@@ -17,7 +17,7 @@ import (
 
 // Run godoc
 // @Summary Run code with custom stdin
-// @Description Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.
+// @Description Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.
 // @Tags Submissions
 // @Accept json
 // @Produce json
@@ -26,6 +26,7 @@ import (
 // @Success 200 {object} dto.RunResponse
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
+// @Failure 404 "Run is disabled"
 // @Failure 413 {object} map[string]string
 // @Failure 429 {object} map[string]string
 // @Failure 502 {object} map[string]string
@@ -63,7 +64,7 @@ func (sc *SubmissionController) Run(c echo.Context) error {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		case errors.Is(err, common.ErrRateLimitExceeded):
 			c.Response().Header().Set("Retry-After", "5")
-			return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "wait five seconds between runs"})
+			return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "run capacity busy; wait five seconds before trying again"})
 		case errors.Is(err, context.DeadlineExceeded), c.Request().Context().Err() != nil:
 			return c.JSON(http.StatusGatewayTimeout, map[string]string{"error": "run timed out; execution may still finish"})
 		default:

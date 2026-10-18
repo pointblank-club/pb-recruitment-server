@@ -3,6 +3,7 @@ package judge0
 import "errors"
 
 var (
+	ErrQueueFull           = errors.New("Judge0 queue is full")
 	ErrDispatchRejected    = errors.New("Judge0 explicitly rejected dispatch")
 	ErrDispatchNotSent     = errors.New("Judge0 dispatch was not attempted")
 	ErrUnavailable         = errors.New("judge0 unavailable")
