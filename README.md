@@ -136,13 +136,15 @@ RUN_JUDGE0_LOAD_TEST=1 TEST_DATABASE_URL='postgres://user:password@localhost/tes
   responses leave scored work pending in PostgreSQL. Recovery pauses its tokenless
   dispatch lane for one second before retrying within the existing sweep budget;
   polling continues. Definitive rejections need no ambiguous-dispatch callback grace.
-  Queue-full responses and chunks never sent do not consume the dispatch retry budget.
+  Queue-full responses, failed connections (including DNS failures), and chunks never
+  sent do not consume the dispatch retry budget. They stay pending through a long outage.
   This prevents false verdicts, not queueing delays. Measure completion time on staging.
 - Source must decode to valid UTF-8; malformed source returns HTTP 400 before submission creation.
 - Execution inputs are saved before dispatch. Recovery claims rows with PostgreSQL
   `FOR UPDATE SKIP LOCKED` and makes network requests after releasing the locks.
-  Claims last 30 seconds; sweeps run every 15 seconds. Polling and tokenless dispatch
-  run independently, so a slow POST cannot block healthy results.
+  Claims last 30 seconds; sweeps use a continuing 15-second ticker and a 30-second
+  work budget. A tick that falls during a sweep does not add a 15-second sleep afterward.
+  Polling and tokenless dispatch run independently, so a slow POST cannot block healthy results.
 - Retry budgets are shared across replicas: three dispatch reservations or three consecutive
   failed result observations before `judge_error`. Crashes can consume dispatch reservations.
   Definitively unaccepted work refunds only its own reservation and claim increment;
@@ -203,7 +205,21 @@ any scored code submission is pending, including parents without execution snaps
 Rejections return `429`, `Retry-After: 5`; explicit Judge0 queue-full responses do too.
 Run creates no contest rows, storage objects or ranking changes.
 
-The backend polls every 200 ms for at most 15 seconds, without `wait=true`. HTTP 200:
+The backlog guard includes every contest because recovery can still dispatch old
+pending work. Before enabling Run, inspect unresolved submissions:
+
+```sql
+SELECT contest_id, count(*) AS pending_code
+FROM submissions WHERE type='code' AND status='pending'
+GROUP BY contest_id;
+```
+
+Investigate old rows through the recovery checks above; ending or force-consolidating
+a contest does not cancel its Judge0 work. Do not ignore pending rows to enable Run.
+
+The backend polls every 200 ms for at most 15 seconds, without `wait=true`. Failed
+status reads retry within that same deadline; malformed responses still fail immediately.
+Run never resubmits the job. HTTP 200:
 
 ```json
 {"status":"accepted","stdout":"hello\n","stderr":"","compile_output":"","runtime":125,"memory":2048}

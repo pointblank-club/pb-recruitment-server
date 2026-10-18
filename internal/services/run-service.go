@@ -57,6 +57,14 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	defer ticker.Stop()
 	for {
 		statuses, err := ss.judge0.GetSubmissionsWithOutput(ctx, []string{results[0].Token})
+		for errors.Is(err, judge0.ErrUnavailable) {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-ticker.C:
+				statuses, err = ss.judge0.GetSubmissionsWithOutput(ctx, []string{results[0].Token})
+			}
+		}
 		if err != nil {
 			return nil, err
 		}

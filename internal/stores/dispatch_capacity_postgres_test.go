@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,9 +19,8 @@ import (
 	"time"
 )
 
-func TestQueueFullPreservesScoredWorkPostgres(t *testing.T) {
-	db := postgresTestDB(t)
-	user, contest, problem, _, _ := executionFixture(t, db, 0)
+func dispatchObjects(t *testing.T) *s3.S3 {
+	t.Helper()
 	objects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut {
 			return
@@ -31,10 +31,16 @@ func TestQueueFullPreservesScoredWorkPostgres(t *testing.T) {
 			w.Write([]byte(`["hello","hello","hello"]`))
 		}
 	}))
-	defer objects.Close()
+	t.Cleanup(objects.Close)
 	for key, value := range map[string]string{"AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test", "AWS_SESSION_TOKEN": "", "AWS_REGION": "us-east-1", "AWS_SHARED_CREDENTIALS_FILE": "/dev/null", "AWS_CONFIG_FILE": "/dev/null", "AWS_EC2_METADATA_DISABLED": "true", "S3_SUBMISSIONS_BUCKET": "test", "AWS_ENDPOINT_URL_S3": objects.URL} {
 		t.Setenv(key, value)
 	}
+	return s3.NewS3Client()
+}
+
+func TestQueueFullPreservesScoredWorkPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, problem, _, _ := executionFixture(t, db, 0)
 	var posts atomic.Int32
 	var full atomic.Bool
 	full.Store(true)
@@ -62,7 +68,7 @@ func TestQueueFullPreservesScoredWorkPostgres(t *testing.T) {
 	t.Setenv("JUDGE0_CALLBACK_BASE_URL", "")
 	t.Setenv("JUDGE0_CALLBACK_SECRET", "")
 	storage := stores.NewStorage(db)
-	service := services.NewSubmissionService(storage, s3.NewS3Client(), judge0.NewClient())
+	service := services.NewSubmissionService(storage, dispatchObjects(t), judge0.NewClient())
 	ctx := context.Background()
 	sub, err := service.CreateSubmission(ctx, user, models.Code, &dto.SubmitSubmissionRequest{ContestID: contest, ProblemID: problem, Language: "python", Code: "print('hello')\n"})
 	if err != nil {
@@ -102,6 +108,67 @@ func TestQueueFullPreservesScoredWorkPostgres(t *testing.T) {
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM test_case_results WHERE submission_id=$1`, sub).Scan(&results); err != nil || results != 3 {
 		t.Fatal(results, err)
+	}
+}
+
+func TestDialFailurePreservesScoredWorkPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, problem, _, _ := executionFixture(t, db, 0)
+	var posts atomic.Int32
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprintf(w, `[{"token":"job-%d"}]`, posts.Add(1))
+			return
+		}
+		results := make([]judge0.SubmissionStatusResponse, 0)
+		for _, token := range strings.Split(r.URL.Query().Get("tokens"), ",") {
+			results = append(results, judge0.SubmissionStatusResponse{Token: token, Status: judge0.StatusResponse{ID: 3}, Time: json.RawMessage(`"0.001"`)})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"submissions": results})
+	})
+	judge := httptest.NewServer(handler)
+	endpoint := judge.URL
+	judge.Close()
+	t.Setenv("JUDGE0_URL", endpoint)
+	t.Setenv("JUDGE0_BATCH_SIZE", "1")
+	service := services.NewSubmissionService(stores.NewStorage(db), dispatchObjects(t), judge0.NewClient())
+	ctx := context.Background()
+	sub, err := service.CreateSubmission(ctx, user, models.Code, &dto.SubmitSubmissionRequest{ContestID: contest, ProblemID: problem, Language: "python", Code: "print('hello')\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 4 {
+		readyExecutions(t, db, sub)
+		sweepCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		service.RecoverJudge0(sweepCtx)
+		cancel()
+		assertSubmission(t, db, sub, "pending", 0, 0)
+		var charged int
+		if err := db.QueryRow(`SELECT count(*) FROM submission_executions WHERE submission_id=$1 AND (status<>'pending' OR dispatch_count<>0 OR recovery_failures<>0)`, sub).Scan(&charged); err != nil || charged != 0 {
+			t.Fatal("dial failure consumed retries or finalized work", charged, err)
+		}
+	}
+	listener, err := net.Listen("tcp", strings.TrimPrefix(endpoint, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	judge = httptest.NewUnstartedServer(handler)
+	judge.Listener.Close()
+	judge.Listener = listener
+	judge.Start()
+	defer judge.Close()
+	for range 3 {
+		readyExecutions(t, db, sub)
+		service.RecoverJudge0(ctx)
+	}
+	assertSubmission(t, db, sub, "accepted", 3, 0)
+	var score, results int
+	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
+		t.Fatal(score, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM test_case_results WHERE submission_id=$1`, sub).Scan(&results); err != nil || results != 3 || posts.Load() != 3 {
+		t.Fatal(results, posts.Load(), err)
 	}
 }
 

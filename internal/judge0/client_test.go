@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -57,19 +58,32 @@ func TestBatchRejections(t *testing.T) {
 	}
 }
 
-func TestUnsentDispatchIsRejected(t *testing.T) {
+func TestUnsentDispatchClassification(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	server.Close()
-	for name, endpoint := range map[string]string{"unset URL": "", "connection refused": server.URL} {
-		t.Run(name, func(t *testing.T) {
-			t.Setenv("JUDGE0_URL", endpoint)
+	for _, tc := range []struct {
+		name, endpoint string
+		want           error
+	}{
+		{"unset URL", "", ErrDispatchRejected},
+		{"connection refused", server.URL, ErrDispatchNotSent},
+		{"DNS failure", "http://judge0.invalid", ErrDispatchNotSent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("JUDGE0_URL", tc.endpoint)
 			t.Setenv("JUDGE0_BATCH_SIZE", "20")
-			results, err := NewClient().CreateBatch(context.Background(), make([]SubmissionRequest, 2))
-			if !errors.Is(err, ErrDispatchRejected) || len(results) != 2 {
+			client := NewClient()
+			if tc.name == "DNS failure" {
+				client.httpClient.Transport = &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+					return nil, &net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "judge0.invalid", IsNotFound: true}}
+				}}
+			}
+			results, err := client.CreateBatch(context.Background(), make([]SubmissionRequest, 2))
+			if !errors.Is(err, tc.want) || len(results) != 2 {
 				t.Fatal(results, err)
 			}
 			for _, result := range results {
-				if result.Token != "" || !errors.Is(result.Error, ErrDispatchRejected) {
+				if result.Token != "" || !errors.Is(result.Error, tc.want) {
 					t.Fatal(result)
 				}
 			}

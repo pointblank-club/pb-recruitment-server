@@ -203,6 +203,10 @@ func (c *Client) getSubmissions(ctx context.Context, tokens []string, fields str
 	}
 	// Keep the response bound proportional to the requested batch.
 	if err = json.NewDecoder(io.LimitReader(resp.Body, int64(len(tokens))*maxResultBytesPerSubmission)).Decode(&out); err != nil {
+		var networkErr net.Error
+		if errors.As(err, &networkErr) || errors.Is(err, context.Canceled) {
+			return nil, errors.Join(ErrUnavailable, err)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
 	if len(out.Submissions) != len(tokens) {
@@ -247,7 +251,7 @@ func (c *Client) postBatch(ctx context.Context, jobs []SubmissionRequest) ([]Sub
 	if err != nil {
 		var dialErr *net.OpError
 		if errors.As(err, &dialErr) && dialErr.Op == "dial" {
-			return nil, fmt.Errorf("%w: %v", ErrDispatchRejected, err)
+			return nil, fmt.Errorf("%w: %w", ErrDispatchNotSent, err)
 		}
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}

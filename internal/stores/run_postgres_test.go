@@ -393,3 +393,57 @@ func TestRunResultsPostgres(t *testing.T) {
 		})
 	}
 }
+
+func TestRunRetriesPollingWithoutRedispatchPostgres(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		persistent, bodyTimeout bool
+	}{
+		{name: "transient"},
+		{name: "persistent", persistent: true},
+		{name: "body timeout", bodyTimeout: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := postgresTestDB(t)
+			var posts, polls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					posts.Add(1)
+					w.WriteHeader(http.StatusCreated)
+					w.Write([]byte(`[{"token":"job"}]`))
+					return
+				}
+				if polls.Add(1) == 1 || tc.persistent {
+					if tc.bodyTimeout {
+						w.WriteHeader(http.StatusOK)
+						w.(http.Flusher).Flush()
+						<-r.Context().Done()
+						return
+					}
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":null}]}`))
+			}))
+			defer server.Close()
+			t.Setenv("JUDGE0_URL", server.URL)
+			if tc.bodyTimeout {
+				t.Setenv("JUDGE0_TIMEOUT_MS", "100")
+			}
+			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
+			req := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`))
+			deadline := 3 * time.Second
+			want, wantPolls := http.StatusOK, int32(2)
+			if tc.persistent {
+				deadline, want, wantPolls = 100*time.Millisecond, http.StatusGatewayTimeout, 1
+			}
+			ctx, cancel := context.WithTimeout(req.Context(), deadline)
+			defer cancel()
+			w := runRequest(t, controller, req.WithContext(ctx), "runner")
+			if w.Code != want || posts.Load() != 1 || polls.Load() != wantPolls {
+				t.Fatal("poll retry changed dispatch or deadline", w.Code, posts.Load(), polls.Load())
+			}
+			assertNoRunWrites(t, db)
+		})
+	}
+}

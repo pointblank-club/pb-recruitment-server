@@ -408,7 +408,7 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 		healthy[i] = fetchErr == nil && result != nil && result.Status.ID < 13
 	}
 	var batch sync.WaitGroup
-	var queueFull atomic.Bool
+	var deferred atomic.Bool
 	for i, e := range items {
 		batch.Add(1)
 		go func(i int, e models.Execution) {
@@ -422,8 +422,8 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 			}
 			var err error
 			healthy[i], err = ss.recoverExecution(workCtx, e, result, fetchErr)
-			if errors.Is(err, judge0.ErrQueueFull) {
-				queueFull.Store(true)
+			if errors.Is(err, judge0.ErrQueueFull) || errors.Is(err, judge0.ErrDispatchNotSent) {
+				deferred.Store(true)
 			}
 			if err != nil {
 				log.Errorf("recover execution %s: %v", e.ID, err)
@@ -436,7 +436,7 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 	if err := ss.stores.Executions.ReleaseRecovery(dbCtx, items, healthy); err != nil {
 		log.Errorf("release recovery: %v", err)
 	}
-	return queueFull.Load()
+	return deferred.Load()
 }
 
 func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Execution, result *judge0.SubmissionStatusResponse, fetchErr error) (bool, error) {
@@ -506,7 +506,7 @@ func (ss *SubmissionService) dispatchRecovery(ctx context.Context, e models.Exec
 	if len(results) == 1 && results[0].Token != "" {
 		return true, ss.stores.Executions.SaveAttemptToken(dbCtx, e.ID, e.Attempt, results[0].Token)
 	}
-	if errors.Is(err, judge0.ErrQueueFull) {
+	if errors.Is(err, judge0.ErrQueueFull) || errors.Is(err, judge0.ErrDispatchNotSent) {
 		return false, errors.Join(err, ss.stores.Executions.DeferDispatch(dbCtx, e))
 	}
 	if len(results) == 1 && errors.Is(results[0].Error, judge0.ErrDispatchRejected) {
