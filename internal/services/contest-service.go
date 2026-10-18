@@ -128,29 +128,7 @@ func (cs *ContestService) CreateProblem(ctx context.Context, contestID string, r
 	if req.Type == "code" {
 
 		testcasesKey := fmt.Sprintf("problems/%s/%s/testcases.json", contestID, problem.ID)
-		answersKey := fmt.Sprintf("problems/%s/%s/answers.json", contestID, problem.ID)
-
-		tcArray := []map[string]interface{}{}
-		ansArray := []string{}
-
-		for i, tc := range req.Testcases {
-			tcArray = append(tcArray, map[string]interface{}{
-				"index":     i,
-				"input":     tc.Input,
-				"is_sample": tc.IsSample,
-			})
-
-			ansArray = append(ansArray, tc.ExpectedOutput)
-		}
-
-		tcBytes, _ := json.Marshal(tcArray)
-		ansBytes, _ := json.Marshal(ansArray)
-
-		if err := cs.s3.PutObject(ctx, testcasesKey, string(tcBytes)); err != nil {
-			return nil, err
-		}
-
-		if err := cs.s3.PutObject(ctx, answersKey, string(ansBytes)); err != nil {
+		if err := cs.writeTestcases(ctx, testcasesKey, req.Testcases); err != nil {
 			return nil, err
 		}
 
@@ -207,28 +185,7 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 
 		// shortcut: retain old versions until problem deletion; add pruning if authoring churn warrants it.
 		testcasesKey = fmt.Sprintf("problems/%s/%s/%s/testcases.json", contestID, problemID, uuid.NewString())
-		answersKey := testcaseAnswersKey(testcasesKey)
-
-		tcArray := []map[string]interface{}{}
-		ansArray := []string{}
-
-		for i, tc := range req.Testcases {
-			tcArray = append(tcArray, map[string]interface{}{
-				"index":     i,
-				"input":     tc.Input,
-				"is_sample": tc.IsSample,
-			})
-
-			ansArray = append(ansArray, tc.ExpectedOutput)
-		}
-
-		tcBytes, _ := json.Marshal(tcArray)
-		if err := cs.s3.PutObject(ctx, testcasesKey, string(tcBytes)); err != nil {
-			return nil, err
-		}
-
-		ansBytes, _ := json.Marshal(ansArray)
-		if err := cs.s3.PutObject(ctx, answersKey, string(ansBytes)); err != nil {
+		if err := cs.writeTestcases(ctx, testcasesKey, req.Testcases); err != nil {
 			return nil, err
 		}
 	}
@@ -259,6 +216,21 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 	}
 
 	return problem, nil
+}
+
+func (cs *ContestService) writeTestcases(ctx context.Context, key string, cases []dto.CreateTestCaseRequest) error {
+	inputs := make([]map[string]any, len(cases))
+	answers := make([]string, len(cases))
+	for i, tc := range cases {
+		inputs[i] = map[string]any{"index": i, "input": tc.Input, "is_sample": tc.IsSample}
+		answers[i] = tc.ExpectedOutput
+	}
+	inputJSON, _ := json.Marshal(inputs)
+	answerJSON, _ := json.Marshal(answers)
+	if err := cs.s3.PutObject(ctx, key, string(inputJSON)); err != nil {
+		return err
+	}
+	return cs.s3.PutObject(ctx, testcaseAnswersKey(key), string(answerJSON))
 }
 
 func (cs *ContestService) DeleteProblem(ctx context.Context, contestID string, problemID string) error {

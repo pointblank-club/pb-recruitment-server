@@ -204,13 +204,7 @@ func TestRunCapacityAcrossUsersAndBacklogPostgres(t *testing.T) {
 	t.Setenv("JUDGE0_URL", server.URL)
 	request := func(user string) *httptest.ResponseRecorder {
 		controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
-		w := httptest.NewRecorder()
-		c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), w)
-		c.Set(common.AUTH_USER_ID, user)
-		if err := controller.Run(c); err != nil {
-			t.Error(err)
-		}
-		return w
+		return runRequest(t, controller, httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), user)
 	}
 	setCapacity := func(value string) {
 		t.Helper()
@@ -249,23 +243,6 @@ func TestRunCapacityAcrossUsersAndBacklogPostgres(t *testing.T) {
 	setCapacity("0")
 	if w := request("dave"); w.Code != http.StatusTooManyRequests || dispatches.Load() != 2 {
 		t.Fatal("per-user cooldown bypassed", w.Code, dispatches.Load())
-	}
-}
-
-func TestRunQueueFullPostgres(t *testing.T) {
-	db := postgresTestDB(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"queue is full"}`))
-	}))
-	defer server.Close()
-	t.Setenv("JUDGE0_URL", server.URL)
-	controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
-	w := httptest.NewRecorder()
-	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)), w)
-	c.Set(common.AUTH_USER_ID, "runner")
-	if err := controller.Run(c); err != nil || w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") != "5" {
-		t.Fatal("explicit rejection must be retryable", w.Code, err)
 	}
 }
 
@@ -345,75 +322,43 @@ func TestRunCapacityAfterLockWaitPostgres(t *testing.T) {
 
 func TestRunResultsPostgres(t *testing.T) {
 	db := postgresTestDB(t)
+	const accepted = `{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":null}`
 	for _, tc := range []struct {
 		name, result string
+		failures     int
+		bodyTimeout  bool
 		want         int
+		wantPolls    int32
 	}{
-		{"deadline", `{"token":"job","status":{"id":2}}`, 504},
-		{"compilation", `{"token":"job","status":{"id":6},"stdout":null,"stderr":null,"compile_output":"ZXJyb3I="}`, 200},
-		{"malformed stdout", `{"token":"job","status":{"id":3},"stdout":"%%%invalid","stderr":null,"compile_output":null}`, 502},
-		{"malformed stderr", `{"token":"job","status":{"id":3},"stdout":null,"stderr":"%%%invalid","compile_output":null}`, 502},
-		{"malformed compile output", `{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":"%%%invalid"}`, 502},
-		{"missing stdout", `{"token":"job","status":{"id":3},"stderr":null,"compile_output":null}`, 502},
+		{"deadline", `{"token":"job","status":{"id":2}}`, 0, false, 504, 1},
+		{"compilation", `{"token":"job","status":{"id":6},"stdout":null,"stderr":null,"compile_output":"ZXJyb3I="}`, 0, false, 200, 1},
+		{"malformed stdout", `{"token":"job","status":{"id":3},"stdout":"%%%invalid","stderr":null,"compile_output":null}`, 0, false, 502, 1},
+		{"malformed stderr", `{"token":"job","status":{"id":3},"stdout":null,"stderr":"%%%invalid","compile_output":null}`, 0, false, 502, 1},
+		{"malformed compile output", `{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":"%%%invalid"}`, 0, false, 502, 1},
+		{"missing stdout", `{"token":"job","status":{"id":3},"stderr":null,"compile_output":null}`, 0, false, 502, 1},
+		{"transient", accepted, 1, false, 200, 2},
+		{"persistent", accepted, -1, false, 504, 1},
+		{"body timeout", accepted, 1, true, 200, 2},
+		{"queue full", "", 0, false, 429, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := db.Exec(`DELETE FROM submission_rate_limits WHERE user_id='run:capacity'`); err != nil {
 				t.Fatal(err)
 			}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method == http.MethodPost {
-					w.WriteHeader(http.StatusCreated)
-					w.Write([]byte(`[{"token":"job"}]`))
-					return
-				}
-				w.Write([]byte(`{"submissions":[` + tc.result + `]}`))
-			}))
-			defer server.Close()
-			t.Setenv("JUDGE0_URL", server.URL)
-			client := judge0.NewClient()
-			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, client), nil, client)
-			r := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`))
-			if tc.want == http.StatusGatewayTimeout {
-				ctx, cancel := context.WithTimeout(r.Context(), 80*time.Millisecond)
-				defer cancel()
-				r = r.WithContext(ctx)
-			}
-			start := time.Now()
-			w := runRequest(t, controller, r, tc.name)
-			if w.Code != tc.want || tc.want == http.StatusGatewayTimeout && time.Since(start) > time.Second {
-				t.Fatal(w.Code, w.Body.String(), time.Since(start))
-			}
-			if w.Code == http.StatusOK {
-				var result dto.RunResponse
-				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.Status != "failed_to_process" || result.CompileOutput != "error" {
-					t.Fatal(result, err)
-				}
-			}
-			assertNoRunWrites(t, db)
-		})
-	}
-}
-
-func TestRunRetriesPollingWithoutRedispatchPostgres(t *testing.T) {
-	for _, tc := range []struct {
-		name                    string
-		persistent, bodyTimeout bool
-	}{
-		{name: "transient"},
-		{name: "persistent", persistent: true},
-		{name: "body timeout", bodyTimeout: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			db := postgresTestDB(t)
 			var posts, polls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
 					posts.Add(1)
+					if tc.want == http.StatusTooManyRequests {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						w.Write([]byte(`{"error":"queue is full"}`))
+						return
+					}
 					w.WriteHeader(http.StatusCreated)
 					w.Write([]byte(`[{"token":"job"}]`))
 					return
 				}
-				if polls.Add(1) == 1 || tc.persistent {
+				if n := polls.Add(1); tc.failures < 0 || int(n) <= tc.failures {
 					if tc.bodyTimeout {
 						w.WriteHeader(http.StatusOK)
 						w.(http.Flusher).Flush()
@@ -423,7 +368,7 @@ func TestRunRetriesPollingWithoutRedispatchPostgres(t *testing.T) {
 					w.WriteHeader(http.StatusServiceUnavailable)
 					return
 				}
-				w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":null}]}`))
+				w.Write([]byte(`{"submissions":[` + tc.result + `]}`))
 			}))
 			defer server.Close()
 			t.Setenv("JUDGE0_URL", server.URL)
@@ -431,17 +376,29 @@ func TestRunRetriesPollingWithoutRedispatchPostgres(t *testing.T) {
 				t.Setenv("JUDGE0_TIMEOUT_MS", "100")
 			}
 			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
-			req := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`))
 			deadline := 3 * time.Second
-			want, wantPolls := http.StatusOK, int32(2)
-			if tc.persistent {
-				deadline, want, wantPolls = 100*time.Millisecond, http.StatusGatewayTimeout, 1
+			if tc.want == http.StatusGatewayTimeout {
+				deadline = 100 * time.Millisecond
 			}
-			ctx, cancel := context.WithTimeout(req.Context(), deadline)
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
-			w := runRequest(t, controller, req.WithContext(ctx), "runner")
-			if w.Code != want || posts.Load() != 1 || polls.Load() != wantPolls {
-				t.Fatal("poll retry changed dispatch or deadline", w.Code, posts.Load(), polls.Load())
+			req := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)).WithContext(ctx)
+			start := time.Now()
+			w := runRequest(t, controller, req, tc.name)
+			if w.Code != tc.want || posts.Load() != 1 || polls.Load() != tc.wantPolls || tc.want == http.StatusGatewayTimeout && time.Since(start) > time.Second {
+				t.Fatal("unexpected Run result/dispatch/poll count", w.Code, w.Body.String(), posts.Load(), polls.Load(), time.Since(start))
+			}
+			if w.Code == http.StatusTooManyRequests && w.Header().Get("Retry-After") != "5" {
+				t.Fatal("explicit rejection must be retryable", w.Header())
+			}
+			if w.Code == http.StatusOK {
+				var result dto.RunResponse
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				if tc.result == accepted && result.Status != "accepted" || tc.result != accepted && (result.Status != "failed_to_process" || result.CompileOutput != "error") {
+					t.Fatal(result)
+				}
 			}
 			assertNoRunWrites(t, db)
 		})

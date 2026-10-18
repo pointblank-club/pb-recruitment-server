@@ -57,38 +57,32 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	defer ticker.Stop()
 	for {
 		statuses, err := ss.judge0.GetSubmissionsWithOutput(ctx, []string{results[0].Token})
-		for errors.Is(err, judge0.ErrUnavailable) {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-ticker.C:
-				statuses, err = ss.judge0.GetSubmissionsWithOutput(ctx, []string{results[0].Token})
-			}
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, judge0.ErrUnavailable) {
 			return nil, err
 		}
-		if statuses[0] == nil {
-			return nil, judge0.ErrUnavailable
-		}
-		result := statuses[0]
-		status, final := mapJudgeStatus(result.Status.ID)
-		if final {
-			runtime, err := judgeRuntimeMillis(result.Time)
-			if err != nil {
-				return nil, judge0.ErrInvalidResponse
+		if err == nil {
+			if statuses[0] == nil {
+				return nil, judge0.ErrUnavailable
 			}
-			memory := int64(0)
-			if result.Memory != nil {
-				memory = *result.Memory
+			result := statuses[0]
+			status, final := mapJudgeStatus(result.Status.ID)
+			if final {
+				runtime, err := judgeRuntimeMillis(result.Time)
+				if err != nil {
+					return nil, judge0.ErrInvalidResponse
+				}
+				memory := int64(0)
+				if result.Memory != nil {
+					memory = *result.Memory
+				}
+				stdout, stdoutErr := decodeJudgeOutput(result.Stdout)
+				stderr, stderrErr := decodeJudgeOutput(result.Stderr)
+				compileOutput, compileErr := decodeJudgeOutput(result.CompileOutput)
+				if stdoutErr != nil || stderrErr != nil || compileErr != nil {
+					return nil, judge0.ErrInvalidResponse
+				}
+				return &dto.RunResponse{Status: status, Stdout: stdout, Stderr: stderr, CompileOutput: compileOutput, Runtime: runtime, Memory: memory}, nil
 			}
-			stdout, stdoutErr := decodeJudgeOutput(result.Stdout)
-			stderr, stderrErr := decodeJudgeOutput(result.Stderr)
-			compileOutput, compileErr := decodeJudgeOutput(result.CompileOutput)
-			if stdoutErr != nil || stderrErr != nil || compileErr != nil {
-				return nil, judge0.ErrInvalidResponse
-			}
-			return &dto.RunResponse{Status: status, Stdout: stdout, Stderr: stderr, CompileOutput: compileOutput, Runtime: runtime, Memory: memory}, nil
 		}
 		select {
 		case <-ctx.Done():
