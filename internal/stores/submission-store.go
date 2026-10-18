@@ -441,12 +441,13 @@ func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID s
 		return nil
 	}
 
+	// Conflict updates must sample the clock after acquiring the row lock.
 	const q = `
 		INSERT INTO submission_rate_limits (user_id, last_submission_at)
 		VALUES ($1, floor(extract(epoch from clock_timestamp()))::bigint)
 		ON CONFLICT (user_id) DO UPDATE
-		SET last_submission_at = EXCLUDED.last_submission_at
-		WHERE EXCLUDED.last_submission_at - submission_rate_limits.last_submission_at >= $2
+		SET last_submission_at = floor(extract(epoch from clock_timestamp()))::bigint
+		WHERE floor(extract(epoch from clock_timestamp()))::bigint - submission_rate_limits.last_submission_at >= $2
 	`
 
 	res, err := s.db.ExecContext(ctx, q, userID, cooldownSeconds)

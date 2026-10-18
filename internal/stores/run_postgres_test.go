@@ -269,6 +269,80 @@ func TestRunQueueFullPostgres(t *testing.T) {
 	}
 }
 
+func TestRunCapacityAfterLockWaitPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if _, err := db.ExecContext(ctx, `INSERT INTO submission_rate_limits VALUES('run:capacity',0)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT user_id FROM submission_rate_limits WHERE user_id='run:capacity' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	var dispatches atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			dispatches.Add(1)
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`[{"token":"job"}]`))
+			return
+		}
+		w.Write([]byte(`{"submissions":[{"token":"job","status":{"id":3},"stdout":null,"stderr":null,"compile_output":null}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("JUDGE0_URL", server.URL)
+	responses := make(chan *httptest.ResponseRecorder, 2)
+	for i, user := range []string{"alice", "bob"} {
+		controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
+		go func() {
+			req := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)).WithContext(ctx)
+			responses <- runRequest(t, controller, req, user)
+		}()
+		// Both requests must reach the locked UPSERT in different database seconds.
+		for {
+			var blocked int
+			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database()
+				AND wait_event_type='Lock' AND query LIKE '%INSERT INTO submission_rate_limits%'`).Scan(&blocked); err != nil {
+				t.Fatal(err)
+			}
+			if blocked >= i+1 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if _, err := db.ExecContext(ctx, `SELECT pg_sleep(1.1)`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var releasedSecond int64
+	if err := tx.QueryRowContext(ctx, `SELECT floor(extract(epoch FROM clock_timestamp()))::bigint`).Scan(&releasedSecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		response := <-responses
+		if response.Code != http.StatusOK && response.Code != http.StatusTooManyRequests {
+			t.Fatal(response.Code, response.Body.String())
+		}
+	}
+	var storedSecond, finishedSecond int64
+	if err := db.QueryRowContext(ctx, `SELECT last_submission_at,floor(extract(epoch FROM clock_timestamp()))::bigint
+		FROM submission_rate_limits WHERE user_id='run:capacity'`).Scan(&storedSecond, &finishedSecond); err != nil {
+		t.Fatal(err)
+	}
+	if storedSecond < releasedSecond || dispatches.Load() < 1 || int64(dispatches.Load()) > finishedSecond-releasedSecond+1 {
+		t.Fatalf("stale admission after lock wait: released=%d stored=%d finished=%d dispatches=%d", releasedSecond, storedSecond, finishedSecond, dispatches.Load())
+	}
+	assertNoRunWrites(t, db)
+}
+
 func TestRunResultsPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	for _, tc := range []struct {
