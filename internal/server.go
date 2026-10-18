@@ -43,6 +43,7 @@ func NewEchoServer(
 			echo.HeaderAuthorization,
 		},
 		ExposeHeaders: []string{
+			echo.HeaderRetryAfter,
 			"X-Total-Count",
 			"X-Total-Pages",
 			"X-Current-Page",

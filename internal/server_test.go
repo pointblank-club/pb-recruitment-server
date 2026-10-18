@@ -1,9 +1,33 @@
 package internal
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
 )
+
+func TestCORSExposesRetryAfter(t *testing.T) {
+	e := NewEchoServer(nil, nil)
+	e.POST("/submission/run", func(c echo.Context) error {
+		c.Response().Header().Set(echo.HeaderRetryAfter, "5")
+		return c.NoContent(http.StatusTooManyRequests)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/submission/run", nil)
+	req.Header.Set(echo.HeaderOrigin, "http://localhost:5173")
+	w := httptest.NewRecorder()
+	e.ServeHTTP(w, req)
+	if w.Code != http.StatusTooManyRequests || w.Header().Get(echo.HeaderRetryAfter) != "5" {
+		t.Fatal("lost rate-limit response", w.Code, w.Header())
+	}
+	if w.Header().Get(echo.HeaderAccessControlAllowOrigin) != "http://localhost:5173" ||
+		!slices.Contains(strings.Split(w.Header().Get(echo.HeaderAccessControlExposeHeaders), ","), echo.HeaderRetryAfter) {
+		t.Fatal("browser cannot read Retry-After", w.Header())
+	}
+}
 
 func TestSwaggerGating(t *testing.T) {
 	tests := []struct {
