@@ -100,48 +100,36 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 		return fmt.Errorf("no fields to update")
 	}
 
-	var hiddenVal, disqVal bool
-	if req.Hidden != nil {
-		hiddenVal = *req.Hidden
+	// Verify participant existence in this contest (either existing ranking or contest registration)
+	var exists bool
+	checkQuery := `
+		SELECT EXISTS (
+			SELECT 1 FROM rankings WHERE contest_id = $1 AND user_id = $2
+			UNION
+			SELECT 1 FROM contest_registrations cr
+			JOIN users u ON cr.user_id = u.id
+			WHERE cr.contest_id = $1 AND cr.user_id = $2
+		)
+	`
+	err := s.db.QueryRowContext(ctx, checkQuery, contestID, userID).Scan(&exists)
+	if err != nil {
+		log.Printf("ranking-store: check participant failed: %v", err)
+		return fmt.Errorf("check participant: %w", err)
 	}
-	if req.Disqualified != nil {
-		disqVal = *req.Disqualified
-	}
-
-	var query string
-	var args []interface{}
-
-	if req.Hidden != nil && req.Disqualified != nil {
-		query = `
-			INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
-			VALUES ($1, $2, 0, 0, $3, $4, false)
-			ON CONFLICT (contest_id, user_id)
-			DO UPDATE SET
-				hidden = EXCLUDED.hidden,
-				disqualified = EXCLUDED.disqualified
-		`
-		args = []interface{}{contestID, userID, hiddenVal, disqVal}
-	} else if req.Hidden != nil {
-		query = `
-			INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
-			VALUES ($1, $2, 0, 0, $3, false, false)
-			ON CONFLICT (contest_id, user_id)
-			DO UPDATE SET
-				hidden = EXCLUDED.hidden
-		`
-		args = []interface{}{contestID, userID, hiddenVal}
-	} else {
-		query = `
-			INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
-			VALUES ($1, $2, 0, 0, false, $3, false)
-			ON CONFLICT (contest_id, user_id)
-			DO UPDATE SET
-				disqualified = EXCLUDED.disqualified
-		`
-		args = []interface{}{contestID, userID, disqVal}
+	if !exists {
+		return common.UserNotRegisteredError
 	}
 
-	_, err := s.db.ExecContext(ctx, query, args...)
+	query := `
+		INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
+		VALUES ($1, $2, 0, 0, COALESCE($3, false), COALESCE($4, false), false)
+		ON CONFLICT (contest_id, user_id)
+		DO UPDATE SET
+			hidden = COALESCE($3, rankings.hidden),
+			disqualified = COALESCE($4, rankings.disqualified)
+	`
+
+	_, err = s.db.ExecContext(ctx, query, contestID, userID, req.Hidden, req.Disqualified)
 	if err != nil {
 		log.Printf("ranking-store: update failed: %v", err)
 		return fmt.Errorf("update ranking: %w", err)

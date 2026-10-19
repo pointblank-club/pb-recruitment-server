@@ -1,9 +1,12 @@
 package stores_test
 
 import (
+	"app/internal/common"
 	"app/internal/models"
+	"app/internal/models/dto"
 	"app/internal/stores"
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -363,5 +366,77 @@ func TestConsolidatedLeaderboardRankZeroOrderingPostgres(t *testing.T) {
 	}
 	if lb.Entries[3].UserID != userUnranked || lb.Entries[3].Rank != 4 {
 		t.Errorf("entry 3: expected userUnranked at the bottom with rank 4, got user %s rank %d", lb.Entries[3].UserID, lb.Entries[3].Rank)
+	}
+}
+
+
+func TestUpdateLeaderboardUserParticipantValidationPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	userRegistered := uuid.NewString()
+	userUnregistered := uuid.NewString()
+	contest := uuid.NewString()
+
+	for _, u := range []string{userRegistered, userUnregistered} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Test user',$2,$1,1,'CS')`, u, u+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Validation Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+
+	// Register userRegistered
+	if _, err := db.ExecContext(ctx, `INSERT INTO contest_registrations(contest_id, user_id, registered_at) VALUES($1, $2, $3)`, contest, userRegistered, now); err != nil {
+		t.Fatal(err)
+	}
+
+	rankingStore := stores.NewRankingStore(db)
+	hiddenTrue := true
+	disqTrue := true
+
+	// 1. Updating unregistered user should fail with common.UserNotRegisteredError
+	err := rankingStore.UpdateLeaderboardUser(ctx, contest, userUnregistered, &dto.UpdateLeaderboardUserRequest{
+		Hidden: &hiddenTrue,
+	})
+	if !errors.Is(err, common.UserNotRegisteredError) {
+		t.Fatalf("expected common.UserNotRegisteredError for unregistered user, got: %v", err)
+	}
+
+	// 2. Updating registered user should succeed
+	err = rankingStore.UpdateLeaderboardUser(ctx, contest, userRegistered, &dto.UpdateLeaderboardUserRequest{
+		Disqualified: &disqTrue,
+	})
+	if err != nil {
+		t.Fatalf("expected UpdateLeaderboardUser to succeed for registered user, got: %v", err)
+	}
+
+	// Verify row in rankings
+	var disq, hidden bool
+	err = db.QueryRowContext(ctx, `SELECT disqualified, hidden FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, userRegistered).Scan(&disq, &hidden)
+	if err != nil {
+		t.Fatalf("failed to query ranking: %v", err)
+	}
+	if !disq || hidden {
+		t.Fatalf("expected disqualified=true, hidden=false, got disq=%v, hidden=%v", disq, hidden)
+	}
+
+	// 3. Now userRegistered exists in rankings; update hidden only, disqualified should remain true
+	err = rankingStore.UpdateLeaderboardUser(ctx, contest, userRegistered, &dto.UpdateLeaderboardUserRequest{
+		Hidden: &hiddenTrue,
+	})
+	if err != nil {
+		t.Fatalf("expected second UpdateLeaderboardUser to succeed, got: %v", err)
+	}
+	err = db.QueryRowContext(ctx, `SELECT disqualified, hidden FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, userRegistered).Scan(&disq, &hidden)
+	if err != nil {
+		t.Fatalf("failed to query ranking: %v", err)
+	}
+	if !disq || !hidden {
+		t.Fatalf("expected disqualified=true, hidden=true (COALESCE preserved disqualified), got disq=%v, hidden=%v", disq, hidden)
 	}
 }

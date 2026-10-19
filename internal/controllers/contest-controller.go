@@ -420,6 +420,7 @@ func (cc *ContestController) HandleDeleteProblem(ctx echo.Context) error {
 // @Failure      400 {object} map[string]string "Invalid input"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      404 {object} map[string]string "User not registered or not found"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /admin/{contestid}/leaderboard/{userid} [put]
 func (cc *ContestController) HandleUpdateLeaderboardUser(ctx echo.Context) error {
@@ -447,6 +448,11 @@ func (cc *ContestController) HandleUpdateLeaderboardUser(ctx echo.Context) error
 
 	err := cc.contestService.UpdateLeaderboardUser(ctx.Request().Context(), contestID, userID, &req)
 	if err != nil {
+		if errors.Is(err, common.UserNotRegisteredError) || errors.Is(err, common.ErrNotFound) || errors.Is(err, common.UserNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{
+				"error": err.Error(),
+			})
+		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to update leaderboard",
 		})

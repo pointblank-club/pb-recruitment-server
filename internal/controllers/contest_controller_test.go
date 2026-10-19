@@ -388,3 +388,117 @@ func TestProblemVisibilityBeforeStartAndRegistration(t *testing.T) {
 		})
 	}
 }
+
+
+func TestHandleUpdateLeaderboardUser(t *testing.T) {
+	t.Run("success update user", func(t *testing.T) {
+		var calledContestID, calledUserID string
+		var calledReq *dto.UpdateLeaderboardUserRequest
+		rankStore := &mockRankingStore{
+			updateFunc: func(_ context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error {
+				calledContestID = contestID
+				calledUserID = userID
+				calledReq = req
+				return nil
+			},
+		}
+		controller := NewContestController(services.NewContestService(&stores.Storage{Rankings: rankStore}, nil))
+		recorder := httptest.NewRecorder()
+		body := `{"hidden": true}`
+		req := httptest.NewRequest(http.MethodPut, "/admin/cid-123/leaderboard/uid-456", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := echo.New().NewContext(req, recorder)
+		ctx.SetParamNames("contestid", "userid")
+		ctx.SetParamValues("cid-123", "uid-456")
+
+		if err := controller.HandleUpdateLeaderboardUser(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("HTTP %d, want 200: %s", recorder.Code, recorder.Body.String())
+		}
+		if calledContestID != "cid-123" || calledUserID != "uid-456" || calledReq == nil || calledReq.Hidden == nil || !*calledReq.Hidden {
+			t.Errorf("unexpected call args: contest=%s user=%s req=%+v", calledContestID, calledUserID, calledReq)
+		}
+	})
+
+	t.Run("missing contest or user id", func(t *testing.T) {
+		controller := NewContestController(services.NewContestService(nil, nil))
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/admin//leaderboard/uid-456", strings.NewReader(`{"hidden": true}`))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := echo.New().NewContext(req, recorder)
+		ctx.SetParamNames("contestid", "userid")
+		ctx.SetParamValues("", "uid-456")
+
+		if err := controller.HandleUpdateLeaderboardUser(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("HTTP %d, want 400", recorder.Code)
+		}
+	})
+
+	t.Run("empty update fields", func(t *testing.T) {
+		controller := NewContestController(services.NewContestService(nil, nil))
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/admin/cid-123/leaderboard/uid-456", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := echo.New().NewContext(req, recorder)
+		ctx.SetParamNames("contestid", "userid")
+		ctx.SetParamValues("cid-123", "uid-456")
+
+		if err := controller.HandleUpdateLeaderboardUser(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("HTTP %d, want 400", recorder.Code)
+		}
+	})
+
+	t.Run("unregistered or nonexistent user returns 404", func(t *testing.T) {
+		rankStore := &mockRankingStore{
+			updateFunc: func(_ context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error {
+				return common.UserNotRegisteredError
+			},
+		}
+		controller := NewContestController(services.NewContestService(&stores.Storage{Rankings: rankStore}, nil))
+		recorder := httptest.NewRecorder()
+		body := `{"disqualified": true}`
+		req := httptest.NewRequest(http.MethodPut, "/admin/cid-123/leaderboard/unknown-user", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := echo.New().NewContext(req, recorder)
+		ctx.SetParamNames("contestid", "userid")
+		ctx.SetParamValues("cid-123", "unknown-user")
+
+		if err := controller.HandleUpdateLeaderboardUser(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("HTTP %d, want 404: %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("internal store error returns 500", func(t *testing.T) {
+		rankStore := &mockRankingStore{
+			updateFunc: func(_ context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error {
+				return errors.New("db connection failed")
+			},
+		}
+		controller := NewContestController(services.NewContestService(&stores.Storage{Rankings: rankStore}, nil))
+		recorder := httptest.NewRecorder()
+		body := `{"hidden": true}`
+		req := httptest.NewRequest(http.MethodPut, "/admin/cid-123/leaderboard/uid-456", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := echo.New().NewContext(req, recorder)
+		ctx.SetParamNames("contestid", "userid")
+		ctx.SetParamValues("cid-123", "uid-456")
+
+		if err := controller.HandleUpdateLeaderboardUser(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("HTTP %d, want 500: %s", recorder.Code, recorder.Body.String())
+		}
+	})
+}
