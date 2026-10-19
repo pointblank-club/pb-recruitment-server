@@ -2548,13 +2548,22 @@ const docTemplate = `{
                 "department": {
                     "type": "string"
                 },
+                "disqualified": {
+                    "type": "boolean"
+                },
                 "email": {
                     "type": "string"
+                },
+                "hidden": {
+                    "type": "boolean"
                 },
                 "name": {
                     "type": "string"
                 },
                 "registered_at": {
+                    "type": "integer"
+                },
+                "score": {
                     "type": "integer"
                 },
                 "user_id": {
