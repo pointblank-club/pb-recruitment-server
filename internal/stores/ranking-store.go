@@ -96,29 +96,50 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 		return fmt.Errorf("ranking store: db is not initialized")
 	}
 
-	query := "UPDATE rankings SET "
-	args := []interface{}{}
-	argID := 1
-
-	if req.Hidden != nil {
-		query += fmt.Sprintf("hidden = $%d, ", argID)
-		args = append(args, *req.Hidden)
-		argID++
-	}
-	if req.Disqualified != nil {
-		query += fmt.Sprintf("disqualified = $%d, ", argID)
-		args = append(args, *req.Disqualified)
-		argID++
-	}
-
-	if len(args) == 0 {
+	if req.Hidden == nil && req.Disqualified == nil {
 		return fmt.Errorf("no fields to update")
 	}
 
-	query = strings.TrimSuffix(query, ", ")
+	var hiddenVal, disqVal bool
+	if req.Hidden != nil {
+		hiddenVal = *req.Hidden
+	}
+	if req.Disqualified != nil {
+		disqVal = *req.Disqualified
+	}
 
-	query += fmt.Sprintf(" WHERE contest_id = $%d AND user_id = $%d", argID, argID+1)
-	args = append(args, contestID, userID)
+	var query string
+	var args []interface{}
+
+	if req.Hidden != nil && req.Disqualified != nil {
+		query = `
+			INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
+			VALUES ($1, $2, 0, 0, $3, $4, false)
+			ON CONFLICT (contest_id, user_id)
+			DO UPDATE SET
+				hidden = EXCLUDED.hidden,
+				disqualified = EXCLUDED.disqualified
+		`
+		args = []interface{}{contestID, userID, hiddenVal, disqVal}
+	} else if req.Hidden != nil {
+		query = `
+			INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
+			VALUES ($1, $2, 0, 0, $3, false, false)
+			ON CONFLICT (contest_id, user_id)
+			DO UPDATE SET
+				hidden = EXCLUDED.hidden
+		`
+		args = []interface{}{contestID, userID, hiddenVal}
+	} else {
+		query = `
+			INSERT INTO rankings (contest_id, user_id, score, rank, hidden, disqualified, shortlisted)
+			VALUES ($1, $2, 0, 0, false, $3, false)
+			ON CONFLICT (contest_id, user_id)
+			DO UPDATE SET
+				disqualified = EXCLUDED.disqualified
+		`
+		args = []interface{}{contestID, userID, disqVal}
+	}
 
 	_, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {

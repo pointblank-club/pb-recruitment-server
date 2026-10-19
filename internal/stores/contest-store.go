@@ -289,9 +289,13 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			u.usn,
 			u.department,
 			u.current_year,
-			cr.registered_at
+			cr.registered_at,
+			COALESCE(r.score, 0),
+			COALESCE(r.hidden, FALSE),
+			COALESCE(r.disqualified, FALSE)
 		FROM contest_registrations cr
 		INNER JOIN users u ON cr.user_id = u.id
+		LEFT JOIN rankings r ON r.contest_id = cr.contest_id AND r.user_id = cr.user_id
 		WHERE cr.contest_id = $1
 		ORDER BY cr.registered_at ASC
 	`
@@ -314,6 +318,9 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.Department,
 			&reg.CurrentYear,
 			&reg.RegisteredAt,
+			&reg.Score,
+			&reg.Hidden,
+			&reg.Disqualified,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
 			continue

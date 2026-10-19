@@ -37,4 +37,7 @@ type ContestRegistration struct {
 	Department   string `json:"department"`
 	CurrentYear  int    `json:"current_year"`
 	RegisteredAt int64  `json:"registered_at"`
+	Score        int    `json:"score"`
+	Hidden       bool   `json:"hidden"`
+	Disqualified bool   `json:"disqualified"`
 }
