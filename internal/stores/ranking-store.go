@@ -6,6 +6,7 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
 )
 
@@ -131,6 +133,10 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 
 	_, err = s.db.ExecContext(ctx, query, contestID, userID, req.Hidden, req.Disqualified)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "rankings_contest_id_fkey" {
+			return common.ErrNotFound
+		}
 		log.Printf("ranking-store: update failed: %v", err)
 		return fmt.Errorf("update ranking: %w", err)
 	}
