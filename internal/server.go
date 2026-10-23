@@ -25,6 +25,7 @@ func NewEchoServer(
 		AllowOrigins: []string{
 			"https://recruitment.pointblank.club",
 			"http://recruitment.pointblank.club",
+			"https://pb-recruitment-website-green.vercel.app",
 			"http://localhost:5173",
 			"http://127.0.0.1:5173",
 		},
