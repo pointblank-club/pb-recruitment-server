@@ -199,3 +199,81 @@ func TestGetLeaderboard(t *testing.T) {
 		})
 	}
 }
+
+type visibilityContestTestStore struct {
+	*stores.ContestStore
+	start, end   int64
+	isRegistered bool
+	err          error
+}
+
+func (s visibilityContestTestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
+	return &dto.GetContestResponse{Contest: models.Contest{StartTime: s.start, EndTime: s.end}}, s.err
+}
+
+func (s visibilityContestTestStore) IsRegistered(context.Context, string, string) (bool, error) {
+	return s.isRegistered, s.err
+}
+
+func TestGetProblemVisibility(t *testing.T) {
+	now := time.Now().UnixMilli()
+	tests := []struct {
+		name         string
+		start, end   int64
+		isRegistered bool
+		wantErr      error
+	}{
+		{
+			name:         "upcoming contest should block all",
+			start:        now + 60_000,
+			end:          now + 120_000,
+			isRegistered: true,
+			wantErr:      common.ContestNotRunningError,
+		},
+		{
+			name:         "running contest blocks unregistered user",
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: false,
+			wantErr:      common.UserNotRegisteredError,
+		},
+		{
+			name:         "running contest allows registered user",
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: true,
+			wantErr:      nil,
+		},
+		{
+			name:         "ended contest allows unregistered user",
+			start:        now - 120_000,
+			end:          now - 60_000,
+			isRegistered: false,
+			wantErr:      nil,
+		},
+		{
+			name:         "ended contest allows registered user",
+			start:        now - 120_000,
+			end:          now - 60_000,
+			isRegistered: true,
+			wantErr:      nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := &stores.Storage{
+				Contests: visibilityContestTestStore{
+					start:        tc.start,
+					end:          tc.end,
+					isRegistered: tc.isRegistered,
+				},
+			}
+			svc := NewContestService(storage, nil)
+			err := svc.GetProblemVisibility(context.Background(), "c1", "u1")
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("got error %v, want %v", err, tc.wantErr)
+			}
+		})
+	}
+}

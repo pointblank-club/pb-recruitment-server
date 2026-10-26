@@ -635,7 +635,7 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 // @Router       /contests/{id}/problems [get]
 func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 	contestID := ctx.Param("id")
-	userID := ctx.Get(common.AUTH_USER_ID).(string)
+	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
 
 	err := cc.contestService.GetProblemVisibility(ctx.Request().Context(), contestID, userID)
 	if err != nil {
@@ -686,7 +686,7 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
 	contestID := ctx.Param("id")
 	problemID := ctx.Param("problem_id")
-	userID := ctx.Get(common.AUTH_USER_ID).(string)
+	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
 
 	err := cc.contestService.GetProblemVisibility(ctx.Request().Context(), contestID, userID)
 	if err != nil {

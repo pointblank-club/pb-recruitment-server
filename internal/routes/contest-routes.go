@@ -42,16 +42,17 @@ func AddContestRoutes(
 		middleware.ValidateRequest(new(dto.ModifyRegistrationRequest)),
 	)
 
-	// Get the problems of a specific contest for the authenticated user
-	// Do not return the problem statements themselves
+	// Get the problems of a specific contest.
+	// Auth is optional: any user (including unauthenticated) can see problems after the contest ends.
 	e.GET("/contests/:id/problems",
 		contestController.GetContestProblemsList,
-		middleware.RequireFirebaseAuth(authClient),
+		middleware.OptionalFirebaseAuth(authClient),
 	)
 
-	// Get the problem statement of a specific problem in a contest for the authenticated user
+	// Get the problem statement of a specific problem in a contest.
+	// Same access rules as the problems list endpoint above.
 	e.GET("/contests/:id/problems/:problem_id",
 		contestController.GetContestProblem,
-		middleware.RequireFirebaseAuth(authClient),
+		middleware.OptionalFirebaseAuth(authClient),
 	)
 }
