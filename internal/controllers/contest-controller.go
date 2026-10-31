@@ -622,13 +622,11 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 
 // GetContestProblemsList godoc
 // @Summary      Get list of problems in contest
-// @Description  Get problems overview (names, score, type) for authenticated and registered user
+// @Description  Get problems overview (names, score, type). Open to all once contest ends; requires registration while open.
 // @Tags         Contests
 // @Produce      json
-// @Security     BearerAuth
 // @Param        id path string true "Contest ID"
 // @Success      200 {array} dto.ProblemOverview
-// @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Not registered or contest not running"
 // @Failure      404 {object} map[string]string "Contest not found"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -671,14 +669,12 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 
 // GetContestProblem godoc
 // @Summary      Get problem statement
-// @Description  Get detailed problem statement and options/sample testcases for authenticated and registered user
+// @Description  Get detailed problem statement and options/sample testcases. Open to all once contest ends; requires registration while open.
 // @Tags         Contests
 // @Produce      json
-// @Security     BearerAuth
 // @Param        id path string true "Contest ID"
 // @Param        problem_id path string true "Problem ID"
 // @Success      200 {object} dto.GetProblemStatementResponse
-// @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 {object} map[string]string "Not registered or contest not running"
 // @Failure      404 {object} map[string]string "Contest or problem not found"
 // @Failure      500 {object} map[string]string "Internal server error"

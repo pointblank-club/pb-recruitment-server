@@ -124,11 +124,6 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusForbidden)
 	}
 
-	// Cache in browser for 1 hour if submission has finished evaluating
-	if sub.Status != models.Pending {
-		ctx.Response().Header().Set("Cache-Control", "private, max-age=3600")
-	}
-
 	return ctx.JSON(http.StatusOK, sub)
 }
 

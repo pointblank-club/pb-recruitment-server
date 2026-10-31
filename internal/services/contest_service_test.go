@@ -204,27 +204,28 @@ type visibilityContestTestStore struct {
 	*stores.ContestStore
 	start, end   int64
 	isRegistered bool
-	err          error
 }
 
 func (s visibilityContestTestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
-	return &dto.GetContestResponse{Contest: models.Contest{StartTime: s.start, EndTime: s.end}}, s.err
+	return &dto.GetContestResponse{Contest: models.Contest{StartTime: s.start, EndTime: s.end}}, nil
 }
 
 func (s visibilityContestTestStore) IsRegistered(context.Context, string, string) (bool, error) {
-	return s.isRegistered, s.err
+	return s.isRegistered, nil
 }
 
 func TestGetProblemVisibility(t *testing.T) {
 	now := time.Now().UnixMilli()
 	tests := []struct {
 		name         string
+		userID       string
 		start, end   int64
 		isRegistered bool
 		wantErr      error
 	}{
 		{
 			name:         "upcoming contest should block all",
+			userID:       "u1",
 			start:        now + 60_000,
 			end:          now + 120_000,
 			isRegistered: true,
@@ -232,6 +233,7 @@ func TestGetProblemVisibility(t *testing.T) {
 		},
 		{
 			name:         "running contest blocks unregistered user",
+			userID:       "u1",
 			start:        now - 60_000,
 			end:          now + 60_000,
 			isRegistered: false,
@@ -239,13 +241,23 @@ func TestGetProblemVisibility(t *testing.T) {
 		},
 		{
 			name:         "running contest allows registered user",
+			userID:       "u1",
 			start:        now - 60_000,
 			end:          now + 60_000,
 			isRegistered: true,
 			wantErr:      nil,
 		},
 		{
+			name:         "running contest blocks anonymous guest",
+			userID:       "",
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: false,
+			wantErr:      common.UserNotRegisteredError,
+		},
+		{
 			name:         "ended contest allows unregistered user",
+			userID:       "u1",
 			start:        now - 120_000,
 			end:          now - 60_000,
 			isRegistered: false,
@@ -253,9 +265,18 @@ func TestGetProblemVisibility(t *testing.T) {
 		},
 		{
 			name:         "ended contest allows registered user",
+			userID:       "u1",
 			start:        now - 120_000,
 			end:          now - 60_000,
 			isRegistered: true,
+			wantErr:      nil,
+		},
+		{
+			name:         "ended contest allows anonymous guest",
+			userID:       "",
+			start:        now - 120_000,
+			end:          now - 60_000,
+			isRegistered: false,
 			wantErr:      nil,
 		},
 	}
@@ -270,7 +291,7 @@ func TestGetProblemVisibility(t *testing.T) {
 				},
 			}
 			svc := NewContestService(storage, nil)
-			err := svc.GetProblemVisibility(context.Background(), "c1", "u1")
+			err := svc.GetProblemVisibility(context.Background(), "c1", tc.userID)
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("got error %v, want %v", err, tc.wantErr)
 			}
