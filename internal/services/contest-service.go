@@ -286,12 +286,18 @@ func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID st
 		return err
 	}
 
-	if contest.IsRegistered == nil || !*contest.IsRegistered {
-		return common.UserNotRegisteredError
+	status := contest.GetRunningStatus()
+	if status == models.ContestRunningUpcoming {
+		return common.ContestNotRunningError
 	}
 
-	if contest.GetRunningStatus() == models.ContestRunningUpcoming {
-		return common.ContestNotRunningError
+	// While the contest is running/open, only registered users can view the problems.
+	// Once the contest is closed/over, anyone (including unauthenticated users) can view
+	// the problems – useful for post-contest review.
+	if status == models.ContestRunningOpen {
+		if contest.IsRegistered == nil || !*contest.IsRegistered {
+			return common.UserNotRegisteredError
+		}
 	}
 
 	return nil

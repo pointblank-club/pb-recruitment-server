@@ -1758,12 +1758,7 @@ const docTemplate = `{
         },
         "/contests/{id}/problems": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get problems overview (names, score, type) for authenticated and registered user",
+                "description": "Get problems overview (names, score, type). Open to all once contest ends; requires registration while open.",
                 "produces": [
                     "application/json"
                 ],
@@ -1787,15 +1782,6 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/app_internal_models_dto.ProblemOverview"
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
                             }
                         }
                     },
@@ -1831,12 +1817,7 @@ const docTemplate = `{
         },
         "/contests/{id}/problems/{problem_id}": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get detailed problem statement and options/sample testcases for authenticated and registered user",
+                "description": "Get detailed problem statement and options/sample testcases. Open to all once contest ends; requires registration while open.",
                 "produces": [
                     "application/json"
                 ],
@@ -1865,15 +1846,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/app_internal_models_dto.GetProblemStatementResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
                         }
                     },
                     "403": {
