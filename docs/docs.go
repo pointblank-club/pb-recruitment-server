@@ -1758,12 +1758,7 @@ const docTemplate = `{
         },
         "/contests/{id}/problems": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get problems overview (names, score, type) for authenticated and registered user",
+                "description": "Get problems overview (names, score, type). Open to all once contest ends; requires registration while open.",
                 "produces": [
                     "application/json"
                 ],
@@ -1791,7 +1786,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Invalid or expired token",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -1831,12 +1826,7 @@ const docTemplate = `{
         },
         "/contests/{id}/problems/{problem_id}": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get detailed problem statement and options/sample testcases for authenticated and registered user",
+                "description": "Get detailed problem statement and options/sample testcases. Open to all once contest ends; requires registration while open.",
                 "produces": [
                     "application/json"
                 ],
@@ -1868,7 +1858,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Invalid or expired token",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
