@@ -627,6 +627,7 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 // @Produce      json
 // @Param        id path string true "Contest ID"
 // @Success      200 {array} dto.ProblemOverview
+// @Failure      401 {object} map[string]string "Invalid or expired token"
 // @Failure      403 {object} map[string]string "Not registered or contest not running"
 // @Failure      404 {object} map[string]string "Contest not found"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -675,6 +676,7 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 // @Param        id path string true "Contest ID"
 // @Param        problem_id path string true "Problem ID"
 // @Success      200 {object} dto.GetProblemStatementResponse
+// @Failure      401 {object} map[string]string "Invalid or expired token"
 // @Failure      403 {object} map[string]string "Not registered or contest not running"
 // @Failure      404 {object} map[string]string "Contest or problem not found"
 // @Failure      500 {object} map[string]string "Internal server error"
