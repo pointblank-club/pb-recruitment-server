@@ -20,10 +20,18 @@ import (
 
 type submissionTestStore struct {
 	*stores.SubmissionStore
-	markFailed       func(context.Context, string) error
-	judgeMCQ         func(context.Context, string) error
-	createSubmission func(context.Context, *models.Submission) (string, error)
-	checkRateLimit   func(context.Context, string, int64) error
+	markFailed          func(context.Context, string) error
+	judgeMCQ            func(context.Context, string) error
+	createSubmission    func(context.Context, *models.Submission) (string, error)
+	checkRateLimit      func(context.Context, string, int64) error
+	listUserSubmissions func(context.Context, string, string, int) ([]models.Submission, error)
+}
+
+func (s submissionTestStore) ListUserSubmissionsByProblemID(ctx context.Context, userID, problemID string, page int) ([]models.Submission, error) {
+	if s.listUserSubmissions != nil {
+		return s.listUserSubmissions(ctx, userID, problemID, page)
+	}
+	return nil, nil
 }
 
 func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldown int64) error {
@@ -522,5 +530,54 @@ func TestCreateSubmissionRejectsInvalidUTF8BeforePreparation(t *testing.T) {
 	})
 	if id != "" || !errors.Is(err, common.ErrInvalidCode) {
 		t.Fatal("invalid source reached preparation", id, err)
+	}
+}
+
+func TestCreateSubmissionDuplicateMCQRejection(t *testing.T) {
+	createCalled := false
+	rateLimitCalled := false
+
+	storage := &stores.Storage{
+		Problems: problemTestStore{
+			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
+				return &dto.GetProblemStatementResponse{Type: models.MCQ}, nil
+			},
+		},
+		Submissions: submissionTestStore{
+			listUserSubmissions: func(ctx context.Context, userID, problemID string, page int) ([]models.Submission, error) {
+				return []models.Submission{
+					{ID: "sub-prior", ProblemID: problemID, UserID: userID, Status: models.WrongAnswer},
+				}, nil
+			},
+			checkRateLimit: func(ctx context.Context, userID string, cooldown int64) error {
+				rateLimitCalled = true
+				return nil
+			},
+			createSubmission: func(ctx context.Context, sub *models.Submission) (string, error) {
+				createCalled = true
+				return "sub-new", nil
+			},
+		},
+	}
+
+	service := NewSubmissionService(storage, nil, nil)
+	id, err := service.CreateSubmission(context.Background(), "user", models.MCQ, &dto.SubmitSubmissionRequest{
+		ContestID: "contest",
+		ProblemID: "problem",
+		Type:      models.MCQ,
+		Option:    []int{1},
+	})
+
+	if id != "" {
+		t.Fatalf("expected empty submission ID on duplicate, got %s", id)
+	}
+	if !errors.Is(err, common.ErrSubmissionAlreadyExists) {
+		t.Fatalf("expected ErrSubmissionAlreadyExists, got %v", err)
+	}
+	if createCalled {
+		t.Fatal("CreateSubmission store method should not be called when duplicate exists")
+	}
+	if rateLimitCalled {
+		t.Fatal("CheckRateLimit should not be called when duplicate exists")
 	}
 }
