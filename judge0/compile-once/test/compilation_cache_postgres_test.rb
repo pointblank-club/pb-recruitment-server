@@ -40,11 +40,19 @@ class CompilationCachePostgresTest < Minitest::Test
     @schema = "compile_cache_test_" + SecureRandom.hex(8)
     @admin = PG.connect(url)
     @admin.exec("CREATE SCHEMA #{@schema}")
+    # Rails 5 sees same-named public indexes if public remains in search_path.
+    # Copy only static language/status metadata needed by the native model getters.
+    if defined?(Language)
+      ["languages", "statuses"].each do |table|
+        @admin.exec("CREATE TABLE #{@schema}.#{table} (LIKE public.#{table} INCLUDING ALL)")
+        @admin.exec("INSERT INTO #{@schema}.#{table} SELECT * FROM public.#{table}")
+      end
+    end
     ActiveRecord::Base.establish_connection(adapter: "postgresql", host: host,
       port: parameters["port"] || uri.port, database: URI::DEFAULT_PARSER.unescape(uri.path.sub(%r{\A/}, "")),
       username: uri.user && URI::DEFAULT_PARSER.unescape(uri.user),
       password: uri.password && URI::DEFAULT_PARSER.unescape(uri.password),
-      schema_search_path: "#{@schema},public", pool: 12)
+      schema_search_path: @schema, pool: 12)
     @previous_build = ENV["JUDGE0_COMPILER_BUILD_ID"]
     ENV["JUDGE0_COMPILER_BUILD_ID"] = "integration-test-toolchain"
     ActiveRecord::Migration.verbose = false
