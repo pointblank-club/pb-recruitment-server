@@ -622,7 +622,7 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 
 // GetContestProblemsList godoc
 // @Summary      Get list of problems in contest
-// @Description  Get problems overview (names, score, type). Open to all once contest ends; requires registration while open.
+// @Description  Get problems overview with the authenticated user's progress. Guests receive no progress. Open to all once contest ends; requires registration while open.
 // @Tags         Contests
 // @Produce      json
 // @Param        id path string true "Contest ID"
@@ -635,6 +635,7 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 	contestID := ctx.Param("id")
 	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
+	ctx.Response().Header().Set("Cache-Control", "private, no-store")
 
 	err := cc.contestService.GetProblemVisibility(ctx.Request().Context(), contestID, userID)
 	if err != nil {
@@ -653,7 +654,7 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 		})
 	}
 
-	problems, err := cc.contestService.GetContestProblemsList(ctx.Request().Context(), contestID)
+	problems, err := cc.contestService.GetContestProblemsList(ctx.Request().Context(), contestID, userID)
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{

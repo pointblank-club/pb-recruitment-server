@@ -290,6 +290,14 @@ type visibilityProblemStore struct {
 	*stores.ProblemStore
 }
 
+type visibilitySubmissionStore struct {
+	*stores.SubmissionStore
+}
+
+func (visibilitySubmissionStore) GetUserProblemProgress(context.Context, string, string) (map[string]string, error) {
+	return map[string]string{"prob-1": "solved"}, nil
+}
+
 func (visibilityProblemStore) GetProblemList(context.Context, string) ([]dto.ProblemOverview, error) {
 	return []dto.ProblemOverview{{ID: "prob-1", Name: "Problem 1", Score: 10, Type: "code"}}, nil
 }
@@ -350,7 +358,8 @@ func TestProblemVisibilityBeforeStartAndRegistration(t *testing.T) {
 					registered: tc.registered,
 					err:        tc.lookupErr,
 				},
-				Problems: visibilityProblemStore{},
+				Problems:    visibilityProblemStore{},
+				Submissions: visibilitySubmissionStore{},
 			}
 			controller := NewContestController(services.NewContestService(storage, nil), nil)
 
