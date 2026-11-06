@@ -1,12 +1,12 @@
 name: Compile-once Judge0 integration
 on:
-  push:
-    branches: [perf/compile-once-judge0]
-    paths: ['judge0/compile-once/**', '!judge0/compile-once/README.md', '.github/workflows/compile-once.yaml']
   pull_request:
     paths: ['judge0/compile-once/**', '!judge0/compile-once/README.md', '.github/workflows/compile-once.yaml']
 permissions:
   contents: read
+concurrency:
+  group: compile-once-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   judge0-runtime:
     runs-on: ubuntu-22.04
@@ -18,7 +18,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
         ports: ['5432:5432']
         options: >-
-          --health-cmd='pg_isready -U postgres'
+          --health-cmd="pg_isready -U postgres"
           --health-interval=5s --health-timeout=5s --health-retries=10
       redis:
         image: redis:7

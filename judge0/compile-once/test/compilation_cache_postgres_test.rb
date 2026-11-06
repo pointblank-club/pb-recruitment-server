@@ -24,6 +24,7 @@ class CacheTestSubmission < ActiveRecord::Base
   self.table_name = "submissions"
   attr_accessor :language, :language_id, :source_code, :compiler_options,
     :enable_per_process_and_thread_time_limit, :enable_per_process_and_thread_memory_limit
+  def additional_files?; false; end
   def status=(value); self.status_id = value.respond_to?(:id) ? value.id : value; end
 end
 
@@ -102,6 +103,27 @@ class CompilationCachePostgresTest < Minitest::Test
     assert_equal [:success] * 10, threads.map(&:value)
     assert_equal 1, count
     assert_equal 1, @admin.exec("SELECT count(*) FROM #{@schema}.compilation_artifacts").first["count"].to_i
+  end
+
+  def test_worker_hook_reuses_group_and_leaves_legacy_compilation_unchanged
+    fixture = Class.new do
+      attr_reader :submission, :boxdir
+      def initialize(value, directory, counter); @submission=value; @boxdir=directory; @counter=counter; end
+      def compile; @counter.call; File.write(File.join(boxdir, "program"), "compiled"); :success; end
+      prepend CompileOnce
+    end
+    group = SecureRandom.uuid; count = 0
+    3.times do
+      Dir.mktmpdir do |directory|
+        assert_equal :success, fixture.new(submission(group), directory, -> {count += 1}).send(:compile)
+      end
+    end
+    assert_equal 1, count
+    2.times do
+      value = submission; value.compilation_group = nil
+      Dir.mktmpdir { |directory| fixture.new(value, directory, -> {count += 1}).send(:compile) }
+    end
+    assert_equal 3, count
   end
 
   def test_failure_reused_and_source_mismatch_rejected
