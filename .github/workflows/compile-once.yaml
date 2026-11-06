@@ -40,6 +40,7 @@ jobs:
             -e POSTGRES_DB=judge0_compile_once -e REDIS_HOST=127.0.0.1 \
             -e COMPILATION_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/judge0_compile_once \
             -e COMPILATION_SANDBOX_TEST=1 -e MAX_MEMORY_LIMIT=4096000 \
+            -e LANG=C.UTF-8 -e LC_ALL=C.UTF-8 \
             -e ALLOW_ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT=true \
             -e ALLOW_ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT=true \
             compile-once:test bash -c '

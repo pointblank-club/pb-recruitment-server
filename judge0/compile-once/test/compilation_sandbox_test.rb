@@ -24,7 +24,7 @@ class CompilationSandboxTest < Minitest::Test
     submissions = cases.map do |input, output|
       value = Submission.create!(source_code: source, language_id: language,
         compilation_group: group, stdin: input, expected_output: output,
-        cpu_time_limit: 1, wall_time_limit: 5, memory_limit: 2048000,
+        cpu_time_limit: 1, wall_time_limit: 5, memory_limit: 4096000,
         enable_per_process_and_thread_time_limit: true,
         enable_per_process_and_thread_memory_limit: true, enable_network: false)
       @ids << value.id
@@ -33,7 +33,7 @@ class CompilationSandboxTest < Minitest::Test
     log, = capture_io { submissions.each { |value| IsolateJob.perform_now(value.id) } }
     submissions.zip(expected).each do |value, verdict|
       value.reload
-      assert_equal verdict, value.status_id, "language #{language}: #{value.message} #{value.compile_output} #{value.stderr}"
+      assert_equal verdict, value.status_id, "language #{language}: #{value.message} #{value.compile_output} #{value.stderr} #{value.stdout}"
       assert value.finished_at
     end
     assert_equal(grouped ? 1 : cases.length, log.scan(/Compiling submission /).length, log)
@@ -53,5 +53,7 @@ class CompilationSandboxTest < Minitest::Test
 
   def test_legacy_jobs_still_compile_individually
     execute_cases(54, CPP, [["1 2\n", "3\n"], ["3 4\n", "7\n"]], [3, 3], grouped: false)
+    execute_cases(62, JAVA, [["1 2\n", "3\n"]], [3], grouped: false)
+    execute_cases(54, "this cannot compile", [["", ""]], [6], grouped: false)
   end
 end

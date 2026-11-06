@@ -80,6 +80,8 @@ invocation counts and accepted, wrong-answer, compilation-error, runtime-error
 and time-limit verdicts, plus legacy requests without groups. These sandbox tests
 use a privileged disposable CI runner and native per-process time/memory limits
 (both flags enabled), rather than the deployment's cgroup configuration.
+The runner uses UTF-8 locale and a 4,096,000 KiB virtual-address-space allowance
+for JVM startup; this is not a measurement of the deployment's memory limits.
 API-to-queue/callback/scoring integration, deployed resource limits and load/capacity
 tests remain required before enabling the feature.
 
