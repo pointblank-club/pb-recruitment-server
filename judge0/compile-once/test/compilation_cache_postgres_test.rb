@@ -1,6 +1,7 @@
 require "minitest/autorun"
 require "active_record"
 require "pg"
+require "uri"
 require "securerandom"
 require "tmpdir"
 require "open3"
@@ -32,15 +33,18 @@ class CompilationCachePostgresTest < Minitest::Test
   def setup
     url = ENV["COMPILATION_TEST_DATABASE_URL"]
     skip "explicit disposable PostgreSQL URL required" unless url
-    parameters = PG::Connection.conninfo_parse(url).each_with_object({}) { |item, hash| hash[item[:keyword]] = item[:val] if item[:val] }
-    host = parameters["host"]
-    raise "local disposable PostgreSQL required" unless host && (host.start_with?("/") || ["localhost", "127.0.0.1"].include?(host))
+    uri = URI.parse(url)
+    parameters = URI.decode_www_form(uri.query || "").to_h
+    host = parameters["host"] || uri.host
+    raise "local disposable PostgreSQL required" unless ["postgres", "postgresql"].include?(uri.scheme) && host && (host.start_with?("/") || ["localhost", "127.0.0.1"].include?(host))
     @schema = "compile_cache_test_" + SecureRandom.hex(8)
     @admin = PG.connect(url)
     @admin.exec("CREATE SCHEMA #{@schema}")
     ActiveRecord::Base.establish_connection(adapter: "postgresql", host: host,
-      port: parameters["port"], database: parameters["dbname"], username: parameters["user"],
-      password: parameters["password"], schema_search_path: "#{@schema},public", pool: 12)
+      port: parameters["port"] || uri.port, database: URI::DEFAULT_PARSER.unescape(uri.path.sub(%r{\A/}, "")),
+      username: uri.user && URI::DEFAULT_PARSER.unescape(uri.user),
+      password: uri.password && URI::DEFAULT_PARSER.unescape(uri.password),
+      schema_search_path: "#{@schema},public", pool: 12)
     @previous_build = ENV["JUDGE0_COMPILER_BUILD_ID"]
     ENV["JUDGE0_COMPILER_BUILD_ID"] = "integration-test-toolchain"
     ActiveRecord::Migration.verbose = false
