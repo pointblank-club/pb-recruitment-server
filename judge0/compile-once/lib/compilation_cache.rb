@@ -94,12 +94,14 @@ module CompilationCache
       if row
         raise "compilation group fingerprint mismatch" unless row.fetch("fingerprint") == fingerprint
         payload = JSON.parse(row.fetch("payload"))
+        output = payload.fetch("compile_output_base64")
+        output = Base64.strict_decode64(output) if output
         if payload.fetch("result") == "success"
           restore(worker.boxdir, payload.fetch("files"))
-          submission.compile_output = payload["compile_output"]
+          submission.compile_output = output
           :success
         elsif payload.fetch("result") == "failure"
-          apply_failure(submission, payload["compile_output"])
+          apply_failure(submission, output)
         else
           raise "invalid compilation result"
         end
@@ -108,7 +110,7 @@ module CompilationCache
         begin
           output = submission.compile_output
           raise Uncacheable if output && output.bytesize > MAX_BYTES
-          payload = { "result" => result.to_s, "compile_output" => output }
+          payload = { "result" => result.to_s, "compile_output_base64" => output && Base64.strict_encode64(output) }
           payload["files"] = capture(worker.boxdir) if result == :success
           connection.exec_params("INSERT INTO compilation_artifacts(compilation_group,fingerprint,payload,created_at) VALUES($1,$2,$3,timezone('UTC',now()))", [group, fingerprint, JSON.generate(payload)])
         rescue Uncacheable, JSON::GeneratorError

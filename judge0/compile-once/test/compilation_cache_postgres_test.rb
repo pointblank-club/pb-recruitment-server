@@ -27,6 +27,8 @@ class CacheTestSubmission < ActiveRecord::Base
     :enable_per_process_and_thread_time_limit, :enable_per_process_and_thread_memory_limit
   def additional_files?; false; end
   def status=(value); self.status_id = value.respond_to?(:id) ? value.id : value; end
+  def compile_output; self[:compile_output] && Base64.strict_decode64(self[:compile_output]); end
+  def compile_output=(value); self[:compile_output] = value && Base64.strict_encode64(value); end
 end
 
 class CompilationCachePostgresTest < Minitest::Test
@@ -138,13 +140,14 @@ class CompilationCachePostgresTest < Minitest::Test
 
   def test_failure_reused_and_source_mismatch_rejected
     group = SecureRandom.uuid
+    diagnostic = "\xe2\x80\x98compile error\xe2\x80\x99\xff".b
     Dir.mktmpdir do |directory|
       first = submission(group)
-      CompilationCache.fetch(worker(first, directory)) { first.compile_output = "compile error"; :failure }
+      CompilationCache.fetch(worker(first, directory)) { first.compile_output = diagnostic; :failure }
       second = submission(group)
       assert_equal :failure, CompilationCache.fetch(worker(second, directory)) { flunk "recompiled failure" }
       assert_equal 6, second.reload.status_id
-      assert_equal "compile error", second.compile_output
+      assert_equal diagnostic, second.compile_output
       third = submission(group); third.source_code = "changed"
       assert_raises(RuntimeError) { CompilationCache.fetch(worker(third, directory)) { flunk "accepted changed source" } }
     end

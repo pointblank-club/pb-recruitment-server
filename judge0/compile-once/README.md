@@ -71,6 +71,7 @@ mismatch and expiry across time zones. The expiry test exposed a timezone
 assumption; cache timestamp writes/comparisons now explicitly use UTC.
 The pinned Rails runtime also exposed binary artifact transcoding; artifact
 reads/writes now explicitly use binary mode, with a failing-before-fix regression test.
+Compiler diagnostics are base64 encoded in cache payloads to preserve arbitrary bytes.
 
 The `Compile-once Judge0 integration` workflow builds the overlay from a resolved
 1.13.1 image digest and tests the migration, native Rails request contract and
