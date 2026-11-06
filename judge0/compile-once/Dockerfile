@@ -6,4 +6,4 @@ ENV JUDGE0_COMPILER_BUILD_ID=${COMPILER_BUILD_ID}
 COPY lib/compilation_cache.rb /api/lib/compilation_cache.rb
 COPY config/initializers/compilation_cache.rb /api/config/initializers/compilation_cache.rb
 COPY db/migrate/20261107000000_add_compilation_groups.rb /api/db/migrate/20261107000000_add_compilation_groups.rb
-COPY test/compilation_cache_test.rb /api/test/compilation_cache_test.rb
+COPY test/*.rb /api/test/

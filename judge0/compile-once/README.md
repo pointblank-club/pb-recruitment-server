@@ -1,6 +1,6 @@
 # Compile once, keep separate testcase sandboxes
 
-Draft implementation for Judge0 CE 1.13.1. **Not tested or deployed.**
+Draft implementation for Judge0 CE 1.13.1. **Production remains unchanged.**
 
 The recruitment API currently submits one Judge0 job per testcase, so C++/Java
 compile repeatedly. A multi-file `run` loop would put the harness and all cases
@@ -63,9 +63,18 @@ docker build --build-arg JUDGE0_BASE_IMAGE=judge0/judge0@sha256:REVIEWED_DIGEST 
 
 ## Validation required before merge/deployment
 
-Tests are provided but **were not run**, at the user's request. CI is intentionally
-skipped for this draft commit. No local build, judge submission, load test or SSH
-change was performed for this PR.
+The later request to test supersedes the original request to skip tests. Local
+Go tests passed with race detection and disposable PostgreSQL; artifact tests
+passed; cache integration tests passed with ten concurrent cases, real C++/Java
+compilation and distinct inputs, compilation failure reuse, rollback, fingerprint
+mismatch and expiry across time zones. The expiry test exposed a timezone
+assumption; cache timestamp writes/comparisons now explicitly use UTC.
+
+The `Compile-once Judge0 integration` workflow builds the overlay from a resolved
+1.13.1 image digest and tests the migration, native Rails request contract and
+shared compilation against disposable PostgreSQL. No production settings or data
+are used. This is not a native isolate end-to-end test or a load/capacity test;
+those remain required before enabling the feature.
 
 - Run Go tests including compilation-group JSON/recovery snapshot compatibility.
 - Run the standalone Ruby artifact tests: `ruby test/compilation_cache_test.rb`

@@ -110,7 +110,7 @@ module CompilationCache
           raise Uncacheable if output && output.bytesize > MAX_BYTES
           payload = { "result" => result.to_s, "compile_output" => output }
           payload["files"] = capture(worker.boxdir) if result == :success
-          connection.exec_params("INSERT INTO compilation_artifacts(compilation_group,fingerprint,payload,created_at) VALUES($1,$2,$3,now())", [group, fingerprint, JSON.generate(payload)])
+          connection.exec_params("INSERT INTO compilation_artifacts(compilation_group,fingerprint,payload,created_at) VALUES($1,$2,$3,timezone('UTC',now()))", [group, fingerprint, JSON.generate(payload)])
         rescue Uncacheable, JSON::GeneratorError
           # shortcut: oversized/nonregular artifacts compile normally; use a bounded artifact store before widening support.
         end
@@ -124,7 +124,7 @@ module CompilationCache
     ActiveRecord::Base.connection.raw_connection.exec_params(<<~SQL, [])
       DELETE FROM compilation_artifacts WHERE compilation_group IN (
         SELECT a.compilation_group FROM compilation_artifacts a
-        WHERE a.created_at < now() - interval '24 hours'
+        WHERE a.created_at < timezone('UTC',now()) - interval '24 hours'
         AND NOT EXISTS (SELECT 1 FROM submissions s WHERE s.compilation_group=a.compilation_group AND s.status_id IN (1,2))
         ORDER BY a.created_at LIMIT 100
       )
