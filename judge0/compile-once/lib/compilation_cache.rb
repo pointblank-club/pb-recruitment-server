@@ -17,7 +17,7 @@ module CompilationCache
     Digest::SHA256.hexdigest(JSON.generate([
       build, submission.language_id, submission.language.compile_cmd,
       submission.language.source_file, submission.language.run_cmd,
-      submission.source_code, submission.compiler_options,
+      Digest::SHA256.hexdigest(submission.source_code), submission.compiler_options,
       submission.enable_per_process_and_thread_time_limit,
       submission.enable_per_process_and_thread_memory_limit,
       Config::MAX_CPU_TIME_LIMIT, Config::MAX_WALL_TIME_LIMIT,

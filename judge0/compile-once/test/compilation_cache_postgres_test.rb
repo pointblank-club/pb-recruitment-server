@@ -80,7 +80,7 @@ class CompilationCachePostgresTest < Minitest::Test
     value = CacheTestSubmission.create!(compilation_group: group)
     value.language_id = language
     value.language = Struct.new(:compile_cmd, :source_file, :run_cmd).new("compiler", "source", "program")
-    value.source_code = "source"
+    value.source_code = "// caf\xc3\xa9\n".b
     value.compiler_options = ""
     value.enable_per_process_and_thread_time_limit = false
     value.enable_per_process_and_thread_memory_limit = false

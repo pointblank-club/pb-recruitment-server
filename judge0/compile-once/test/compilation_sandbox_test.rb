@@ -4,8 +4,8 @@ require "securerandom"
 raise "disposable privileged Judge0 runner required" unless ENV["COMPILATION_SANDBOX_TEST"] == "1"
 
 class CompilationSandboxTest < Minitest::Test
-  CPP = "#include <iostream>\nint main(){int a,b;std::cin>>a>>b;std::cout<<a+b<<std::endl;}"
-  JAVA = "import java.util.Scanner; public class Main {public static void main(String[] a){Scanner s=new Scanner(System.in);System.out.println(s.nextInt()+s.nextInt());}}"
+  CPP = "// café\n#include <iostream>\nint main(){int a,b;std::cin>>a>>b;std::cout<<a+b<<std::endl;}"
+  JAVA = "// café\nimport java.util.Scanner; public class Main {public static void main(String[] a){Scanner s=new Scanner(System.in);System.out.println(s.nextInt()+s.nextInt());}}"
 
   def setup
     @ids = []; @groups = []
