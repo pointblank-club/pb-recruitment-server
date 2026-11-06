@@ -41,12 +41,10 @@ class CompilationCachePostgresTest < Minitest::Test
     @admin = PG.connect(url)
     @admin.exec("CREATE SCHEMA #{@schema}")
     # Rails 5 sees same-named public indexes if public remains in search_path.
-    # Copy only static language/status metadata needed by the native model getters.
+    # Status is a static enum; only language metadata lives in PostgreSQL.
     if defined?(Language)
-      ["languages", "statuses"].each do |table|
-        @admin.exec("CREATE TABLE #{@schema}.#{table} (LIKE public.#{table} INCLUDING ALL)")
-        @admin.exec("INSERT INTO #{@schema}.#{table} SELECT * FROM public.#{table}")
-      end
+      @admin.exec("CREATE TABLE #{@schema}.languages (LIKE public.languages INCLUDING ALL)")
+      @admin.exec("INSERT INTO #{@schema}.languages SELECT * FROM public.languages")
     end
     ActiveRecord::Base.establish_connection(adapter: "postgresql", host: host,
       port: parameters["port"] || uri.port, database: URI::DEFAULT_PARSER.unescape(uri.path.sub(%r{\A/}, "")),
