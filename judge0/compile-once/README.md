@@ -73,8 +73,13 @@ assumption; cache timestamp writes/comparisons now explicitly use UTC.
 The `Compile-once Judge0 integration` workflow builds the overlay from a resolved
 1.13.1 image digest and tests the migration, native Rails request contract and
 shared compilation against disposable PostgreSQL. No production settings or data
-are used. This is not a native isolate end-to-end test or a load/capacity test;
-those remain required before enabling the feature.
+are used. It also runs native `IsolateJob` C++/Java cases, checking compiler
+invocation counts and accepted, wrong-answer, compilation-error, runtime-error
+and time-limit verdicts, plus legacy requests without groups. These sandbox tests
+use a privileged disposable CI runner and native per-process time/memory limits
+(both flags enabled), rather than the deployment's cgroup configuration.
+API-to-queue/callback/scoring integration, deployed resource limits and load/capacity
+tests remain required before enabling the feature.
 
 - Run Go tests including compilation-group JSON/recovery snapshot compatibility.
 - Run the standalone Ruby artifact tests: `ruby test/compilation_cache_test.rb`
