@@ -3,6 +3,22 @@ require "tmpdir"
 require_relative "../lib/compilation_cache"
 
 class CompilationCacheTest < Minitest::Test
+  def test_binary_artifacts_ignore_rails_default_encoding
+    previous = Encoding.default_internal
+    Encoding.default_internal = Encoding::UTF_8
+    bytes = "\x7fELF\x00\xa0\xff".b
+    Dir.mktmpdir do |source|
+      File.binwrite(File.join(source, "program"), bytes)
+      artifact = CompilationCache.capture(source)
+      Dir.mktmpdir do |target|
+        CompilationCache.restore(target, artifact)
+        assert_equal bytes, File.binread(File.join(target, "program"))
+      end
+    end
+  ensure
+    Encoding.default_internal = previous
+  end
+
   def test_fresh_copy_preserves_executable_and_resets_candidate_writes
     Dir.mktmpdir do |source|
       File.write(File.join(source, "program"), "compiled bytes")

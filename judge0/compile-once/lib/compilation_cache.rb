@@ -37,7 +37,7 @@ module CompilationCache
       raise Uncacheable unless info.file? && !info.symlink?
       size += info.size
       raise Uncacheable if size > MAX_BYTES || files.length >= MAX_FILES
-      data = File.open(path, File::RDONLY | File::NOFOLLOW) { |f| f.read(MAX_BYTES + 1) || "".b }
+      data = File.open(path, File::RDONLY | File::NOFOLLOW | File::BINARY) { |f| f.read(MAX_BYTES + 1) || "".b }
       raise Uncacheable if data.bytesize != info.size
       name = Pathname.new(path).relative_path_from(Pathname.new(directory)).to_s
       files << { "path" => name, "mode" => info.mode & 0777, "data" => Base64.strict_encode64(data) }
@@ -68,7 +68,7 @@ module CompilationCache
     decoded.each do |name, mode, data|
       path = File.join(directory, name)
       FileUtils.mkdir_p(File.dirname(path))
-      File.open(path, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, mode) { |f| f.write(data) }
+      File.open(path, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW | File::BINARY, mode) { |f| f.write(data) }
       File.chmod(mode, path)
     end
   end
