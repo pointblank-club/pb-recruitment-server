@@ -66,19 +66,21 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 	return sub, nil
 }
 
-func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) error {
-	if ss == nil || ss.stores == nil || ss.stores.Submissions == nil {
-		return nil
-	}
-
+func (ss *SubmissionService) rateLimitCooldown() int64 {
 	cooldown := int64(5) // default 5 seconds
 	if envVal := os.Getenv("SUBMISSION_RATE_LIMIT_SECONDS"); envVal != "" {
 		if val, err := strconv.ParseInt(envVal, 10, 64); err == nil {
 			cooldown = val
 		}
 	}
+	return cooldown
+}
 
-	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, cooldown)
+func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) error {
+	if ss == nil || ss.stores == nil || ss.stores.Submissions == nil {
+		return nil
+	}
+	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, ss.rateLimitCooldown())
 }
 
 func (ss *SubmissionService) JudgeMCQ(ctx context.Context, submissionID string) error {
@@ -113,10 +115,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		return "", common.ErrNotFound
 	}
 	if submissionType != models.Code {
-		if err := ss.CheckRateLimit(ctx, userID); err != nil {
-			return "", err
-		}
-		return ss.stores.Submissions.CreateSubmission(ctx, sub)
+		return ss.stores.Submissions.CreateMCQSubmission(ctx, sub, ss.rateLimitCooldown())
 	}
 
 	source, err := decodeSource(req.Code)

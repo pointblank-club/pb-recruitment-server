@@ -63,6 +63,10 @@ func (s *controllerSubmissionStore) CreateSubmission(context.Context, *models.Su
 	s.created = true
 	return "submission", nil
 }
+func (s *controllerSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
+	s.created = true
+	return "submission", nil
+}
 func (s *controllerSubmissionStore) JudgeMCQ(context.Context, string) error {
 	s.judged = true
 	return nil
@@ -115,6 +119,12 @@ func (s *rateLimitedSubmissionStore) CheckSubmissionRateLimit(ctx context.Contex
 	return s.rateLimitErr
 }
 func (s *rateLimitedSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
+	return "submission", nil
+}
+func (s *rateLimitedSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
+	if s.rateLimitErr != nil {
+		return "", s.rateLimitErr
+	}
 	return "submission", nil
 }
 func (s *rateLimitedSubmissionStore) JudgeMCQ(context.Context, string) error {
@@ -176,5 +186,47 @@ func TestSubmitSolutionLogsCreateFailure(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), storeErr.Error()) {
 		t.Fatal("database error exposed in response")
+	}
+}
+
+type duplicateSubmissionStore struct {
+	*stores.SubmissionStore
+}
+
+func (s *duplicateSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
+	// Simulate DB unique constraint violation (concurrent insert race).
+	return "", common.ErrSubmissionAlreadyExists
+}
+func (s *duplicateSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
+	return "", common.ErrSubmissionAlreadyExists
+}
+func (s *duplicateSubmissionStore) JudgeMCQ(context.Context, string) error {
+	return errors.New("should not be called")
+}
+
+func TestSubmitSolutionDuplicateMCQ(t *testing.T) {
+	now := time.Now().UnixMilli()
+	storage := &stores.Storage{
+		Contests: submissionContestStore{
+			contest:    models.Contest{StartTime: now - 60_000, EndTime: now + 60_000},
+			registered: true,
+		},
+		Problems:    submissionProblemStore{},
+		Submissions: &duplicateSubmissionStore{},
+	}
+	controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil), nil)
+	recorder := httptest.NewRecorder()
+	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/submit", nil), recorder)
+	ctx.Set(common.AUTH_USER_ID, "user")
+	ctx.Set(common.VALIDATED_REQUEST_BODY, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: models.MCQ, Option: []int{1}})
+
+	if err := controller.SubmitSolution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("HTTP %d, want 409", recorder.Code)
+	}
+	if !strings.Contains(recorder.Body.String(), "submission already exists") {
+		t.Fatalf("body = %s, want to contain 'submission already exists'", recorder.Body.String())
 	}
 }

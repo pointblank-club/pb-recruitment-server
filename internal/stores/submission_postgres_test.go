@@ -55,13 +55,13 @@ func TestUserProblemProgressPostgres(t *testing.T) {
 		if i == 0 {
 			firstProblem = problem
 		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,$3,10,'mcq')`, problem, contest, tc.name); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,$3,10,'code')`, problem, contest, tc.name); err != nil {
 			t.Fatal(err)
 		}
 		var previousSeq int64
 		for _, a := range tc.attempts {
 			var seq int64
-			err := db.QueryRowContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES($1,$2,$3,$4,'mcq',$5,$6) RETURNING submission_seq`, fmt.Sprintf("%02d-%s", i, a.id), user, contest, problem, a.status, a.createdAt).Scan(&seq)
+			err := db.QueryRowContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES($1,$2,$3,$4,'code',$5,$6) RETURNING submission_seq`, fmt.Sprintf("%02d-%s", i, a.id), user, contest, problem, a.status, a.createdAt).Scan(&seq)
 			if err != nil || seq <= previousSeq {
 				t.Fatalf("%s: sequence %d after %d: %v", tc.name, seq, previousSeq, err)
 			}
@@ -72,14 +72,14 @@ func TestUserProblemProgressPostgres(t *testing.T) {
 		}
 	}
 	// Another account's accepted result must not change this user's pending result.
-	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('other-user',$1,$2,$3,'mcq','accepted',100)`, otherUser, contest, firstProblem); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('other-user',$1,$2,$3,'code','accepted',100)`, otherUser, contest, firstProblem); err != nil {
 		t.Fatal(err)
 	}
 	otherProblem := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,'Other contest',10,'mcq')`, otherProblem, otherContest); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,'Other contest',10,'code')`, otherProblem, otherContest); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('other-contest',$1,$2,$3,'mcq','accepted',100)`, user, otherContest, otherProblem); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('other-contest',$1,$2,$3,'code','accepted',100)`, user, otherContest, otherProblem); err != nil {
 		t.Fatal(err)
 	}
 
@@ -116,20 +116,22 @@ func TestJudgeMCQPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	submissions := stores.NewSubmissionStore(db)
-	const n = 24
-	ids := make([]string, n)
-	for i := range ids {
-		ids[i], err = submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
-		if err != nil {
-			t.Fatal(err)
-		}
+	id, err := submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	_, dupErr := submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
+	if !errors.Is(dupErr, common.ErrSubmissionAlreadyExists) {
+		t.Fatalf("expected ErrSubmissionAlreadyExists, got %v", dupErr)
+	}
+
+	const n = 24
 	start := make(chan struct{})
 	failures := make(chan error, n)
 	var wg sync.WaitGroup
-	for _, id := range ids {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func(id string) { defer wg.Done(); <-start; failures <- submissions.JudgeMCQ(ctx, id) }(id)
+		go func() { defer wg.Done(); <-start; failures <- submissions.JudgeMCQ(ctx, id) }()
 	}
 	close(start)
 	wg.Wait()
@@ -139,11 +141,11 @@ func TestJudgeMCQPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := submissions.JudgeMCQ(ctx, ids[0]); err != nil {
+	if err := submissions.JudgeMCQ(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	var accepted int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM submissions WHERE user_id=$1 AND contest_id=$2 AND status='accepted'`, user, contest).Scan(&accepted); err != nil || accepted != n {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM submissions WHERE user_id=$1 AND contest_id=$2 AND status='accepted'`, user, contest).Scan(&accepted); err != nil || accepted != 1 {
 		t.Fatalf("accepted=%d error=%v", accepted, err)
 	}
 	assertScore := func() {
@@ -166,10 +168,10 @@ func TestJudgeMCQPostgres(t *testing.T) {
 	}
 	assertScore()
 	// A completed verdict and its points must survive failure cleanup.
-	if err := submissions.MarkFailed(ctx, ids[0]); err != nil {
+	if err := submissions.MarkFailed(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	status, err := submissions.GetSubmissionStatusByID(ctx, ids[0])
+	status, err := submissions.GetSubmissionStatusByID(ctx, id)
 	if err != nil || status.Status != models.Accepted {
 		t.Fatalf("completed verdict changed: %+v %v", status, err)
 	}
@@ -251,5 +253,126 @@ func TestSubmissionRateLimitPostgres(t *testing.T) {
 	if successCount != 1 || rateLimitedCount != workers-1 {
 		t.Fatalf("expected exactly 1 success and %d rate limited, got %d successes and %d rate limited",
 			workers-1, successCount, rateLimitedCount)
+	}
+}
+
+func TestCreateMCQSubmissionConcurrentPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'MCQ User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'MCQ Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{ID: problem, ContestID: contest, Name: "MCQ Problem", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	submissionStore := stores.NewSubmissionStore(db)
+
+	const n = 5
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	type res struct {
+		id  string
+		err error
+	}
+	results := make([]res, n)
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			id, err := submissionStore.CreateMCQSubmission(ctx, &models.Submission{
+				UserID:    user,
+				ContestID: contest,
+				ProblemID: problem,
+				Type:      models.MCQ,
+				Option:    []int{1},
+			}, 5)
+			results[idx] = res{id: id, err: err}
+		}(i)
+	}
+
+	close(start)
+	wg.Wait()
+
+	var successCount, conflictCount, rateLimitCount int
+	for _, r := range results {
+		if r.err == nil && r.id != "" {
+			successCount++
+		} else if errors.Is(r.err, common.ErrSubmissionAlreadyExists) {
+			conflictCount++
+		} else if errors.Is(r.err, common.ErrRateLimitExceeded) {
+			rateLimitCount++
+		} else {
+			t.Fatalf("unexpected result: %+v", r)
+		}
+	}
+
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 success, got %d", successCount)
+	}
+	if conflictCount != n-1 {
+		t.Fatalf("expected exactly %d duplicate conflicts, got %d (rate limits: %d)", n-1, conflictCount, rateLimitCount)
+	}
+	if rateLimitCount != 0 {
+		t.Fatalf("concurrent duplicates must not return rate limit (429), got %d rate limit errors", rateLimitCount)
+	}
+}
+
+func TestMCQHistoricalSurplusPreservedPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+	user := uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Surplus User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Surplus Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{ID: problem, ContestID: contest, Name: "Surplus Problem", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert 1 active historical attempt and 2 surplus historical attempts
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, is_historical_surplus) VALUES($1,$2,$3,$4,'mcq','wrong_answer',100,false)`, uuid.NewString(), user, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, is_historical_surplus) VALUES($1,$2,$3,$4,'mcq','accepted',200,true)`, uuid.NewString(), user, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, is_historical_surplus) VALUES($1,$2,$3,$4,'mcq','pending',300,true)`, uuid.NewString(), user, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify all 3 attempts exist in the database (history preserved)
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM submissions WHERE user_id=$1 AND problem_id=$2`, user, problem).Scan(&count); err != nil || count != 3 {
+		t.Fatalf("expected 3 historical rows preserved, got %d (err: %v)", count, err)
+	}
+
+	// Any new submission must still be rejected
+	submissionStore := stores.NewSubmissionStore(db)
+	_, err := submissionStore.CreateMCQSubmission(ctx, &models.Submission{
+		UserID:    user,
+		ContestID: contest,
+		ProblemID: problem,
+		Type:      models.MCQ,
+		Option:    []int{1},
+	}, 0)
+	if !errors.Is(err, common.ErrSubmissionAlreadyExists) {
+		t.Fatalf("expected ErrSubmissionAlreadyExists for problem with surplus history, got %v", err)
 	}
 }

@@ -22,6 +22,7 @@ var (
 	InvalidYearError               = errors.New("you are not eligible for this contest based on your academic year")
 	KeyNotFoundError               = errors.New("key not found")
 	KeyAlreadyExistsError          = errors.New("key already exists")
+	ErrSubmissionAlreadyExists     = errors.New("submission already exists")
 	ErrUnsupportedLanguage         = errors.New("unsupported language")
 	ErrNoTestcases                 = errors.New("problem has no testcases")
 	ErrInvalidCode                 = errors.New("code must be non-empty UTF-8 text")

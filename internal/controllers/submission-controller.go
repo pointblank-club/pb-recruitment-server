@@ -214,7 +214,7 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		if errors.Is(err, common.ErrNotFound) {
 			return ctx.NoContent(http.StatusNotFound)
 		}
-		if errors.Is(err, common.KeyAlreadyExistsError) {
+		if errors.Is(err, common.KeyAlreadyExistsError) || errors.Is(err, common.ErrSubmissionAlreadyExists) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		}
 		if errors.Is(err, common.ErrUnsupportedLanguage) || errors.Is(err, common.ErrNoTestcases) || errors.Is(err, common.ErrInvalidCode) {

@@ -14,16 +14,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 type submissionTestStore struct {
 	*stores.SubmissionStore
-	markFailed       func(context.Context, string) error
-	judgeMCQ         func(context.Context, string) error
-	createSubmission func(context.Context, *models.Submission) (string, error)
-	checkRateLimit   func(context.Context, string, int64) error
+	markFailed          func(context.Context, string) error
+	judgeMCQ            func(context.Context, string) error
+	createSubmission    func(context.Context, *models.Submission) (string, error)
+	createMCQSubmission func(context.Context, *models.Submission, int64) (string, error)
+	checkRateLimit      func(context.Context, string, int64) error
 }
 
 func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldown int64) error {
@@ -34,6 +36,21 @@ func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userI
 }
 
 func (s submissionTestStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
+	if s.createSubmission != nil {
+		return s.createSubmission(ctx, sub)
+	}
+	return "submission", nil
+}
+
+func (s submissionTestStore) CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
+	if s.createMCQSubmission != nil {
+		return s.createMCQSubmission(ctx, sub, cooldown)
+	}
+	if s.checkRateLimit != nil {
+		if err := s.checkRateLimit(ctx, sub.UserID, cooldown); err != nil {
+			return "", err
+		}
+	}
 	if s.createSubmission != nil {
 		return s.createSubmission(ctx, sub)
 	}
@@ -522,5 +539,71 @@ func TestCreateSubmissionRejectsInvalidUTF8BeforePreparation(t *testing.T) {
 	})
 	if id != "" || !errors.Is(err, common.ErrInvalidCode) {
 		t.Fatal("invalid source reached preparation", id, err)
+	}
+}
+
+func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
+	// Two goroutines racing to submit for the same MCQ problem with an active cooldown.
+	// Serialized admission guarantees one succeeds and the other gets ErrSubmissionAlreadyExists (409), NOT ErrRateLimitExceeded (429).
+	var mu sync.Mutex
+	submitted := false
+	rateLimited := false
+
+	storage := &stores.Storage{
+		Problems: problemTestStore{
+			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
+				return &dto.GetProblemStatementResponse{Type: models.MCQ}, nil
+			},
+		},
+		Submissions: submissionTestStore{
+			createMCQSubmission: func(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				// Duplicate check comes first under per-user lock
+				if submitted {
+					return "", common.ErrSubmissionAlreadyExists
+				}
+				if rateLimited {
+					return "", common.ErrRateLimitExceeded
+				}
+				submitted = true
+				rateLimited = true
+				return "sub-1", nil
+			},
+		},
+	}
+
+	svc := NewSubmissionService(storage, nil, nil)
+	req := &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: models.MCQ, Option: []int{1}}
+
+	var wg sync.WaitGroup
+	type res struct {
+		id  string
+		err error
+	}
+	results := make(chan res, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := svc.CreateSubmission(context.Background(), "user", models.MCQ, req)
+			results <- res{id: id, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var successes, duplicates int
+	for r := range results {
+		if r.err == nil && r.id == "sub-1" {
+			successes++
+		} else if errors.Is(r.err, common.ErrSubmissionAlreadyExists) && r.id == "" {
+			duplicates++
+		} else {
+			t.Errorf("unexpected result: %+v", r)
+		}
+	}
+	if successes != 1 || duplicates != 1 {
+		t.Errorf("expected 1 success and 1 duplicate rejection, got %d successes and %d duplicates", successes, duplicates)
 	}
 }
