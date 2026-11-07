@@ -8,12 +8,95 @@ import (
 	"app/internal/stores"
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func TestUserProblemProgressPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+	user, otherUser := uuid.NewString(), uuid.NewString()
+	contest, otherContest := uuid.NewString(), uuid.NewString()
+	for _, id := range []string{user, otherUser} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Progress test',$2,$1,1,'CS')`, id, id+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{contest, otherContest} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Progress test','',1,4102444800000,1,4102444800000)`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	type attempt struct {
+		id, status string
+		createdAt  int64
+	}
+	tests := []struct {
+		name     string
+		attempts []attempt
+		want     string
+	}{
+		{"latest pending with lower ID", []attempt{{"z", "wrong_answer", 100}, {"a", "pending", 100}}, "judging"},
+		{"latest failure with lower ID", []attempt{{"z", "pending", 100}, {"a", "wrong_answer", 100}}, "failed"},
+		{"earlier acceptance wins", []attempt{{"z", "accepted", 100}, {"a", "pending", 100}}, "solved"},
+		{"latest timestamp wins", []attempt{{"z", "pending", 100}, {"a", "wrong_answer", 101}}, "failed"},
+		{"no submissions", nil, ""},
+	}
+	want := make(map[string]string)
+	var firstProblem string
+	for i, tc := range tests {
+		problem := uuid.NewString()
+		if i == 0 {
+			firstProblem = problem
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,$3,10,'mcq')`, problem, contest, tc.name); err != nil {
+			t.Fatal(err)
+		}
+		var previousSeq int64
+		for _, a := range tc.attempts {
+			var seq int64
+			err := db.QueryRowContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES($1,$2,$3,$4,'mcq',$5,$6) RETURNING submission_seq`, fmt.Sprintf("%02d-%s", i, a.id), user, contest, problem, a.status, a.createdAt).Scan(&seq)
+			if err != nil || seq <= previousSeq {
+				t.Fatalf("%s: sequence %d after %d: %v", tc.name, seq, previousSeq, err)
+			}
+			previousSeq = seq
+		}
+		if tc.want != "" {
+			want[problem] = tc.want
+		}
+	}
+	// Another account's accepted result must not change this user's pending result.
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('other-user',$1,$2,$3,'mcq','accepted',100)`, otherUser, contest, firstProblem); err != nil {
+		t.Fatal(err)
+	}
+	otherProblem := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,'Other contest',10,'mcq')`, otherProblem, otherContest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('other-contest',$1,$2,$3,'mcq','accepted',100)`, user, otherContest, otherProblem); err != nil {
+		t.Fatal(err)
+	}
+
+	store := stores.NewSubmissionStore(db)
+	got, err := store.GetUserProblemProgress(ctx, user, contest)
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("user progress = %v, want %v: %v", got, want, err)
+	}
+	got, err = store.GetUserProblemProgress(ctx, otherUser, contest)
+	if err != nil || !reflect.DeepEqual(got, map[string]string{firstProblem: "solved"}) {
+		t.Fatalf("other user progress = %v: %v", got, err)
+	}
+	got, err = store.GetUserProblemProgress(ctx, user, otherContest)
+	if err != nil || !reflect.DeepEqual(got, map[string]string{otherProblem: "solved"}) {
+		t.Fatalf("other contest progress = %v: %v", got, err)
+	}
+}
 
 func TestJudgeMCQPostgres(t *testing.T) {
 	db := postgresTestDB(t)

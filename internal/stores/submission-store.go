@@ -35,7 +35,7 @@ func (s *SubmissionStore) GetUserProblemProgress(ctx context.Context, userID, co
 	const q = `
 		SELECT problem_id,
 		       CASE WHEN bool_or(status = 'accepted') THEN 'solved'
-		            WHEN (array_agg(status::text ORDER BY created_at DESC, id DESC))[1] IN ('pending', 'processing') THEN 'judging'
+		            WHEN (array_agg(status::text ORDER BY created_at DESC, submission_seq DESC))[1] IN ('pending', 'processing') THEN 'judging'
 		            ELSE 'failed' END
 		FROM submissions
 		WHERE user_id = $1 AND contest_id = $2
