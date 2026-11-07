@@ -71,9 +71,6 @@ func (s *controllerSubmissionStore) JudgeMCQ(context.Context, string) error {
 	s.judged = true
 	return nil
 }
-func (s *controllerSubmissionStore) ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error) {
-	return nil, nil
-}
 
 func TestSubmitSolutionContestWindow(t *testing.T) {
 	now := time.Now().UnixMilli()
@@ -132,9 +129,6 @@ func (s *rateLimitedSubmissionStore) CreateMCQSubmission(context.Context, *model
 }
 func (s *rateLimitedSubmissionStore) JudgeMCQ(context.Context, string) error {
 	return nil
-}
-func (s *rateLimitedSubmissionStore) ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error) {
-	return nil, nil
 }
 
 func TestSubmitSolutionRateLimit(t *testing.T) {
@@ -199,9 +193,6 @@ type duplicateSubmissionStore struct {
 	*stores.SubmissionStore
 }
 
-func (s *duplicateSubmissionStore) ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error) {
-	return nil, nil
-}
 func (s *duplicateSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
 	// Simulate DB unique constraint violation (concurrent insert race).
 	return "", common.ErrSubmissionAlreadyExists
