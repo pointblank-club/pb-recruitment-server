@@ -1,0 +1,100 @@
+{
+  "k6": "k6 v2.3.0 (commit/e088784614, go1.26.8, linux/amd64)",
+  "checks": [
+    {
+      "profile": "smoke",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "baseline",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "expected",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "deadline",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "stress",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "spike",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "soak",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "breakpoint",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "volume",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "scalability",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "recovery",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "resilience",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "fairness",
+      "workload": "default",
+      "valid": true
+    },
+    {
+      "profile": "expected",
+      "workload": "journey",
+      "valid": true
+    },
+    {
+      "profile": "expected",
+      "workload": "arrival",
+      "valid": true
+    },
+    {
+      "profile": "expected",
+      "workload": "burst",
+      "valid": true
+    },
+    {
+      "profile": "expected",
+      "workload": "runs",
+      "valid": true
+    },
+    {
+      "profile": "expected",
+      "workload": "mixed",
+      "valid": true
+    },
+    {
+      "profile": "direct-judge",
+      "workload": "isolated direct execution",
+      "valid": true
+    }
+  ]
+}

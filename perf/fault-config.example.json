@@ -1,0 +1,11 @@
+{
+  "environment": "isolated",
+  "run_id": "pbperf-20261106T000000Z-isolated",
+  "api": "http://127.0.0.1:18080",
+  "judge": "http://127.0.0.1:12358",
+  "port": 23590,
+  "callbacks": "missing",
+  "delay_seconds": 10,
+  "judge_failures": 0,
+  "fault_seconds": 30
+}

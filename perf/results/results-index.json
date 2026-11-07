@@ -1,0 +1,764 @@
+{
+  "k6_version": "v2.3.0",
+  "backend_revision": "2efc783c2e87a407a4ac922e103b7d2b150491f1",
+  "frontend_revision": "8d2a40d49266b1f81daf3eead5b88acb66800703",
+  "advertised_configuration": {
+    "mcq": 10,
+    "coding": 5,
+    "minutes": 120,
+    "asset": "index-DfCBBD_n.js"
+  },
+  "existing_contests_checked": 10,
+  "existing_contests_matching_advertisement": 0,
+  "runs": [
+    {
+      "label": "baseline-low",
+      "profile": "baseline",
+      "workload": "arrival",
+      "dropped_iterations": 0,
+      "admission_rejections": 0,
+      "custom_run_attempts": 0,
+      "successful_custom_executions": 0,
+      "oldest_test_pending_seconds": 49.258718,
+      "test_backlog_drain_upper_bound_seconds": 56.137381076812744,
+      "queue_recovery_passed": true,
+      "receipt_p95_ms": 1966.2101013499998,
+      "verdict_p95_ms": 53943.6,
+      "read_p95_ms": 444.1762826,
+      "k6_exit_code": 0,
+      "measurement_seconds": 327.512,
+      "planned_submissions": 10,
+      "started_posts": 10,
+      "receipt_ids": 10,
+      "observed_finals": 10,
+      "database_new_submissions": 10,
+      "database_terminal_testcases_delta": 55,
+      "observed_scored_completion_sps": 0.03022705471945175,
+      "logical_testcase_completion_eps": 0.16624880071736386,
+      "submission_start_spread_ms": 270000,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.317359447479248,
+      "completion_observation_seconds": 330.82945585250854,
+      "passed": true,
+      "verdict_max_ms": 54147,
+      "correct_verdict_rate": 1,
+      "http_requests": 136,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 10
+        },
+        "status": {
+          "200": 115
+        },
+        "details": {
+          "200": 10
+        }
+      },
+      "http_request_rate_in_k6_window": 0.41842697800506473
+    },
+    {
+      "label": "smoke-01",
+      "profile": "smoke",
+      "k6_exit_code": 99,
+      "measurement_seconds": 33.062,
+      "planned_submissions": 12,
+      "started_posts": 3,
+      "receipt_ids": 3,
+      "observed_finals": 0,
+      "database_new_submissions": 3,
+      "database_terminal_testcases_delta": 12,
+      "observed_scored_completion_sps": 0.03895840276057921,
+      "logical_testcase_completion_eps": 0.15583361104231683,
+      "submission_start_spread_ms": 20002,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 43.94321036338806,
+      "passed": false,
+      "completion_observation_seconds": 77.00521036338806,
+      "receipt_p95_ms": 2100.6061559,
+      "verdict_p95_ms": null,
+      "verdict_max_ms": null,
+      "read_p95_ms": 357.83602725000003,
+      "correct_verdict_rate": null,
+      "dropped_iterations": 1,
+      "admission_rejections": 0,
+      "custom_run_attempts": 0,
+      "successful_custom_executions": 0,
+      "http_requests": 20,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 3
+        },
+        "status": {
+          "200": 16
+        }
+      },
+      "stopped_reason": "Insufficient VU allocation caused one dropped iteration; observations continued outside k6.",
+      "http_request_rate_in_k6_window": 0.6250130419713619
+    },
+    {
+      "label": "smoke-02",
+      "profile": "smoke",
+      "k6_exit_code": 99,
+      "measurement_seconds": 66.112,
+      "planned_submissions": 3,
+      "started_posts": 3,
+      "receipt_ids": 3,
+      "observed_finals": 3,
+      "database_new_submissions": 3,
+      "database_terminal_testcases_delta": 12,
+      "observed_scored_completion_sps": 0.04379696387493742,
+      "logical_testcase_completion_eps": 0.1751878530606653,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 2.3860530853271484,
+      "completion_observation_seconds": 68.49790740013123,
+      "passed": false,
+      "receipt_p95_ms": 2014.3676777,
+      "verdict_p95_ms": 63113.6,
+      "verdict_max_ms": 63629,
+      "read_p95_ms": 382.94042959999985,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 0,
+      "custom_run_attempts": 0,
+      "successful_custom_executions": 0,
+      "http_requests": 47,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 3
+        },
+        "status": {
+          "200": 40
+        },
+        "details": {
+          "200": 3
+        }
+      },
+      "stopped_reason": "Proposed final-verdict p95 threshold failed; all work finalized.",
+      "http_request_rate_in_k6_window": 0.7287234992654907
+    },
+    {
+      "label": "smoke-11-mcq-wrong",
+      "profile": "smoke",
+      "workload": "arrival",
+      "dropped_iterations": 0,
+      "admission_rejections": 0,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 1,
+      "oldest_test_pending_seconds": 0.72608,
+      "test_backlog_drain_upper_bound_seconds": 11.081403017044067,
+      "queue_recovery_passed": true,
+      "receipt_p95_ms": 999.554384,
+      "verdict_p95_ms": 3075,
+      "read_p95_ms": 283.02319505,
+      "k6_exit_code": 0,
+      "measurement_seconds": 11.316,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 0,
+      "observed_scored_completion_sps": 0.0,
+      "logical_testcase_completion_eps": 0.0,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.3468422889709473,
+      "completion_observation_seconds": 14.663226127624512,
+      "passed": true,
+      "verdict_max_ms": 3075,
+      "correct_verdict_rate": 1,
+      "http_requests": 5,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "200": 1
+        },
+        "status": {
+          "200": 1
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 1.4087658336341082
+    },
+    {
+      "label": "smoke-3-wrong",
+      "profile": "smoke",
+      "k6_exit_code": 0,
+      "measurement_seconds": 34.843,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.026293882627437114,
+      "logical_testcase_completion_eps": 0.026293881803261945,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.18882155418396,
+      "completion_observation_seconds": 38.03166484832764,
+      "passed": true,
+      "receipt_p95_ms": 1357.613422,
+      "verdict_p95_ms": 33325,
+      "verdict_max_ms": 33325,
+      "read_p95_ms": 436.8147232,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 1,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 0,
+      "http_requests": 12,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "429": 1
+        },
+        "status": {
+          "200": 8
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.3504668747480129
+    },
+    {
+      "label": "smoke-4-compile",
+      "profile": "smoke",
+      "k6_exit_code": 0,
+      "measurement_seconds": 61.458,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.015576794390279642,
+      "logical_testcase_completion_eps": 0.01557679410103437,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 2.740293264389038,
+      "completion_observation_seconds": 64.19806814193726,
+      "passed": true,
+      "receipt_p95_ms": 687.444729,
+      "verdict_p95_ms": 58627,
+      "verdict_max_ms": 58627,
+      "read_p95_ms": 385.54133049999996,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 1,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 0,
+      "http_requests": 17,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "429": 1
+        },
+        "status": {
+          "200": 13
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.2866763756057431
+    },
+    {
+      "label": "smoke-5-runtime",
+      "profile": "smoke",
+      "k6_exit_code": 0,
+      "measurement_seconds": 46.514,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.019885198845185116,
+      "logical_testcase_completion_eps": 0.01988519780815198,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.7750637531280518,
+      "completion_observation_seconds": 50.288665533065796,
+      "passed": true,
+      "receipt_p95_ms": 666.147317,
+      "verdict_p95_ms": 38082,
+      "verdict_max_ms": 38082,
+      "read_p95_ms": 626.6685815999996,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 1,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 0,
+      "http_requests": 13,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "429": 1
+        },
+        "status": {
+          "200": 9
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.33441571221383504
+    },
+    {
+      "label": "smoke-6-time",
+      "profile": "smoke",
+      "k6_exit_code": 0,
+      "measurement_seconds": 68.733,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.01386251388456208,
+      "logical_testcase_completion_eps": 0.013862513701295164,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.403954029083252,
+      "completion_observation_seconds": 72.13699221611023,
+      "passed": true,
+      "receipt_p95_ms": 991.46686,
+      "verdict_p95_ms": 58973,
+      "verdict_max_ms": 58973,
+      "read_p95_ms": 433.47633109999987,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 1,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 0,
+      "http_requests": 17,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "429": 1
+        },
+        "status": {
+          "200": 13
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.2829898761896276
+    },
+    {
+      "label": "smoke-7-memory",
+      "profile": "smoke",
+      "k6_exit_code": 0,
+      "measurement_seconds": 67.58,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.014096507333591466,
+      "logical_testcase_completion_eps": 0.014096507144085396,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.3596231937408447,
+      "completion_observation_seconds": 70.93956184387207,
+      "passed": true,
+      "receipt_p95_ms": 1236.006794,
+      "verdict_p95_ms": 59035,
+      "verdict_max_ms": 59035,
+      "read_p95_ms": 336.7531401,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 1,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 0,
+      "http_requests": 17,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "429": 1
+        },
+        "status": {
+          "200": 13
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.2839217356674565
+    },
+    {
+      "label": "smoke-final-harness",
+      "profile": "smoke",
+      "workload": "arrival",
+      "dropped_iterations": 0,
+      "admission_rejections": 1,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 0,
+      "oldest_test_pending_seconds": 33.273996,
+      "test_backlog_drain_upper_bound_seconds": 44.08234095573425,
+      "queue_recovery_passed": true,
+      "receipt_p95_ms": 1352.176839,
+      "verdict_p95_ms": 43151,
+      "read_p95_ms": 398.931924,
+      "k6_exit_code": 0,
+      "measurement_seconds": 45.111,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.020819651055376556,
+      "logical_testcase_completion_eps": 0.02081965084868774,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 2.9206714630126953,
+      "completion_observation_seconds": 48.03154706954956,
+      "passed": true,
+      "verdict_max_ms": 43151,
+      "correct_verdict_rate": 1,
+      "http_requests": 14,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "429": 1
+        },
+        "status": {
+          "200": 10
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.31781767517117393
+    },
+    {
+      "label": "smoke-fixture-publisher",
+      "profile": "smoke",
+      "workload": "arrival",
+      "stopped_for_work_budget": false,
+      "dropped_iterations": 0,
+      "admission_rejections": 0,
+      "custom_run_attempts": 0,
+      "successful_custom_executions": 0,
+      "oldest_test_pending_seconds": 34.918272,
+      "test_backlog_drain_upper_bound_seconds": 45.06729483604431,
+      "queue_recovery_passed": true,
+      "receipt_p95_ms": 1057.498419,
+      "verdict_p95_ms": 38197,
+      "read_p95_ms": 466.2494417999999,
+      "k6_exit_code": 0,
+      "measurement_seconds": 45.747,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 1,
+      "observed_scored_completion_sps": 0.020520367811843295,
+      "logical_testcase_completion_eps": 0.02052036741026488,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 2.985565185546875,
+      "completion_observation_seconds": 48.73207426071167,
+      "passed": true,
+      "verdict_max_ms": 38197,
+      "correct_verdict_rate": 1,
+      "http_requests": 12,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "status": {
+          "200": 9
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 0.30656812664812133
+    },
+    {
+      "label": "smoke-mcq-correct",
+      "profile": "smoke",
+      "k6_exit_code": 0,
+      "measurement_seconds": 11.133,
+      "planned_submissions": 1,
+      "started_posts": 1,
+      "receipt_ids": 1,
+      "observed_finals": 1,
+      "database_new_submissions": 1,
+      "database_terminal_testcases_delta": 0,
+      "observed_scored_completion_sps": 0.0,
+      "logical_testcase_completion_eps": 0.0,
+      "submission_start_spread_ms": 0,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.5360279083251953,
+      "completion_observation_seconds": 14.66926121711731,
+      "passed": true,
+      "receipt_p95_ms": 1329.58964,
+      "verdict_p95_ms": 3434,
+      "verdict_max_ms": 3434,
+      "read_p95_ms": 349.93579809999994,
+      "correct_verdict_rate": 1,
+      "dropped_iterations": 0,
+      "admission_rejections": 0,
+      "custom_run_attempts": 1,
+      "successful_custom_executions": 1,
+      "http_requests": 5,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "submit": {
+          "201": 1
+        },
+        "run": {
+          "200": 1
+        },
+        "status": {
+          "200": 1
+        },
+        "details": {
+          "200": 1
+        }
+      },
+      "http_request_rate_in_k6_window": 1.18918387067039
+    },
+    {
+      "label": "smoke-runs",
+      "profile": "smoke",
+      "workload": "runs",
+      "dropped_iterations": 0,
+      "admission_rejections": 3,
+      "custom_run_attempts": 6,
+      "successful_custom_executions": 3,
+      "oldest_test_pending_seconds": 0,
+      "test_backlog_drain_upper_bound_seconds": 1.017460823059082,
+      "queue_recovery_passed": true,
+      "receipt_p95_ms": null,
+      "verdict_p95_ms": null,
+      "read_p95_ms": null,
+      "k6_exit_code": 0,
+      "measurement_seconds": 11.339,
+      "planned_submissions": 0,
+      "started_posts": 0,
+      "receipt_ids": 0,
+      "observed_finals": 0,
+      "database_new_submissions": 0,
+      "database_terminal_testcases_delta": 0,
+      "observed_scored_completion_sps": 0.0,
+      "logical_testcase_completion_eps": 0.0,
+      "submission_start_spread_ms": null,
+      "ambiguous_posts": 0,
+      "unmatched_saved_work": 0,
+      "missing_saved_ids": 0,
+      "unexpected_verdicts": 0,
+      "unresolved_at_observation_deadline": 0,
+      "score_mismatches": 0,
+      "observation_drain_seconds": 3.183701515197754,
+      "completion_observation_seconds": 14.522433519363403,
+      "passed": true,
+      "verdict_max_ms": null,
+      "correct_verdict_rate": 1,
+      "http_requests": 7,
+      "http_endpoint_status_counts": {
+        "fixture_preflight": {
+          "200": 1
+        },
+        "run": {
+          "429": 3,
+          "200": 3
+        }
+      },
+      "http_request_rate_in_k6_window": 1.0741759866913154
+    }
+  ],
+  "monitoring": {
+    "baseline-low": {
+      "host_samples": 27,
+      "generator_samples": 29,
+      "generator_peak_rss_mib": 44.82421875,
+      "generator_peak_cpu_percent_one_core": 0.987923894389781,
+      "generator_peak_fds": 11,
+      "host_peak_load1": 0.12841796875,
+      "host_peak_sample_cpu_percent": 7.997147514262426,
+      "host_swap_used_kib": 0,
+      "api_peak_sample_cpu_percent_one_core": 3.57,
+      "worker_peak_sample_cpu_percent_one_core": 339.23,
+      "api_sample_memory": "20.2MiB / 1GiB",
+      "worker_sample_memory": "1.424GiB / 15.34GiB"
+    },
+    "smoke-02": {
+      "host_samples": 6,
+      "generator_samples": 6,
+      "generator_peak_rss_mib": 43.80078125,
+      "generator_peak_cpu_percent_one_core": 1.269002752526719,
+      "generator_peak_fds": 11,
+      "host_peak_load1": 0.9609375,
+      "host_peak_sample_cpu_percent": 10.213414634146345,
+      "host_swap_used_kib": 0,
+      "api_peak_sample_cpu_percent_one_core": 2.18,
+      "worker_peak_sample_cpu_percent_one_core": 737.97,
+      "api_sample_memory": "19.18MiB / 1GiB",
+      "worker_sample_memory": "1.423GiB / 15.34GiB"
+    }
+  },
+  "readiness": "500-600 participants not demonstrated",
+  "unexecuted": [
+    "50/100/300/500/600 participant stages",
+    "deadline 10 submissions/s",
+    "600-user synchronized burst",
+    "120-minute soak and token refresh",
+    "20-testcase scored fan-out",
+    "41-item populated-history fixture",
+    "isolated stress and breakpoint",
+    "isolated worker scaling comparisons",
+    "real delayed/missing/duplicate callbacks and transient Judge0 failures",
+    "real worker interruption",
+    "isolated fairness and volume",
+    "direct Judge0 bottleneck profile"
+  ],
+  "cleanup": {
+    "application_rows_remaining": 0,
+    "firebase_users_remaining": 0,
+    "object_keys_remaining": 0,
+    "object_keys_verified_absent": 67,
+    "synthetic_identities_removed": 8,
+    "native_judge0_records_retained": 91,
+    "native_scored_jobs_retained": 86,
+    "native_custom_jobs_retained": 5,
+    "native_jobs_pending": 0,
+    "early_custom_inventory_correlation": "Known source/stdin and successful request windows; inventory only, not deletion"
+  },
+  "highest_demonstrated_passing_baseline": {
+    "offered_scored_sps": 0.03333333333333333,
+    "achieved_completion_sps_including_drain": 0.03022705471945175,
+    "logical_testcase_completion_eps_including_drain": 0.16624880071736386,
+    "arrival_schedule_seconds": 300,
+    "full_observation_seconds": 330.82945585250854,
+    "distinct_fixture_identities": 3,
+    "submissions": 10,
+    "logical_testcase_jobs": 55,
+    "is_capacity_limit": false
+  },
+  "future_planning": {
+    "assumed_polls_per_submission": 12,
+    "basis": "115 real baseline polls for 10 submissions = 11.5; rounded up for planning",
+    "burst_http_rate_warning": "Polling and detail reads continue after the submission window; generation-normalized work rates are not instantaneous HTTP peak measurements"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "enabled_at_utc": "2026-11-06T18:19:24.888217+00:00",
+  "callback_base": "https://api.recruitment.pointblank.club",
+  "callback_secret": "protected runtime file; value omitted",
+  "same_api_image": "sha256:fecb5ce816090a3d497848e1bfaa3665c462d6e783e4530086d473b105c0639a",
+  "callback_redaction_enabled": true,
+  "worker_restarted": false,
+  "unsigned_callback_http": 401,
+  "callback_successful_executions": 12,
+  "callback_statuses": {
+    "200": 12,
+    "500": 3
+  },
+  "callback_error_categories": {
+    "context canceled": 3,
+    "context deadline exceeded": 0,
+    "deadlock": 0,
+    "conflicting Judge0 token": 0,
+    "SQLSTATE": 0,
+    "unclassified": 0
+  },
+  "signature_in_logs": {
+    "recruitment-server": false,
+    "recruitment-ingresss": false,
+    "judge0-v1131_server_1": false,
+    "judge0-v1131_workers_1": false
+  },
+  "smoke": {
+    "profile": "smoke",
+    "workload": "arrival",
+    "stopped_for_work_budget": false,
+    "dropped_iterations": 0,
+    "admission_rejections": 0,
+    "custom_run_attempts": 0,
+    "successful_custom_executions": 0,
+    "oldest_test_pending_seconds": 0,
+    "test_backlog_drain_upper_bound_seconds": 9.07686996459961,
+    "queue_recovery_passed": true,
+    "receipt_p95_ms": 2219.7796229,
+    "verdict_p95_ms": 12274.7,
+    "read_p95_ms": 608.60535615,
+    "k6_exit_code": 0,
+    "measurement_seconds": 22.279,
+    "planned_submissions": 3,
+    "started_posts": 3,
+    "receipt_ids": 3,
+    "observed_finals": 3,
+    "database_new_submissions": 3,
+    "database_terminal_testcases_delta": 12,
+    "observed_scored_completion_sps": 0.11932268997461064,
+    "logical_testcase_completion_eps": 0.4772907508462269,
+    "submission_start_spread_ms": 0,
+    "ambiguous_posts": 0,
+    "unmatched_saved_work": 0,
+    "missing_saved_ids": 0,
+    "unexpected_verdicts": 0,
+    "unresolved_at_observation_deadline": 0,
+    "score_mismatches": 0,
+    "observation_drain_seconds": 2.862926721572876,
+    "completion_observation_seconds": 25.141910314559937,
+    "passed": true
+  },
+  "cleanup": {
+    "application_rows_remaining": 0,
+    "firebase_users_remaining": 0,
+    "judge0_native_retention": "untouched",
+    "object_keys_checked": 17,
+    "object_keys_remaining": 0
+  },
+  "native_records_retained": 12,
+  "native_pending": 0,
+  "capacity_500_600_verified": false,
+  "callback_attempt_failure_rate": 0.2,
+  "callback_verification": "functional with retries; not a clean first-attempt delivery result",
+  "callback_cancelled_attempt_ms": [
+    4999.33238,
+    5005.626859,
+    5005.03792
+  ]
+}

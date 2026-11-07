@@ -1,0 +1,79 @@
+{
+  "run_id": "compile-once-validation-20261107",
+  "commit": "dc110f573cd20425f28188984a0d6ddc66c83f78",
+  "pr": "https://github.com/pointblank-club/pb-recruitment-server/pull/87",
+  "result": "passed_functional_checks",
+  "judge0_image": "judge0/judge0@sha256:6b5d6a66aa19a8e878a52ea3c6a560afc1086734d96e2885b561fd5c6018f082",
+  "checks": {
+    "go_race_and_build": {
+      "result": "passed",
+      "url": "https://github.com/pointblank-club/pb-recruitment-server/actions/runs/42287945191"
+    },
+    "native_runtime": {
+      "result": "passed",
+      "url": "https://github.com/pointblank-club/pb-recruitment-server/actions/runs/42287945194",
+      "artifact_tests": {
+        "tests": 4,
+        "assertions": 11
+      },
+      "postgres_cache_tests": {
+        "tests": 6,
+        "assertions": 35
+      },
+      "native_contract_tests": {
+        "tests": 4,
+        "assertions": 11
+      },
+      "native_sandbox_tests": {
+        "tests": 3,
+        "assertions": 40,
+        "testcase_jobs": 16,
+        "compiler_invocations_asserted": 9,
+        "expected_verdict_counts": {
+          "accepted": 7,
+          "wrong_answer": 2,
+          "compilation_error": 3,
+          "runtime_error": 2,
+          "time_limit_exceeded": 2
+        },
+        "failures": 0,
+        "errors": 0,
+        "skips": 0
+      }
+    },
+    "ten_case_contention": {
+      "result": "passed",
+      "distinct_postgres_connections": 10,
+      "compiler_callback_invocations": 1,
+      "native_sandbox": false
+    }
+  },
+  "runner": {
+    "sandbox": "native IsolateJob.perform_now; disposable privileged CI container",
+    "limits": "native per-process time and memory mode; 4096000 KiB virtual address space; UTF-8 locale",
+    "production_configuration_match": false
+  },
+  "fixed": [
+    "UTC cache expiry",
+    "binary executable restore",
+    "binary compiler diagnostics serialization",
+    "source-byte fingerprint encoding"
+  ],
+  "production_changes": false,
+  "performance_or_capacity_certification": false,
+  "unexecuted": [
+    "production cgroup limits and memory/output-limit cases",
+    "full recruitment API/Redis queue/callback/recovery/scoring integration",
+    "multiple native worker processes/hosts and interruption recovery",
+    "comparative throughput/CPU/latency benchmark",
+    "500\u2013600 participant load, stress, and soak"
+  ],
+  "remaining_test_resources": {
+    "production_accounts": 0,
+    "production_contests": 0,
+    "production_submissions": 0,
+    "local_postgres": "stopped; exact test-owned pgdata removed",
+    "ci_database_and_containers": "ephemeral runner teardown completed",
+    "retained": "protected local test logs and this report"
+  }
+}
