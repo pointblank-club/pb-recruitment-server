@@ -28,3 +28,26 @@ type GetSubmissionDetailsResponse struct {
 	models.Submission
 	Code string `json:"code"`
 }
+
+type AdminSubmissionItem struct {
+	ID          string                 `json:"id"`
+	UserID      string                 `json:"user_id"`
+	UserName    string                 `json:"user_name"`
+	UserEmail   string                 `json:"user_email"`
+	ContestID   string                 `json:"contest_id"`
+	ProblemID   string                 `json:"problem_id"`
+	ProblemName string                 `json:"problem_name"`
+	Type        models.SubmissionType  `json:"type"`
+	Language    string                 `json:"language"`
+	Status      models.SubmissionStatus `json:"status"`
+	CreatedAt   int64                  `json:"created_at"`
+	Runtime     int64                  `json:"runtime"`
+	Memory      int64                  `json:"memory"`
+}
+
+type AdminSubmissionDetails struct {
+	AdminSubmissionItem
+	Code            string                  `json:"code"`
+	TestCaseResults []models.TestCaseResult `json:"test_case_results"`
+}
+

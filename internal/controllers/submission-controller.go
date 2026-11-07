@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -243,3 +244,91 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		SubmissionID: submissionID,
 	})
 }
+
+// GetAdminSubmissions godoc
+// @Summary      Get contest coding submissions (Admin)
+// @Description  Get all coding submissions made in a contest, optionally filtered by user_id and problem_id
+// @Tags         Admin - Contests
+// @Produce      json
+// @Security     BearerAuth
+// @Param        contestId path string true "Contest ID"
+// @Param        user_id query string false "User ID (optional)"
+// @Param        problem_id query string false "Problem ID (optional)"
+// @Param        page query int false "Page number (defaults to 0)"
+// @Param        page_size query int false "Page size (defaults to 50)"
+// @Success      200 {array} dto.AdminSubmissionItem
+// @Failure      400 {object} map[string]string "Contest ID is required"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/contests/{contestId}/submissions [get]
+func (sc *SubmissionController) GetAdminSubmissions(ctx echo.Context) error {
+	contestID := ctx.Param("contestId")
+	if contestID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "contest ID is required",
+		})
+	}
+
+	userID := ctx.QueryParam("user_id")
+	problemID := ctx.QueryParam("problem_id")
+
+	page := 0
+	if p, err := strconv.Atoi(ctx.QueryParam("page")); err == nil && p >= 0 {
+		page = p
+	}
+
+	pageSize := 50
+	if ps, err := strconv.Atoi(ctx.QueryParam("page_size")); err == nil && ps > 0 {
+		pageSize = ps
+	}
+
+	submissions, totalCount, err := sc.submissionService.ListAdminSubmissions(ctx.Request().Context(), contestID, userID, problemID, page, pageSize)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to list submissions",
+		})
+	}
+
+	ctx.Response().Header().Set("X-Total-Count", strconv.Itoa(totalCount))
+	return ctx.JSON(http.StatusOK, submissions)
+}
+
+// GetAdminSubmissionDetails godoc
+// @Summary      Get coding submission details (Admin)
+// @Description  Get full execution and code details of a specific submission for admin viewing
+// @Tags         Admin - Contests
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Submission ID"
+// @Success      200 {object} dto.AdminSubmissionDetails
+// @Failure      400 {object} map[string]string "Submission ID is required"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      404 {object} map[string]string "Submission not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/submissions/{id} [get]
+func (sc *SubmissionController) GetAdminSubmissionDetails(ctx echo.Context) error {
+	id := ctx.Param("id")
+	if id == "" {
+		id = ctx.Param("submissionId")
+	}
+	if id == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "submission ID is required",
+		})
+	}
+
+	details, err := sc.submissionService.GetAdminSubmissionDetails(ctx.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": "submission not found"})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to get submission details",
+		})
+	}
+
+	return ctx.JSON(http.StatusOK, details)
+}
+

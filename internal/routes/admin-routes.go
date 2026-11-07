@@ -15,6 +15,7 @@ import (
 func AddAdminRoutes(
 	e *echo.Echo,
 	contestController *controllers.ContestController,
+	submissionController *controllers.SubmissionController,
 	authClient *auth.Client,
 	userService *services.UserService,
 	adminService *services.AdminService,
@@ -52,4 +53,9 @@ func AddAdminRoutes(
 	adminGroup.PATCH("/contest/:id/plagiarism/pairs/:pairKey", contestController.ReviewDolosPair, middleware.ValidateRequest(new(dto.PlagiarismPairReviewRequest)))
 
 	adminGroup.GET("/contests/:contestId/registrations", contestController.GetContestRegistrations)
+
+	//Submissions / Code Management
+	adminGroup.GET("/contests/:contestId/submissions", submissionController.GetAdminSubmissions)
+	adminGroup.GET("/submissions/:id", submissionController.GetAdminSubmissionDetails)
+	adminGroup.GET("/contests/:contestId/submissions/:id", submissionController.GetAdminSubmissionDetails)
 }
