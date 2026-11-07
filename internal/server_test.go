@@ -18,7 +18,7 @@ func TestCORSExposesResponseHeaders(t *testing.T) {
 		"X-Max-Pairs-Per-Report": "1000",
 		"X-Min-Similarity":       "0.20",
 	}
-	e := NewEchoServer(nil, nil)
+	e := NewEchoServer(nil, nil, nil)
 	e.POST("/submission/run", func(c echo.Context) error {
 		for name, value := range headers {
 			c.Response().Header().Set(name, value)
@@ -99,7 +99,7 @@ func TestSwaggerGating(t *testing.T) {
 			t.Setenv("STAGE", tt.stage)
 			t.Setenv("ENABLE_SWAGGER", tt.enableSwagger)
 
-			e := NewEchoServer(nil, nil)
+			e := NewEchoServer(nil, nil, nil)
 
 			mounted := false
 			for _, route := range e.Routes() {
@@ -114,5 +114,36 @@ func TestSwaggerGating(t *testing.T) {
 					mounted, tt.wantMounted, tt.stage, tt.enableSwagger)
 			}
 		})
+	}
+}
+
+func TestHealthAndMetricsEndpoints(t *testing.T) {
+	e := NewEchoServer(nil, nil, nil)
+
+	// Test /health
+	reqHealth := httptest.NewRequest(http.MethodGet, "/health", nil)
+	recHealth := httptest.NewRecorder()
+	e.ServeHTTP(recHealth, reqHealth)
+	if recHealth.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /health, got %d", recHealth.Code)
+	}
+
+	// Test /healthz
+	reqHealthz := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	recHealthz := httptest.NewRecorder()
+	e.ServeHTTP(recHealthz, reqHealthz)
+	if recHealthz.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /healthz, got %d", recHealthz.Code)
+	}
+
+	// Test /metrics
+	reqMetrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	recMetrics := httptest.NewRecorder()
+	e.ServeHTTP(recMetrics, reqMetrics)
+	if recMetrics.Code != http.StatusOK {
+		t.Fatalf("expected 200 for /metrics, got %d", recMetrics.Code)
+	}
+	if !strings.Contains(recMetrics.Body.String(), "http_requests_total") {
+		t.Errorf("expected /metrics response to contain http_requests_total")
 	}
 }
