@@ -246,11 +246,11 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 	return submissions, nil
 }
 
-func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
-	if s == nil || s.db == nil {
-		return "", fmt.Errorf("submission store: db is not initialized")
-	}
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
 
+func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRower, sub *models.Submission) (string, error) {
 	sub.ID = uuid.NewString()
 	sub.CreatedAt = time.Now().Unix()
 
@@ -271,7 +271,7 @@ func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Subm
 	`
 
 	var submissionID string
-	err := s.db.QueryRowContext(ctx, q,
+	err := runner.QueryRowContext(ctx, q,
 		sub.ID,
 		sub.UserID,
 		sub.ContestID,
@@ -296,6 +296,76 @@ func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Subm
 		}
 		log.Printf("submission-store: failed to insert submission: %v", err)
 		return "", fmt.Errorf("insert submission: %w", err)
+	}
+
+	return submissionID, nil
+}
+
+func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
+	if s == nil || s.db == nil {
+		return "", fmt.Errorf("submission store: db is not initialized")
+	}
+	return s.insertSubmission(ctx, s.db, sub)
+}
+
+func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error) {
+	if s == nil || s.db == nil {
+		return "", fmt.Errorf("submission store: db is not initialized")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin mcq submission tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// ponytail: advisory user lock serializes MCQ admission per user to prevent duplicate/rate-limit races
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('sub:user:' || $1))`, sub.UserID); err != nil {
+		return "", fmt.Errorf("acquire user mcq admission lock: %w", err)
+	}
+
+	var exists bool
+	const checkDupQ = `
+		SELECT EXISTS(
+			SELECT 1 FROM submissions
+			WHERE user_id = $1 AND contest_id = $2 AND problem_id = $3 AND type = 'mcq'
+		)
+	`
+	if err := tx.QueryRowContext(ctx, checkDupQ, sub.UserID, sub.ContestID, sub.ProblemID).Scan(&exists); err != nil {
+		return "", fmt.Errorf("check duplicate mcq submission: %w", err)
+	}
+	if exists {
+		return "", common.ErrSubmissionAlreadyExists
+	}
+
+	if cooldownSeconds > 0 {
+		const rateLimitQ = `
+			INSERT INTO submission_rate_limits (user_id, last_submission_at)
+			VALUES ($1, floor(extract(epoch from clock_timestamp()))::bigint)
+			ON CONFLICT (user_id) DO UPDATE
+			SET last_submission_at = floor(extract(epoch from clock_timestamp()))::bigint
+			WHERE floor(extract(epoch from clock_timestamp()))::bigint - submission_rate_limits.last_submission_at >= $2
+		`
+		res, err := tx.ExecContext(ctx, rateLimitQ, sub.UserID, cooldownSeconds)
+		if err != nil {
+			return "", fmt.Errorf("check submission rate limit: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return "", fmt.Errorf("rate limit rows affected: %w", err)
+		}
+		if affected == 0 {
+			return "", common.ErrRateLimitExceeded
+		}
+	}
+
+	submissionID, err := s.insertSubmission(ctx, tx, sub)
+	if err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit mcq submission: %w", err)
 	}
 
 	return submissionID, nil

@@ -63,6 +63,10 @@ func (s *controllerSubmissionStore) CreateSubmission(context.Context, *models.Su
 	s.created = true
 	return "submission", nil
 }
+func (s *controllerSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
+	s.created = true
+	return "submission", nil
+}
 func (s *controllerSubmissionStore) JudgeMCQ(context.Context, string) error {
 	s.judged = true
 	return nil
@@ -118,6 +122,12 @@ func (s *rateLimitedSubmissionStore) CheckSubmissionRateLimit(ctx context.Contex
 	return s.rateLimitErr
 }
 func (s *rateLimitedSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
+	return "submission", nil
+}
+func (s *rateLimitedSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
+	if s.rateLimitErr != nil {
+		return "", s.rateLimitErr
+	}
 	return "submission", nil
 }
 func (s *rateLimitedSubmissionStore) JudgeMCQ(context.Context, string) error {
@@ -194,6 +204,9 @@ func (s *duplicateSubmissionStore) ListUserSubmissionsByProblemID(context.Contex
 }
 func (s *duplicateSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
 	// Simulate DB unique constraint violation (concurrent insert race).
+	return "", common.ErrSubmissionAlreadyExists
+}
+func (s *duplicateSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
 	return "", common.ErrSubmissionAlreadyExists
 }
 func (s *duplicateSubmissionStore) JudgeMCQ(context.Context, string) error {

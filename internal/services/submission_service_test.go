@@ -24,6 +24,7 @@ type submissionTestStore struct {
 	markFailed          func(context.Context, string) error
 	judgeMCQ            func(context.Context, string) error
 	createSubmission    func(context.Context, *models.Submission) (string, error)
+	createMCQSubmission func(context.Context, *models.Submission, int64) (string, error)
 	checkRateLimit      func(context.Context, string, int64) error
 	listUserSubmissions func(context.Context, string, string, int) ([]models.Submission, error)
 }
@@ -43,6 +44,30 @@ func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userI
 }
 
 func (s submissionTestStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
+	if s.createSubmission != nil {
+		return s.createSubmission(ctx, sub)
+	}
+	return "submission", nil
+}
+
+func (s submissionTestStore) CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
+	if s.createMCQSubmission != nil {
+		return s.createMCQSubmission(ctx, sub, cooldown)
+	}
+	if s.listUserSubmissions != nil {
+		existing, err := s.listUserSubmissions(ctx, sub.UserID, sub.ProblemID, 0)
+		if err != nil {
+			return "", err
+		}
+		if len(existing) > 0 {
+			return "", common.ErrSubmissionAlreadyExists
+		}
+	}
+	if s.checkRateLimit != nil {
+		if err := s.checkRateLimit(ctx, sub.UserID, cooldown); err != nil {
+			return "", err
+		}
+	}
 	if s.createSubmission != nil {
 		return s.createSubmission(ctx, sub)
 	}
@@ -586,10 +611,12 @@ func TestCreateSubmissionDuplicateMCQRejection(t *testing.T) {
 }
 
 func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
-	// Two goroutines racing to submit for the same MCQ problem.
-	// One succeeds; the second hits ErrSubmissionAlreadyExists from the DB constraint.
+	// Two goroutines racing to submit for the same MCQ problem with an active cooldown.
+	// Serialized admission guarantees one succeeds and the other gets ErrSubmissionAlreadyExists (409), NOT ErrRateLimitExceeded (429).
 	var mu sync.Mutex
-	calls := 0
+	submitted := false
+	rateLimited := false
+
 	storage := &stores.Storage{
 		Problems: problemTestStore{
 			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
@@ -597,14 +624,19 @@ func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
 			},
 		},
 		Submissions: submissionTestStore{
-			createSubmission: func(_ context.Context, _ *models.Submission) (string, error) {
+			createMCQSubmission: func(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
 				mu.Lock()
 				defer mu.Unlock()
-				calls++
-				if calls == 1 {
-					return "sub-1", nil
+				// Duplicate check comes first under per-user lock
+				if submitted {
+					return "", common.ErrSubmissionAlreadyExists
 				}
-				return "", common.ErrSubmissionAlreadyExists
+				if rateLimited {
+					return "", common.ErrRateLimitExceeded
+				}
+				submitted = true
+				rateLimited = true
+				return "sub-1", nil
 			},
 		},
 	}
