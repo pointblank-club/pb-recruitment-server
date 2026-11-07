@@ -127,6 +127,29 @@ func NewEchoServer(
 	e.GET("/health", healthHandler)
 	e.GET("/healthz", healthHandler)
 
+	// Test endpoint to verify Sentry integration (only available outside production)
+	if os.Getenv("STAGE") != "production" {
+		e.GET("/debug/sentry-test", func(c echo.Context) error {
+			if os.Getenv("SENTRY_BACKEND_DSN") == "" {
+				return c.JSON(http.StatusBadRequest, map[string]string{
+					"status":  "error",
+					"message": "SENTRY_BACKEND_DSN is not set in environment or .env",
+				})
+			}
+			hub := sentryecho.GetHubFromContext(c)
+			if hub != nil {
+				hub.CaptureMessage("Sentry integration verified successfully on PB Recruitment Server!")
+			} else {
+				sentry.CaptureMessage("Sentry integration verified successfully on PB Recruitment Server!")
+			}
+			sentry.Flush(2 * time.Second)
+			return c.JSON(http.StatusOK, map[string]string{
+				"status":  "success",
+				"message": "Test event dispatched to Sentry! Check your Sentry.io dashboard under Issues.",
+			})
+		})
+	}
+
 	return e
 }
 

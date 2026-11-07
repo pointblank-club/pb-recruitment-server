@@ -1,74 +1,29 @@
-# PB-Recruitment Monitoring Stack
+# PB-Recruitment Cloud Observability Pipeline
 
-Production-grade observability stack featuring Prometheus, Loki, Promtail, Grafana, Node Exporter, and Uptime Kuma.
+Forwarder stack that scrapes local backend metrics and container logs, and securely streams them up to **Grafana Cloud** via HTTPS.
 
-## Services & Ports
+## Architecture
 
-| Service | Host Port | Purpose |
-| :--- | :--- | :--- |
-| **Grafana** | `http://localhost:3000` | Unified Dashboards & Log Exploration (User: `admin`, Pass: `change_this_strong_password`) |
-| **Uptime Kuma** | `http://localhost:3001` | External Synthetic Health Probes & Discord Alerts |
-| **Prometheus** | `http://localhost:9090` | TSDB scraping `/metrics` from backend and host |
-| **Loki** | `http://localhost:3100` | Log Aggregation Engine |
-| **Promtail** | `http://localhost:9080` | Docker stdout tailer |
-| **node_exporter** | `http://localhost:9100` | Host CPU, RAM, and Disk metrics |
+- **Prometheus**: Scrapes `pb-backend:8080/metrics` and forwards them to Grafana Cloud via `remote_write`.
+- **Promtail**: Tails Docker container JSON logs and pushes them to Grafana Cloud Loki.
+- **node_exporter**: Collects host CPU, memory, and disk stats.
 
-## Quick Start
+All dashboards, alerts, and log searches are viewed at your hosted Grafana URL: `https://<your-org>.grafana.net`.
 
-```bash
-cd monitoring
+## Setup Instructions
 
-# Start all observability services in the background
-docker compose up -d
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
+2. In your Grafana Cloud account ([grafana.com](https://grafana.com)):
+   - Under **Prometheus** → click **Send Metrics** and copy `URL`, `Username`, and generate an `API Token`.
+   - Under **Loki** → click **Send Logs** and copy `URL` and `Username`.
+   - Paste these values into `monitoring/.env`.
 
-# Check status
-docker compose ps
+3. Start the forwarders:
+   ```bash
+   docker compose up -d
+   ```
 
-# View service logs
-docker compose logs -f
-```
-
-## Stopping the Stack
-
-```bash
-docker compose down
-```
-
-*(Note: Data is preserved in Docker volumes `prometheus_data`, `loki_data`, `grafana_data`, and `uptime_kuma_data`)*
-
-## Grafana Dashboards
-
-Grafana automatically provisions Prometheus and Loki datasources on startup.
-
-### Recommended Community Dashboards to Import:
-1. **Node Exporter Full** (Dashboard ID: `1860`): Host CPU, RAM, Disk I/O, Network.
-2. **Go Processes** (Dashboard ID: `10826`): Go runtime stats (Goroutines, GC pauses, Heap alloc).
-
-### Useful PromQL Queries for PB-Recruitment:
-- **Throughput by Route**:
-  ```promql
-  sum(rate(http_requests_total[1m])) by (route)
-  ```
-- **5xx Error Rate %**:
-  ```promql
-  (sum(rate(http_requests_total{status=~"5.."}[1m])) / sum(rate(http_requests_total[1m]))) * 100
-  ```
-- **In-Flight Judge0 Executions Queue**:
-  ```promql
-  pb_judge_in_flight_submissions
-  ```
-- **Judge0 95th Percentile Latency**:
-  ```promql
-  histogram_quantile(0.95, sum(rate(pb_judge0_roundtrip_duration_seconds_bucket[5m])) by (le))
-  ```
-- **Postgres DB Connections In-Use**:
-  ```promql
-  go_sql_db_connections_in_use{db_name="pb_db"}
-  ```
-
-## Running Verification Load Test
-
-```bash
-# Requires k6 (https://k6.io/)
-k6 run -e API_BASE_URL=http://localhost:8080 loadtest.js
-```
+4. View your metrics and logs in Grafana Cloud: `https://<your-org>.grafana.net`!
