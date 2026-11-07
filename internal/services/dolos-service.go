@@ -31,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/labstack/gommon/log"
 	"go.uber.org/fx"
 )
@@ -852,6 +853,10 @@ func (d *DolosService) Run(ctx context.Context) {
 		case <-ticker.C:
 			if err := d.process(ctx); err != nil {
 				log.Errorf("Dolos worker: %v", err)
+				sentry.WithScope(func(scope *sentry.Scope) {
+					scope.SetTag("worker", "dolos")
+					sentry.CaptureException(err)
+				})
 			}
 		}
 	}
@@ -1376,6 +1381,12 @@ func (d *DolosService) makeArchiveWithLease(ctx context.Context, contestID, prob
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("panic in Dolos archive lease renovator: %v", r)
+				sentry.CurrentHub().Recover(r)
+			}
+		}()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -1485,6 +1496,13 @@ func NewDolosWorker(lc fx.Lifecycle, d *DolosService) {
 		OnStart: func(context.Context) error {
 			go func() {
 				defer close(done)
+				defer func() {
+					if r := recover(); r != nil {
+						log.Errorf("panic in Dolos worker: %v", r)
+						sentry.CurrentHub().Recover(r)
+						sentry.Flush(2 * time.Second)
+					}
+				}()
 				d.Run(workerCtx)
 			}()
 			return nil

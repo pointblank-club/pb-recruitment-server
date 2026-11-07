@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/getsentry/sentry-go"
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
 )
@@ -53,6 +55,19 @@ func FirebaseAuth(authClient *auth.Client, optional bool) echo.MiddlewareFunc {
 
 			// Add the verified user information to the context
 			c.Set(common.AUTH_USER_ID, token.UID)
+
+			// Enrich Sentry hub scope with user identity
+			if hub := sentryecho.GetHubFromContext(c); hub != nil {
+				hub.ConfigureScope(func(scope *sentry.Scope) {
+					sentryUser := sentry.User{
+						ID: token.UID,
+					}
+					if email, ok := token.Claims["email"].(string); ok && email != "" {
+						sentryUser.Email = email
+					}
+					scope.SetUser(sentryUser)
+				})
+			}
 
 			// Call the next handler
 			return next(c)

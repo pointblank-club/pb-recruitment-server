@@ -11,7 +11,9 @@ import (
 	"app/internal/services"
 	"app/internal/stores"
 	"log"
+	"time"
 
+	"github.com/getsentry/sentry-go"
 	"go.uber.org/fx"
 )
 
@@ -34,6 +36,12 @@ func main() {
 	if err := boot.LoadEnv(); err != nil {
 		log.Fatal(err)
 	}
+
+	if err := boot.InitSentry(); err != nil {
+		log.Printf("[Sentry] Initialization error: %v", err)
+	}
+	defer boot.FlushSentry(2 * time.Second)
+	defer sentry.Recover()
 
 	fx.New(
 		fx.Provide(
