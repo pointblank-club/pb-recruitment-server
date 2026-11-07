@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
 )
 
@@ -285,6 +286,14 @@ func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Subm
 	).Scan(&submissionID)
 
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_submissions_user_mcq" {
+			return "", common.ErrSubmissionAlreadyExists
+		}
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "idx_submissions_user_mcq" {
+			return "", common.ErrSubmissionAlreadyExists
+		}
 		log.Printf("submission-store: failed to insert submission: %v", err)
 		return "", fmt.Errorf("insert submission: %w", err)
 	}

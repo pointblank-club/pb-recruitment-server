@@ -190,10 +190,11 @@ type duplicateSubmissionStore struct {
 }
 
 func (s *duplicateSubmissionStore) ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error) {
-	return []models.Submission{{ID: "prior-sub"}}, nil
+	return nil, nil
 }
 func (s *duplicateSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
-	return "", errors.New("should not be called")
+	// Simulate DB unique constraint violation (concurrent insert race).
+	return "", common.ErrSubmissionAlreadyExists
 }
 func (s *duplicateSubmissionStore) JudgeMCQ(context.Context, string) error {
 	return errors.New("should not be called")

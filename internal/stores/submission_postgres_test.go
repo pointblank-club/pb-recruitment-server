@@ -116,20 +116,22 @@ func TestJudgeMCQPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	submissions := stores.NewSubmissionStore(db)
-	const n = 24
-	ids := make([]string, n)
-	for i := range ids {
-		ids[i], err = submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
-		if err != nil {
-			t.Fatal(err)
-		}
+	id, err := submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	_, dupErr := submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
+	if !errors.Is(dupErr, common.ErrSubmissionAlreadyExists) {
+		t.Fatalf("expected ErrSubmissionAlreadyExists, got %v", dupErr)
+	}
+
+	const n = 24
 	start := make(chan struct{})
 	failures := make(chan error, n)
 	var wg sync.WaitGroup
-	for _, id := range ids {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func(id string) { defer wg.Done(); <-start; failures <- submissions.JudgeMCQ(ctx, id) }(id)
+		go func() { defer wg.Done(); <-start; failures <- submissions.JudgeMCQ(ctx, id) }()
 	}
 	close(start)
 	wg.Wait()
@@ -139,11 +141,11 @@ func TestJudgeMCQPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := submissions.JudgeMCQ(ctx, ids[0]); err != nil {
+	if err := submissions.JudgeMCQ(ctx, id); err != nil {
 		t.Fatal(err)
 	}
 	var accepted int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM submissions WHERE user_id=$1 AND contest_id=$2 AND status='accepted'`, user, contest).Scan(&accepted); err != nil || accepted != n {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM submissions WHERE user_id=$1 AND contest_id=$2 AND status='accepted'`, user, contest).Scan(&accepted); err != nil || accepted != 1 {
 		t.Fatalf("accepted=%d error=%v", accepted, err)
 	}
 	assertScore := func() {
@@ -166,10 +168,10 @@ func TestJudgeMCQPostgres(t *testing.T) {
 	}
 	assertScore()
 	// A completed verdict and its points must survive failure cleanup.
-	if err := submissions.MarkFailed(ctx, ids[0]); err != nil {
+	if err := submissions.MarkFailed(ctx, id); err != nil {
 		t.Fatal(err)
 	}
-	status, err := submissions.GetSubmissionStatusByID(ctx, ids[0])
+	status, err := submissions.GetSubmissionStatusByID(ctx, id)
 	if err != nil || status.Status != models.Accepted {
 		t.Fatalf("completed verdict changed: %+v %v", status, err)
 	}

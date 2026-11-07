@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -534,9 +535,8 @@ func TestCreateSubmissionRejectsInvalidUTF8BeforePreparation(t *testing.T) {
 }
 
 func TestCreateSubmissionDuplicateMCQRejection(t *testing.T) {
-	createCalled := false
-	rateLimitCalled := false
-
+	// Verify that ErrSubmissionAlreadyExists from the store (DB unique constraint)
+	// propagates out of CreateSubmission unchanged.
 	storage := &stores.Storage{
 		Problems: problemTestStore{
 			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
@@ -544,40 +544,78 @@ func TestCreateSubmissionDuplicateMCQRejection(t *testing.T) {
 			},
 		},
 		Submissions: submissionTestStore{
-			listUserSubmissions: func(ctx context.Context, userID, problemID string, page int) ([]models.Submission, error) {
-				return []models.Submission{
-					{ID: "sub-prior", ProblemID: problemID, UserID: userID, Status: models.WrongAnswer},
-				}, nil
-			},
-			checkRateLimit: func(ctx context.Context, userID string, cooldown int64) error {
-				rateLimitCalled = true
-				return nil
-			},
-			createSubmission: func(ctx context.Context, sub *models.Submission) (string, error) {
-				createCalled = true
-				return "sub-new", nil
+			createSubmission: func(_ context.Context, _ *models.Submission) (string, error) {
+				return "", common.ErrSubmissionAlreadyExists
 			},
 		},
 	}
 
-	service := NewSubmissionService(storage, nil, nil)
-	id, err := service.CreateSubmission(context.Background(), "user", models.MCQ, &dto.SubmitSubmissionRequest{
-		ContestID: "contest",
-		ProblemID: "problem",
-		Type:      models.MCQ,
-		Option:    []int{1},
+	id, err := NewSubmissionService(storage, nil, nil).CreateSubmission(context.Background(), "user", models.MCQ, &dto.SubmitSubmissionRequest{
+		ContestID: "contest", ProblemID: "problem", Type: models.MCQ, Option: []int{1},
 	})
-
 	if id != "" {
-		t.Fatalf("expected empty submission ID on duplicate, got %s", id)
+		t.Fatalf("expected empty ID, got %s", id)
 	}
 	if !errors.Is(err, common.ErrSubmissionAlreadyExists) {
 		t.Fatalf("expected ErrSubmissionAlreadyExists, got %v", err)
 	}
-	if createCalled {
-		t.Fatal("CreateSubmission store method should not be called when duplicate exists")
+}
+
+func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
+	// Two goroutines racing to submit for the same MCQ problem.
+	// One succeeds; the second hits ErrSubmissionAlreadyExists from the DB constraint.
+	var mu sync.Mutex
+	calls := 0
+	storage := &stores.Storage{
+		Problems: problemTestStore{
+			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
+				return &dto.GetProblemStatementResponse{Type: models.MCQ}, nil
+			},
+		},
+		Submissions: submissionTestStore{
+			createSubmission: func(_ context.Context, _ *models.Submission) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				calls++
+				if calls == 1 {
+					return "sub-1", nil
+				}
+				return "", common.ErrSubmissionAlreadyExists
+			},
+		},
 	}
-	if rateLimitCalled {
-		t.Fatal("CheckRateLimit should not be called when duplicate exists")
+
+	svc := NewSubmissionService(storage, nil, nil)
+	req := &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: models.MCQ, Option: []int{1}}
+
+	var wg sync.WaitGroup
+	type res struct {
+		id  string
+		err error
+	}
+	results := make(chan res, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := svc.CreateSubmission(context.Background(), "user", models.MCQ, req)
+			results <- res{id: id, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	var successes, duplicates int
+	for r := range results {
+		if r.err == nil && r.id == "sub-1" {
+			successes++
+		} else if errors.Is(r.err, common.ErrSubmissionAlreadyExists) && r.id == "" {
+			duplicates++
+		} else {
+			t.Errorf("unexpected result: %+v", r)
+		}
+	}
+	if successes != 1 || duplicates != 1 {
+		t.Errorf("expected 1 success and 1 duplicate rejection, got %d successes and %d duplicates", successes, duplicates)
 	}
 }
