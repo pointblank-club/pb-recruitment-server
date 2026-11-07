@@ -32,6 +32,7 @@ type Storage struct {
 		GetSubmissionDetailsByID(context.Context, string) (*dto.GetSubmissionDetailsResponse, error)
 		GetTestCaseResultsBySubmissionID(context.Context, string) ([]models.TestCaseResult, error)
 		ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error)
+		GetUserProblemProgress(context.Context, string, string) (map[string]string, error)
 		CreateSubmission(context.Context, *models.Submission) (string, error)
 		JudgeMCQ(context.Context, string) error
 		MarkFailed(context.Context, string) error

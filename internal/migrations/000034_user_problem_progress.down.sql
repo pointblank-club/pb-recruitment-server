@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS submissions_user_contest_progress_idx;

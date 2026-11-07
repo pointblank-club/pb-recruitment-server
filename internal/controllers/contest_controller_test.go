@@ -7,6 +7,7 @@ import (
 	"app/internal/services"
 	"app/internal/stores"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -290,12 +291,83 @@ type visibilityProblemStore struct {
 	*stores.ProblemStore
 }
 
+type visibilitySubmissionStore struct {
+	*stores.SubmissionStore
+}
+
+func (visibilitySubmissionStore) GetUserProblemProgress(context.Context, string, string) (map[string]string, error) {
+	return map[string]string{"prob-1": "solved"}, nil
+}
+
 func (visibilityProblemStore) GetProblemList(context.Context, string) ([]dto.ProblemOverview, error) {
 	return []dto.ProblemOverview{{ID: "prob-1", Name: "Problem 1", Score: 10, Type: "code"}}, nil
 }
 
 func (visibilityProblemStore) GetProblem(context.Context, string, string) (*dto.GetProblemStatementResponse, error) {
 	return &dto.GetProblemStatementResponse{ProblemID: "prob-1", Name: "Problem 1", Score: 10, Type: models.Code}, nil
+}
+
+type progressResponseStore struct {
+	visibilitySubmissionStore
+	requested []string
+}
+
+func (s *progressResponseStore) GetUserProblemProgress(_ context.Context, userID, contestID string) (map[string]string, error) {
+	s.requested = append(s.requested, userID+":"+contestID)
+	switch userID {
+	case "user-1":
+		return map[string]string{"prob-1": "solved"}, nil
+	case "user-2":
+		return map[string]string{"prob-1": "failed"}, nil
+	default:
+		return map[string]string{}, nil
+	}
+}
+
+func TestProblemOverviewProgressResponse(t *testing.T) {
+	progress := &progressResponseStore{}
+	storage := &stores.Storage{
+		Contests:    submissionContestStore{contest: models.Contest{ID: "contest", StartTime: 1, EndTime: time.Now().Add(-time.Minute).UnixMilli()}},
+		Problems:    visibilityProblemStore{},
+		Submissions: progress,
+	}
+	controller := NewContestController(services.NewContestService(storage, nil), nil)
+	for _, tc := range []struct {
+		name, userID, want string
+		includeProgress    bool
+	}{
+		{"first account", "user-1", "solved", true},
+		{"second account", "user-2", "failed", true},
+		{"no attempts", "user-3", "unsolved", true},
+		{"guest", "", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/contests/contest/problems", nil), recorder)
+			ctx.SetParamNames("id")
+			ctx.SetParamValues("contest")
+			if tc.userID != "" {
+				ctx.Set(common.AUTH_USER_ID, tc.userID)
+			}
+			if err := controller.GetContestProblemsList(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "private, no-store" {
+				t.Fatalf("HTTP %d, Cache-Control %q: %s", recorder.Code, recorder.Header().Get("Cache-Control"), recorder.Body.String())
+			}
+			var body []map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil || len(body) != 1 {
+				t.Fatalf("problem list %s: %v", recorder.Body.String(), err)
+			}
+			got, present := body[0]["progress"]
+			if present != tc.includeProgress || (present && got != tc.want) {
+				t.Fatalf("progress = %v (present %v), want %q (present %v)", got, present, tc.want, tc.includeProgress)
+			}
+		})
+	}
+	if got, want := strings.Join(progress.requested, ","), "user-1:contest,user-2:contest,user-3:contest"; got != want {
+		t.Fatalf("progress lookups = %q, want %q", got, want)
+	}
 }
 
 func TestProblemVisibilityBeforeStartAndRegistration(t *testing.T) {
@@ -350,7 +422,8 @@ func TestProblemVisibilityBeforeStartAndRegistration(t *testing.T) {
 					registered: tc.registered,
 					err:        tc.lookupErr,
 				},
-				Problems: visibilityProblemStore{},
+				Problems:    visibilityProblemStore{},
+				Submissions: visibilitySubmissionStore{},
 			}
 			controller := NewContestController(services.NewContestService(storage, nil), nil)
 

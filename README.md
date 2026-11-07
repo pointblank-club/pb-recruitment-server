@@ -23,10 +23,12 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000033`: submission cooldowns
+- The current schema requires migrations through `000035`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
-  (`000032`), and Dolos plagiarism detection (`000033`).
+  (`000032`), Dolos plagiarism detection (`000033`), and the per-user problem
+  progress index (`000034`), and stable submission ordering (`000035`). Apply `000035`
+  before running this backend revision.
   `make migrate-up` applies only pending migrations; do not force the version or
   roll back a production database.
 
@@ -95,7 +97,7 @@ before the website editor, which now consumes inputs and answers from one respon
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
-all migrations through `000032`, and clean up afterward. They skip when
+all migrations through `000035`, and clean up afterward. They skip when
 `TEST_DATABASE_URL` is unset.
 
 ```bash

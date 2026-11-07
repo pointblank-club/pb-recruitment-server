@@ -1758,7 +1758,7 @@ const docTemplate = `{
         },
         "/contests/{id}/problems": {
             "get": {
-                "description": "Get problems overview (names, score, type). Open to all once contest ends; requires registration while open.",
+                "description": "Get problems overview with the authenticated user's progress. Guests receive no progress. Open to all once contest ends; requires registration while open.",
                 "produces": [
                     "application/json"
                 ],
@@ -3259,6 +3259,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "progress": {
                     "type": "string"
                 },
                 "score": {

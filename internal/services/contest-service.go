@@ -303,8 +303,25 @@ func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID st
 	return nil
 }
 
-func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID string) ([]dto.ProblemOverview, error) {
-	return cs.stores.Problems.GetProblemList(ctx, contestID)
+func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID, userID string) ([]dto.ProblemOverview, error) {
+	problems, err := cs.stores.Problems.GetProblemList(ctx, contestID)
+	if err != nil {
+		return nil, err
+	}
+	if userID == "" || len(problems) == 0 {
+		return problems, nil
+	}
+	progress, err := cs.stores.Submissions.GetUserProblemProgress(ctx, userID, contestID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range problems {
+		problems[i].Progress = progress[problems[i].ID]
+		if problems[i].Progress == "" {
+			problems[i].Progress = "unsolved"
+		}
+	}
+	return problems, nil
 }
 
 func (cs *ContestService) GetContestProblemsListAdmin(ctx context.Context, contestID string) ([]dto.ProblemOverview, error) {

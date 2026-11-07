@@ -13,6 +13,7 @@ type ProblemOverview struct {
 	Type        models.SubmissionType `json:"type"`
 	TimeLimit   int                   `json:"time_limit,omitempty"`
 	MemoryLimit int                   `json:"memory_limit,omitempty"`
+	Progress    string                `json:"progress,omitempty"`
 }
 
 type GetProblemStatementResponse struct {

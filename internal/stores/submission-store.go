@@ -28,6 +28,39 @@ func NewSubmissionStore(db *sql.DB) *SubmissionStore {
 	}
 }
 
+func (s *SubmissionStore) GetUserProblemProgress(ctx context.Context, userID, contestID string) (map[string]string, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("submission store: db is not initialized")
+	}
+	const q = `
+		SELECT problem_id,
+		       CASE WHEN bool_or(status = 'accepted') THEN 'solved'
+		            WHEN (array_agg(status::text ORDER BY created_at DESC, submission_seq DESC))[1] IN ('pending', 'processing') THEN 'judging'
+		            ELSE 'failed' END
+		FROM submissions
+		WHERE user_id = $1 AND contest_id = $2
+		GROUP BY problem_id
+	`
+	rows, err := s.db.QueryContext(ctx, q, userID, contestID)
+	if err != nil {
+		return nil, fmt.Errorf("query user problem progress: %w", err)
+	}
+	defer rows.Close()
+
+	progress := make(map[string]string)
+	for rows.Next() {
+		var problemID, status string
+		if err := rows.Scan(&problemID, &status); err != nil {
+			return nil, fmt.Errorf("scan user problem progress: %w", err)
+		}
+		progress[problemID] = status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read user problem progress: %w", err)
+	}
+	return progress, nil
+}
+
 func (s *SubmissionStore) GetSubmissionStatusByID(ctx context.Context, id string) (*models.Submission, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("submission store: db is not initialized")
