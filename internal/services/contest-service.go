@@ -283,7 +283,12 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	if contest.GetRunningStatus() == models.ContestRunningUpcoming {
 		return nil, common.ErrContestNotStarted
 	}
-	res, err := cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	var res *dto.GetLeaderboardResponse
+	if !isAdmin && contest.GetRunningStatus() != models.ContestRunningClosed {
+		res, err = cs.stores.Rankings.GetCodeLeaderboard(ctx, contestID, page)
+	} else {
+		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -327,6 +332,10 @@ func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID,
 	if userID == "" || len(problems) == 0 {
 		return problems, nil
 	}
+	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
+	if err != nil {
+		return nil, err
+	}
 	progress, err := cs.stores.Submissions.GetUserProblemProgress(ctx, userID, contestID)
 	if err != nil {
 		return nil, err
@@ -335,7 +344,7 @@ func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID,
 		p := progress[problems[i].ID]
 		if p == "" {
 			problems[i].Progress = "unsolved"
-		} else if problems[i].Type == models.MCQ {
+		} else if problems[i].Type == models.MCQ && contest.GetRunningStatus() != models.ContestRunningClosed {
 			problems[i].Progress = "attempted"
 		} else {
 			problems[i].Progress = p

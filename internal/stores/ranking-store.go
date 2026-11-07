@@ -149,12 +149,23 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 const leaderboardPageSize = 20
 
 func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	return s.getLeaderboard(ctx, contestID, page, false)
+}
+
+func (s *RankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	return s.getLeaderboard(ctx, contestID, page, true)
+}
+
+func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool) (*dto.GetLeaderboardResponse, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
 
 	page = max(0, page)
 	cacheKey := fmt.Sprintf("%s:%d", contestID, page)
+	if codeOnly {
+		cacheKey += ":code"
+	}
 
 	if s.cacheTTL > 0 {
 		s.cacheMu.RLock()
@@ -240,6 +251,29 @@ func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, pag
 		LIMIT $2 OFFSET $3
 	`
 	}
+	if codeOnly {
+		// Recompute before pagination so neither stored MCQ points nor final ranks leak.
+		entriesQ = `
+		WITH code_scores AS (
+			SELECT solved.user_id, SUM(p.score) AS score
+			FROM (
+				SELECT DISTINCT user_id, problem_id
+				FROM submissions
+				WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
+			) solved
+			JOIN problems p ON p.id = solved.problem_id AND p.contest_id = $1
+			GROUP BY solved.user_id
+		)
+		SELECT RANK() OVER (ORDER BY COALESCE(cs.score, 0) DESC),
+		       r.user_id, u.name, u.usn, COALESCE(cs.score, 0)
+		FROM rankings r
+		JOIN users u ON u.id = r.user_id
+		LEFT JOIN code_scores cs ON cs.user_id = r.user_id
+		WHERE r.contest_id = $1 AND r.hidden = false AND r.disqualified = false
+		ORDER BY 1 ASC, u.name ASC, r.user_id ASC
+		LIMIT $2 OFFSET $3
+		`
+	}
 
 	rows, err := s.db.QueryContext(ctx, entriesQ, contestID, leaderboardPageSize, offset)
 	if err != nil {
@@ -265,7 +299,7 @@ func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, pag
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 
-	problemScores, err := s.getProblemScores(ctx, contestID, userIDs)
+	problemScores, err := s.getProblemScores(ctx, contestID, userIDs, codeOnly)
 	if err != nil {
 		log.Printf("ranking-store: problem scores query failed : %v", err)
 		return nil, err
@@ -319,7 +353,7 @@ func summarizeSolves(scores []dto.ProblemScore) (solved int, lastSolve int64) {
 }
 
 // Attempts counts all submissions for display; the final-ranking penalty excludes judge errors.
-func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string) (map[string][]dto.ProblemScore, error) {
+func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string, codeOnly bool) (map[string][]dto.ProblemScore, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
@@ -330,6 +364,10 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 	for i, uid := range userIDs {
 		placeholders[i] = fmt.Sprintf("$%d", i+2)
 		args = append(args, uid)
+	}
+	typeFilter := ""
+	if codeOnly {
+		typeFilter = "AND sub.type = 'code'"
 	}
 
 	query := fmt.Sprintf(`
@@ -345,9 +383,10 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		INNER JOIN problems p ON sub.problem_id = p.id AND sub.contest_id = p.contest_id
 		WHERE sub.contest_id = $1
 		  AND sub.user_id IN (%s)
+		  %s
 		GROUP BY sub.user_id, sub.problem_id, p.name, p.score
 		ORDER BY sub.user_id, p.name
-	`, strings.Join(placeholders, ", "))
+	`, strings.Join(placeholders, ", "), typeFilter)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

@@ -109,6 +109,15 @@ versioned edits. After any versioned edit, rollback must retain version-aware re
 or migrate references and both objects while traffic is stopped. Deploy the backend
 before the website editor, which now consumes inputs and answers from one response.
 
+## MCQ result visibility
+
+MCQ submission status, details, and history return `attempted` until the contest
+ends, then the stored verdict (`accepted` or `wrong_answer`). The problem overview
+shows `attempted`/`unsolved` while open and `solved`/`failed` after closing.
+The public live leaderboard uses only code submissions for scores, ranks, solved
+counts, and solve times. Admins see full results; after closing, public totals
+include MCQs. Per-problem leaderboard breakdowns remain admin-only.
+
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply

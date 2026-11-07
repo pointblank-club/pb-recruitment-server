@@ -105,6 +105,10 @@ func (s serviceRankingTestStore) GetLeaderboard(ctx context.Context, contestID s
 
 func (s serviceRankingTestStore) InvalidateCache(contestID string) {}
 
+func (s serviceRankingTestStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	return s.GetLeaderboard(ctx, contestID, page)
+}
+
 func TestConsolidateContestService(t *testing.T) {
 	t.Run("nil ranking store error", func(t *testing.T) {
 		svc := NewContestService(&stores.Storage{}, nil)
@@ -361,6 +365,7 @@ func (s progressSubmissionsTestStore) GetUserProblemProgress(context.Context, st
 
 func TestGetContestProblemsListMCQProgressMasking(t *testing.T) {
 	storage := &stores.Storage{
+		Contests: problemContestTestStore{start: 1, end: time.Now().Add(time.Minute).UnixMilli()},
 		Problems: problemsListTestStore{
 			problems: []dto.ProblemOverview{
 				{ID: "mcq1", Type: models.MCQ},
@@ -399,4 +404,3 @@ func TestGetContestProblemsListMCQProgressMasking(t *testing.T) {
 		}
 	}
 }
-

@@ -67,7 +67,7 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 
 // GetSubmissionStatus godoc
 // @Summary      Get submission status
-// @Description  Get current status of a specific submission (e.g. pending, accepted, wrong_answer)
+// @Description  Get a submission's status. MCQs return attempted until the contest ends, then their actual verdict. Code verdicts are always visible.
 // @Tags         Submissions
 // @Produce      json
 // @Security     BearerAuth
@@ -79,6 +79,7 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /submission/{id}/status [get]
 func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
+	ctx.Response().Header().Set("Cache-Control", "private, no-store")
 	id := ctx.Param("id")
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
@@ -104,7 +105,7 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 
 // GetSubmissionDetails godoc
 // @Summary      Get submission details
-// @Description  Get full execution details of a specific submission including test cases, runtime, memory, and code
+// @Description  Get submission details. MCQ status is attempted until the contest ends, then the actual verdict. Selected options remain visible.
 // @Tags         Submissions
 // @Produce      json
 // @Security     BearerAuth
@@ -116,6 +117,7 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /submission/{id}/details [get]
 func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
+	ctx.Response().Header().Set("Cache-Control", "private, no-store")
 	id := ctx.Param("id")
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
@@ -138,7 +140,7 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 
 // ListUserSubmissions godoc
 // @Summary      List user submissions for a problem
-// @Description  Get paginated submissions of the authenticated user for a specific problem
+// @Description  Get the user's submissions for a problem. MCQ statuses are attempted until the contest ends, then their actual verdicts.
 // @Tags         Submissions
 // @Produce      json
 // @Security     BearerAuth
@@ -150,6 +152,7 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /submission/list [get]
 func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
+	ctx.Response().Header().Set("Cache-Control", "private, no-store")
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
 	req, ok := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.ListProblemSubmissionsRequest)

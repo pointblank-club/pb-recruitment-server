@@ -149,6 +149,10 @@ func (m *mockRankingStore) GetLeaderboard(ctx context.Context, contestID string,
 
 func (m *mockRankingStore) InvalidateCache(contestID string) {}
 
+func (m *mockRankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	return m.GetLeaderboard(ctx, contestID, page)
+}
+
 func TestHandleConsolidateContest(t *testing.T) {
 	t.Run("success with regrade", func(t *testing.T) {
 		var calledContestID string
@@ -716,4 +720,3 @@ type mockAdminStore struct {
 func (m mockAdminStore) IsAdmin(ctx context.Context, userID string) (bool, error) {
 	return m.isAdmin, nil
 }
-

@@ -622,7 +622,7 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 
 // GetContestProblemsList godoc
 // @Summary      Get list of problems in contest
-// @Description  Get problems overview with the authenticated user's progress. Guests receive no progress. Open to all once contest ends; requires registration while open.
+// @Description  Get problems with the user's progress. MCQs show attempted/unsolved while open and solved/failed after closing. Guests receive no progress. Requires registration while open.
 // @Tags         Contests
 // @Produce      json
 // @Param        id path string true "Contest ID"
@@ -888,7 +888,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 
 // GetLeaderboard godoc
 // @Summary      Get contest leaderboard
-// @Description  Get ranked participants and scores for a contest with pagination
+// @Description  Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.
 // @Tags         Contests
 // @Produce      json
 // @Param        id path string true "Contest ID"
@@ -902,6 +902,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id}/leaderboard [get]
 func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
+	ctx.Response().Header().Set("Cache-Control", "private, no-store")
 	contestID := ctx.Param("id")
 
 	pageStr := ctx.QueryParam("page")

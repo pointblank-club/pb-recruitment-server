@@ -37,11 +37,19 @@ func NewSubmissionService(stores *stores.Storage, s3 *s3.S3, judge0Client *judge
 	return &SubmissionService{stores: stores, s3: s3, judge0: judge0Client}
 }
 
+func maskMCQVerdict(sub *models.Submission) {
+	if sub.Type == models.MCQ && sub.ContestEndTime >= time.Now().UnixMilli() {
+		sub.Status = models.Attempted
+		sub.TestCaseResults = nil
+	}
+}
+
 func (ss *SubmissionService) GetSubmissionStatusByID(ctx context.Context, id string) (*models.Submission, error) {
 	sub, err := ss.stores.Submissions.GetSubmissionStatusByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	maskMCQVerdict(sub)
 	return sub, nil
 }
 
@@ -56,6 +64,7 @@ func (ss *SubmissionService) GetSubmissionDetailsByID(ctx context.Context, id st
 			return nil, err
 		}
 	}
+	maskMCQVerdict(&sub.Submission)
 	return sub, nil
 }
 
@@ -63,6 +72,9 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 	sub, err := ss.stores.Submissions.ListUserSubmissionsByProblemID(ctx, userID, problemID, page)
 	if err != nil {
 		return nil, err
+	}
+	for i := range sub {
+		maskMCQVerdict(&sub[i])
 	}
 	return sub, nil
 }
