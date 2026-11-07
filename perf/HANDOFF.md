@@ -35,6 +35,25 @@ Remaining issues:
 3. An earlier harness pacing defect clustered second submissions: 135 starts in an aligned 30-second window. That run is invalid as average-load evidence, but its queue failure was real: fleet queue 978, frontend timeouts, oldest test-owned pending age 141s and drain over 120s. All 764 saved submissions eventually finalized. The phase-preserving pacing fix and regression check must remain. The additional 10/s production deadline test was skipped after this failure.
 4. A separate constant-arrival 0.833/s test completed all 250 submissions/1,375 jobs, but failed the retained proposed receipt target at 3.085s versus 3s. Do not relabel it as passing.
 
+## Check configuration-only improvements too
+
+The following settings were inspected read-only on EC2 on 7 November 2026. **No values were changed, and the proposed changes have not been benchmarked.** Recheck the effective runtime values before experimenting; blank Judge0 settings can resolve to defaults.
+
+| File / setting | Observed value | Experiment or constraint |
+| --- | --- | --- |
+| `/home/ubuntu/judge0-v1.13.1/judge0.conf`: `CALLBACKS_TIMEOUT` | Blank; effective default 5 seconds | First isolated experiment: set `10`. It may reduce the observed callback cancellations/retries, but synchronous callbacks can occupy workers longer when the API is slow. Check queue age, drain and completed throughput as well as callback errors. |
+| `/home/ubuntu/recruitment-server-config/.env`: `DB_MAX_IDLE_CONNS` | `5` | Separately try `25`, retaining `DB_MAX_OPEN_CONNS=25`. This may reduce connection churn; the benefit is unmeasured. Measure connection/pool behaviour where instrumentation permits. |
+| API: `DB_MAX_OPEN_CONNS` | `25` | Keep the existing ceiling for the idle-pool comparison. Do not increase it without checking the database connection budget and measured waits. |
+| Judge0: `COUNT` | Effective `16` on an eight-vCPU host | Compare `8`, `12`, and `16` in isolation, one configuration at a time. More workers are not automatically faster when compilation, CPU scheduling or callback contention dominates. |
+| Judge0: `MAX_QUEUE_SIZE` | `1000` | Keep initially. A larger queue admits more waiting work without adding processing capacity. |
+| API: `JUDGE0_TIMEOUT_MS` | `10000` | This is API-to-Judge0 request timeout, not the Judge0-to-API callback timeout. The measured Go client caps it at 10 seconds; setting a larger number does not extend it. |
+
+Use the [version-pinned Judge0 configuration](https://github.com/judge0/judge0/blob/v1.13.1/judge0.conf), [callback implementation](https://github.com/judge0/judge0/blob/v1.13.1/app/jobs/isolate_job.rb#L272-L298), and the recruitment client's `internal/judge0/client.go` / `internal/db/db.go` as references. Keep callback authentication, sandbox limits and admission protections intact. Configuration tuning does not remove repeated compilation or per-parent callback locking.
+
+Compare each change against an unchanged baseline using identical workloads, fixture costs and thresholds. Record the effective settings, final-verdict correctness, receipt/verdict latency, callback attempts, completed submissions/testcases, queue depth/age and recovery. Smoke first; increase load only after final outcomes and recovery pass. Report configuration-only results separately from code-optimisation results so their effects are attributable.
+
+These files are loaded at process startup; editing them alone is not a hot reload. Applying changes to production requires Hemang's explicit authorization, an empty/drained queue and a controlled restart/recreation of only the affected services outside measurements. Do not restart Redis/PostgreSQL or apply these experiments through the read-only monitoring session. Keep the original values for rollback.
+
 ## Execution rules
 
 - Inspect contracts and existing integration tests first. Distinguish mocked Judge0 tests from real sandbox execution.
