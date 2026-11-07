@@ -113,6 +113,13 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		return "", common.ErrNotFound
 	}
 	if submissionType != models.Code {
+		existing, err := ss.stores.Submissions.ListUserSubmissionsByProblemID(ctx, userID, req.ProblemID, 0)
+		if err != nil {
+			return "", err
+		}
+		if len(existing) > 0 {
+			return "", common.ErrSubmissionAlreadyExists
+		}
 		if err := ss.CheckRateLimit(ctx, userID); err != nil {
 			return "", err
 		}

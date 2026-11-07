@@ -535,8 +535,11 @@ func TestCreateSubmissionRejectsInvalidUTF8BeforePreparation(t *testing.T) {
 }
 
 func TestCreateSubmissionDuplicateMCQRejection(t *testing.T) {
-	// Verify that ErrSubmissionAlreadyExists from the store (DB unique constraint)
-	// propagates out of CreateSubmission unchanged.
+	// Fast-path guard: if previous submissions already exist, reject immediately
+	// before invoking rate limiting or store insert.
+	createCalled := false
+	rateLimitCalled := false
+
 	storage := &stores.Storage{
 		Problems: problemTestStore{
 			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
@@ -544,20 +547,41 @@ func TestCreateSubmissionDuplicateMCQRejection(t *testing.T) {
 			},
 		},
 		Submissions: submissionTestStore{
-			createSubmission: func(_ context.Context, _ *models.Submission) (string, error) {
-				return "", common.ErrSubmissionAlreadyExists
+			listUserSubmissions: func(ctx context.Context, userID, problemID string, page int) ([]models.Submission, error) {
+				return []models.Submission{
+					{ID: "sub-prior", ProblemID: problemID, UserID: userID, Status: models.WrongAnswer},
+				}, nil
+			},
+			checkRateLimit: func(ctx context.Context, userID string, cooldown int64) error {
+				rateLimitCalled = true
+				return nil
+			},
+			createSubmission: func(ctx context.Context, sub *models.Submission) (string, error) {
+				createCalled = true
+				return "sub-new", nil
 			},
 		},
 	}
 
-	id, err := NewSubmissionService(storage, nil, nil).CreateSubmission(context.Background(), "user", models.MCQ, &dto.SubmitSubmissionRequest{
-		ContestID: "contest", ProblemID: "problem", Type: models.MCQ, Option: []int{1},
+	service := NewSubmissionService(storage, nil, nil)
+	id, err := service.CreateSubmission(context.Background(), "user", models.MCQ, &dto.SubmitSubmissionRequest{
+		ContestID: "contest",
+		ProblemID: "problem",
+		Type:      models.MCQ,
+		Option:    []int{1},
 	})
+
 	if id != "" {
-		t.Fatalf("expected empty ID, got %s", id)
+		t.Fatalf("expected empty submission ID on duplicate, got %s", id)
 	}
 	if !errors.Is(err, common.ErrSubmissionAlreadyExists) {
 		t.Fatalf("expected ErrSubmissionAlreadyExists, got %v", err)
+	}
+	if createCalled {
+		t.Fatal("CreateSubmission store method should not be called when duplicate exists")
+	}
+	if rateLimitCalled {
+		t.Fatal("CheckRateLimit should not be called when duplicate exists")
 	}
 }
 
