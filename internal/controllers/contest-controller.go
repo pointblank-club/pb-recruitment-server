@@ -910,7 +910,13 @@ func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
 		page = 0
 	}
 
-	leaderboard, err := cc.contestService.GetLeaderboard(ctx.Request().Context(), contestID, page)
+	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
+	isAdmin := false
+	if userID != "" {
+		isAdmin, _ = cc.contestService.IsAdmin(ctx.Request().Context(), userID)
+	}
+
+	leaderboard, err := cc.contestService.GetLeaderboard(ctx.Request().Context(), contestID, page, isAdmin)
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{

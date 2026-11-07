@@ -268,7 +268,14 @@ func (cs *ContestService) UpdateLeaderboardUser(ctx context.Context, contestID s
 	return cs.stores.Rankings.UpdateLeaderboardUser(ctx, contestID, userID, req)
 }
 
-func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+func (cs *ContestService) IsAdmin(ctx context.Context, userID string) (bool, error) {
+	if cs.stores == nil || cs.stores.Admins == nil || userID == "" {
+		return false, nil
+	}
+	return cs.stores.Admins.IsAdmin(ctx, userID)
+}
+
+func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, page int, isAdmin bool) (*dto.GetLeaderboardResponse, error) {
 	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
 	if err != nil {
 		return nil, err
@@ -276,7 +283,16 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	if contest.GetRunningStatus() == models.ContestRunningUpcoming {
 		return nil, common.ErrContestNotStarted
 	}
-	return cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	res, err := cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	if err != nil {
+		return nil, err
+	}
+	if !isAdmin {
+		for i := range res.Entries {
+			res.Entries[i].ProblemScores = nil
+		}
+	}
+	return res, nil
 }
 
 func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID string, userID string) error {
@@ -316,9 +332,13 @@ func (cs *ContestService) GetContestProblemsList(ctx context.Context, contestID,
 		return nil, err
 	}
 	for i := range problems {
-		problems[i].Progress = progress[problems[i].ID]
-		if problems[i].Progress == "" {
+		p := progress[problems[i].ID]
+		if p == "" {
 			problems[i].Progress = "unsolved"
+		} else if problems[i].Type == models.MCQ {
+			problems[i].Progress = "attempted"
+		} else {
+			problems[i].Progress = p
 		}
 	}
 	return problems, nil

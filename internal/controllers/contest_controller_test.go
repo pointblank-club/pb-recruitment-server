@@ -651,4 +651,69 @@ func TestGetLeaderboardController(t *testing.T) {
 			t.Fatalf("expected X-Total-Count 5, got %s", recorder.Header().Get("X-Total-Count"))
 		}
 	})
+
+	t.Run("omits problem scores for non-admin and includes for admin", func(t *testing.T) {
+		rankStore := &mockRankingStore{
+			leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+				return &dto.GetLeaderboardResponse{
+					Entries: []dto.LeaderboardEntry{
+						{UserID: "u1", ProblemScores: []dto.ProblemScore{{ProblemID: "p1", Score: 10}}},
+					},
+					TotalCount: 1,
+					TotalPages: 1,
+					Page:       0,
+				}, nil
+			},
+		}
+
+		// Non-admin request
+		storageNonAdmin := &stores.Storage{
+			Contests: submissionContestStore{contest: models.Contest{ID: "c1", StartTime: now - 60_000, EndTime: now + 60_000}},
+			Rankings: rankStore,
+			Admins:   mockAdminStore{isAdmin: false},
+		}
+		ctrlNonAdmin := NewContestController(services.NewContestService(storageNonAdmin, nil), nil)
+		recNonAdmin := httptest.NewRecorder()
+		ctxNonAdmin := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/contests/c1/leaderboard", nil), recNonAdmin)
+		ctxNonAdmin.SetParamNames("id")
+		ctxNonAdmin.SetParamValues("c1")
+		ctxNonAdmin.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrlNonAdmin.GetLeaderboard(ctxNonAdmin); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(recNonAdmin.Body.String(), "problem_scores") {
+			t.Fatalf("expected problem_scores to be omitted for non-admin, got: %s", recNonAdmin.Body.String())
+		}
+
+		// Admin request
+		storageAdmin := &stores.Storage{
+			Contests: submissionContestStore{contest: models.Contest{ID: "c1", StartTime: now - 60_000, EndTime: now + 60_000}},
+			Rankings: rankStore,
+			Admins:   mockAdminStore{isAdmin: true},
+		}
+		ctrlAdmin := NewContestController(services.NewContestService(storageAdmin, nil), nil)
+		recAdmin := httptest.NewRecorder()
+		ctxAdmin := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/contests/c1/leaderboard", nil), recAdmin)
+		ctxAdmin.SetParamNames("id")
+		ctxAdmin.SetParamValues("c1")
+		ctxAdmin.Set(common.AUTH_USER_ID, "admin1")
+
+		if err := ctrlAdmin.GetLeaderboard(ctxAdmin); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(recAdmin.Body.String(), "problem_scores") {
+			t.Fatalf("expected problem_scores to be included for admin, got: %s", recAdmin.Body.String())
+		}
+	})
 }
+
+type mockAdminStore struct {
+	*stores.AdminStore
+	isAdmin bool
+}
+
+func (m mockAdminStore) IsAdmin(ctx context.Context, userID string) (bool, error) {
+	return m.isAdmin, nil
+}
+

@@ -32,6 +32,7 @@ func AddContestRoutes(
 	// // Paginate, page=<page> and 20 entries per page
 	e.GET("/contests/:id/leaderboard",
 		contestController.GetLeaderboard,
+		middleware.OptionalFirebaseAuth(authClient),
 	)
 
 	// Register/Unregister the authenticated user for a specific contest
