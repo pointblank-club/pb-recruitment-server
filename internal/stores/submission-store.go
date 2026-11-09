@@ -736,11 +736,9 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 
 	testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, submissionID)
 	if err != nil {
-		log.Printf("submission-store: failed to get test case results for admin submission ID %s: %v", submissionID, err)
-		details.TestCaseResults = []models.TestCaseResult{}
-	} else {
-		details.TestCaseResults = testCaseResults
+		return nil, fmt.Errorf("get test case results: %w", err)
 	}
+	details.TestCaseResults = testCaseResults
 
 	return &details, nil
 }

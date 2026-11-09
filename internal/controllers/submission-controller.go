@@ -329,6 +329,14 @@ func (sc *SubmissionController) GetAdminSubmissionDetails(ctx echo.Context) erro
 		})
 	}
 
+	contestID := ctx.Param("contestId")
+	if contestID == "" {
+		contestID = ctx.Param("contestid")
+	}
+	if contestID != "" && details.ContestID != contestID {
+		return ctx.JSON(http.StatusNotFound, map[string]string{"error": "submission not found"})
+	}
+
 	return ctx.JSON(http.StatusOK, details)
 }
 
