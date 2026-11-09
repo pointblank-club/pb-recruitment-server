@@ -53,6 +53,31 @@ func TestSummarizeSolves(t *testing.T) {
 	}
 }
 
+func TestResubmissionDoesNotPenalizeRank(t *testing.T) {
+	// Participant A solved at T=1000, then resubmitted at T=5000
+	// Participant B solved at T=2000
+	// Participant A must remain ahead of Participant B because A's earliest solve is 1000 < 2000.
+	scoresA := []dto.ProblemScore{
+		{ProblemID: "p1", Score: 100, MaxScore: 100, SolvedAt: ts(1000)},
+	}
+	scoresB := []dto.ProblemScore{
+		{ProblemID: "p1", Score: 100, MaxScore: 100, SolvedAt: ts(2000)},
+	}
+
+	_, lastA := summarizeSolves(scoresA)
+	_, lastB := summarizeSolves(scoresB)
+
+	pA := participantSummary{UserID: "alice", TotalScore: 100, ProblemsSolved: 1, LastSubmissionTime: lastA}
+	pB := participantSummary{UserID: "bob", TotalScore: 100, ProblemsSolved: 1, LastSubmissionTime: lastB}
+
+	participants := []participantSummary{pB, pA}
+	SortParticipantsForRanking(participants)
+
+	if participants[0].UserID != "alice" {
+		t.Fatalf("expected alice to rank first (solve time %d < %d), got %s", lastA, lastB, participants[0].UserID)
+	}
+}
+
 func TestMCQAnswersMatchLogic(t *testing.T) {
 	cases := []struct {
 		name    string
