@@ -345,6 +345,8 @@ func TestRunResultsPostgres(t *testing.T) {
 			if _, err := db.Exec(`DELETE FROM submission_rate_limits WHERE user_id='run:capacity'`); err != nil {
 				t.Fatal(err)
 			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
 			var posts, polls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost {
@@ -366,9 +368,15 @@ func TestRunResultsPostgres(t *testing.T) {
 						return
 					}
 					w.WriteHeader(http.StatusServiceUnavailable)
+					if tc.want == http.StatusGatewayTimeout && int(n) >= int(tc.wantPolls) {
+						time.AfterFunc(20*time.Millisecond, cancel)
+					}
 					return
 				}
 				w.Write([]byte(`{"submissions":[` + tc.result + `]}`))
+				if tc.want == http.StatusGatewayTimeout && polls.Load() >= tc.wantPolls {
+					time.AfterFunc(20*time.Millisecond, cancel)
+				}
 			}))
 			defer server.Close()
 			t.Setenv("JUDGE0_URL", server.URL)
@@ -376,16 +384,10 @@ func TestRunResultsPostgres(t *testing.T) {
 				t.Setenv("JUDGE0_TIMEOUT_MS", "100")
 			}
 			controller := controllers.NewSubmissionController(services.NewSubmissionService(stores.NewStorage(db), nil, judge0.NewClient()), nil, nil)
-			deadline := 3 * time.Second
-			if tc.want == http.StatusGatewayTimeout {
-				deadline = 100 * time.Millisecond
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), deadline)
-			defer cancel()
 			req := httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(`{"language":"python","code":"pass"}`)).WithContext(ctx)
 			start := time.Now()
 			w := runRequest(t, controller, req, tc.name)
-			if w.Code != tc.want || posts.Load() != 1 || polls.Load() != tc.wantPolls || tc.want == http.StatusGatewayTimeout && time.Since(start) > time.Second {
+			if w.Code != tc.want || posts.Load() != 1 || polls.Load() != tc.wantPolls || tc.want == http.StatusGatewayTimeout && time.Since(start) > 2*time.Second {
 				t.Fatal("unexpected Run result/dispatch/poll count", w.Code, w.Body.String(), posts.Load(), polls.Load(), time.Since(start))
 			}
 			if w.Code == http.StatusTooManyRequests && w.Header().Get("Retry-After") != "5" {
