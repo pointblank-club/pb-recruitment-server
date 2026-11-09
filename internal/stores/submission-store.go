@@ -644,7 +644,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 		WHERE s.contest_id = $1 AND s.type = 'code'
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
-		ORDER BY s.created_at DESC
+		ORDER BY s.created_at DESC, s.submission_seq DESC
 		LIMIT $4 OFFSET $5
 	`
 
