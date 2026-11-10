@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
@@ -52,6 +53,7 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 	payload.Attempt = attempt
 	if err := sc.submissionService.HandleJudge0Callback(c.Request().Context(), id, payload); err != nil {
 		log.Errorf("judge0 callback failed for execution %s: %v", id, err)
+		sentry.CaptureException(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	return c.NoContent(http.StatusOK)
@@ -227,6 +229,7 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 			})
 		}
 		log.Errorf("create submission for user %s: %v", userID, err)
+		sentry.CaptureException(err)
 		return ctx.NoContent(http.StatusInternalServerError)
 	}
 

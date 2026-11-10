@@ -3,6 +3,7 @@ package services
 import (
 	"app/internal/common"
 	"app/internal/judge0"
+	"app/internal/metrics"
 	"app/internal/models/dto"
 	"context"
 	"errors"
@@ -40,6 +41,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	if err := ss.stores.Submissions.CheckRunCapacity(ctx); err != nil {
 		return nil, err
 	}
+	startRun := time.Now()
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{{
 		SourceCode: req.Code, LanguageID: language, Stdin: req.Stdin, CPUTimeLimit: 2, WallTimeLimit: 5,
 		MemoryLimit: 256 * 1024, MaxFileSize: 64, CompilerOptions: judge0.CompilerOptions(language),
@@ -67,6 +69,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 			result := statuses[0]
 			status, final := mapJudgeStatus(result.Status.ID)
 			if final {
+				metrics.Judge0RoundTripDuration.WithLabelValues("run").Observe(time.Since(startRun).Seconds())
 				runtime, err := judgeRuntimeMillis(result.Time)
 				if err != nil {
 					return nil, judge0.ErrInvalidResponse

@@ -1,4 +1,8 @@
 .env
+*.env
+monitoring/.env
+*.token
+monitoring/.token
 firebase.json
 
 tmp/

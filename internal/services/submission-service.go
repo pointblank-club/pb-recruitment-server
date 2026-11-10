@@ -3,6 +3,7 @@ package services
 import (
 	"app/internal/common"
 	"app/internal/judge0"
+	"app/internal/metrics"
 	"app/internal/models"
 	"app/internal/models/dto"
 	"app/internal/s3"
@@ -108,8 +109,10 @@ func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) 
 
 func (ss *SubmissionService) JudgeMCQ(ctx context.Context, submissionID string) error {
 	if err := ss.stores.Submissions.JudgeMCQ(ctx, submissionID); err != nil {
+		metrics.VerdictsTotal.WithLabelValues("judge_error", "mcq").Inc()
 		return ss.markSubmissionFailed(ctx, submissionID, err)
 	}
+	metrics.VerdictsTotal.WithLabelValues("judged", "mcq").Inc()
 	return nil
 }
 
@@ -138,7 +141,11 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		return "", common.ErrNotFound
 	}
 	if submissionType != models.Code {
-		return ss.stores.Submissions.CreateMCQSubmission(ctx, sub, ss.rateLimitCooldown())
+		subID, err := ss.stores.Submissions.CreateMCQSubmission(ctx, sub, ss.rateLimitCooldown())
+		if err == nil {
+			metrics.SubmissionsTotal.WithLabelValues("mcq", "none").Inc()
+		}
+		return subID, err
 	}
 
 	source, err := decodeSource(req.Code)
@@ -170,6 +177,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 	if err != nil {
 		return "", err
 	}
+	metrics.SubmissionsTotal.WithLabelValues("code", req.Language).Inc()
 
 	if err := ss.s3.PutObject(ctx, submissionID, req.Code); err != nil {
 		return "", ss.markSubmissionFailed(ctx, submissionID, err)
@@ -193,6 +201,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 	if err != nil {
 		return "", ss.markSubmissionFailed(ctx, submissionID, err)
 	}
+	metrics.InFlightExecutions.Add(float64(len(executions)))
 	for i, exec := range executions {
 		jobs[i].CallbackURL = ss.judge0.CallbackURL(exec.ID, exec.Attempt)
 	}
@@ -221,6 +230,8 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 				log.Errorf("defer Judge0 dispatch for execution %s: %v", exec.ID, err)
 			}
 		} else if errors.Is(result.Error, judge0.ErrDispatchRejected) {
+			metrics.InFlightExecutions.Dec()
+			metrics.VerdictsTotal.WithLabelValues("judge_error", "code").Inc()
 			if err := ss.stores.Executions.ProcessFinal(dbCtx, stores.FinalExecutionResult{ExecutionID: exec.ID, Attempt: exec.Attempt, Status: "judge_error"}); err != nil {
 				return "", err
 			}
@@ -242,6 +253,11 @@ func (ss *SubmissionService) HandleJudge0Callback(ctx context.Context, execution
 	result, err := finalJudgeResult(executionID, status, payload)
 	if err != nil {
 		return err
+	}
+	metrics.InFlightExecutions.Dec()
+	metrics.VerdictsTotal.WithLabelValues(status, "code").Inc()
+	if result.Runtime > 0 {
+		metrics.Judge0RoundTripDuration.WithLabelValues("submit").Observe(float64(result.Runtime) / 1000.0)
 	}
 	return ss.stores.Executions.ProcessFinal(ctx, result)
 }
@@ -463,6 +479,8 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 
 func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Execution, result *judge0.SubmissionStatusResponse, fetchErr error) (bool, error) {
 	finalize := func(status string) error {
+		metrics.InFlightExecutions.Dec()
+		metrics.VerdictsTotal.WithLabelValues(status, "code").Inc()
 		return ss.stores.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Claim: e.Claim, Token: e.Judge0Token, Status: status})
 	}
 	callCtx, cancel := context.WithTimeout(ctx, ss.judge0.Timeout())
@@ -517,6 +535,11 @@ func (ss *SubmissionService) recoverExecution(ctx context.Context, e models.Exec
 		return false, err
 	}
 	finalResult.Attempt, finalResult.Claim = e.Attempt, e.Claim
+	metrics.InFlightExecutions.Dec()
+	metrics.VerdictsTotal.WithLabelValues(status, "code").Inc()
+	if finalResult.Runtime > 0 {
+		metrics.Judge0RoundTripDuration.WithLabelValues("submit").Observe(float64(finalResult.Runtime) / 1000.0)
+	}
 	return true, ss.stores.Executions.ProcessFinal(ctx, finalResult)
 }
 

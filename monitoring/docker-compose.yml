@@ -1,0 +1,52 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: pb-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./.token:/etc/prometheus/.token:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=2d'
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - pb-telemetry
+
+#   promtail:
+#     image: grafana/promtail:3.0.0
+#     container_name: pb-promtail
+#     restart: unless-stopped
+#     volumes:
+#       - ./promtail-config.yml:/etc/promtail/config.yml:ro
+#       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+#       - /var/run/docker.sock:/var/run/docker.sock
+#     command:
+#       - '-config.file=/etc/promtail/config.yml'
+#       - '-config.expand-env=true'
+#     env_file:
+#       - .env
+#     networks:
+#       - pb-telemetry
+
+  node_exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: pb-node-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9100:9100"
+    networks:
+      - pb-telemetry
+
+volumes:
+  prometheus_data:
+
+networks:
+  pb-telemetry:
+    driver: bridge
