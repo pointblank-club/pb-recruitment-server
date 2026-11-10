@@ -47,6 +47,7 @@ func TestSentryHTTPReportsOnceWithoutRequestSecrets(t *testing.T) {
 	}
 	options.EnableTracing = false
 	options.EnableLogs = false
+	options.DisableMetrics = true
 	tr := &capturedSentryEvents{}
 	options.Transport = tr
 	client, err := sentry.NewClient(options)
@@ -176,6 +177,7 @@ func TestSentryTraceAndLogEnvelopes(t *testing.T) {
 	}
 	var transaction map[string]interface{}
 	var logEntry map[string]interface{}
+	var metricEntry map[string]interface{}
 	for _, payload := range payloads {
 		lines := strings.Split(strings.TrimSpace(payload), "\n")
 		if len(lines) < 3 {
@@ -189,13 +191,25 @@ func TestSentryTraceAndLogEnvelopes(t *testing.T) {
 			transaction = item
 		}
 		if entries, ok := item["items"].([]interface{}); ok && len(entries) > 0 {
-			logEntry, _ = entries[0].(map[string]interface{})
+			entry, _ := entries[0].(map[string]interface{})
+			if entry["body"] != nil {
+				logEntry = entry
+			}
+			if entry["name"] == "http.server.duration" {
+				metricEntry = entry
+			}
 		}
 	}
-	if transaction == nil || logEntry == nil {
-		t.Fatalf("missing transaction or log: %s", combined)
+	if transaction == nil || logEntry == nil || metricEntry == nil {
+		t.Fatalf("missing transaction, log or metric: %s", combined)
 	}
 	trace := transaction["contexts"].(map[string]interface{})["trace"].(map[string]interface{})["trace_id"]
+	if metricEntry["unit"] != "millisecond" || metricEntry["value"].(float64) <= 0 {
+		t.Fatalf("invalid duration: %+v", metricEntry)
+	}
+	if trace != metricEntry["trace_id"] {
+		t.Fatal("metric not correlated with trace")
+	}
 	if trace != logEntry["trace_id"] {
 		t.Fatalf("log not correlated with trace: %s", combined)
 	}
@@ -238,5 +252,67 @@ func TestSentryLogsUnsampledServerFailures(t *testing.T) {
 		if entry.Level != sentry.LogLevelError || entry.Body != "HTTP request completed" {
 			t.Fatalf("unexpected log: %+v", entry)
 		}
+	}
+}
+
+func TestSentryMetricsCoverUnsampledRequests(t *testing.T) {
+	previous := sentry.CurrentHub().Client()
+	defer sentry.CurrentHub().BindClient(previous)
+	var metrics []*sentry.Metric
+	tr := &capturedSentryEvents{}
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "http://public@127.0.0.1:1/1", Transport: tr,
+		BeforeSendMetric: func(metric *sentry.Metric) *sentry.Metric { metrics = append(metrics, metric); return metric },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	sentry.CurrentHub().BindClient(client)
+	for _, tc := range []struct {
+		name, method, path, route string
+		status                    int
+		handler                   echo.HandlerFunc
+		wantMetric                bool
+	}{
+		{"success", "POST", "/synthetic/private-id?token=secret", "/synthetic/:id", 201, func(c echo.Context) error { return c.NoContent(201) }, true},
+		{"validation", "POST", "/synthetic/private-id", "/synthetic/:id", 400, func(c echo.Context) error { return echo.NewHTTPError(400) }, true},
+		{"5xx", "POST", "/synthetic/private-id", "/synthetic/:id", 503, func(c echo.Context) error { return c.NoContent(503) }, true},
+		{"returned error", "POST", "/synthetic/private-id", "/synthetic/:id", 500, func(c echo.Context) error { return errors.New("synthetic failure") }, true},
+		{"panic", "POST", "/synthetic/private-id", "/synthetic/:id", 500, func(c echo.Context) error { panic("synthetic failure") }, true},
+		{"unmatched", "GET", "/private-path?token=secret", "unmatched", 404, nil, true},
+		{"health", "GET", "/health", "/health", 200, nil, false},
+		{"preflight", "OPTIONS", "/synthetic/private-id", "/synthetic/:id", 204, func(c echo.Context) error { return c.NoContent(204) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metrics = nil
+			e := NewEchoServer(nil, nil)
+			if tc.handler != nil {
+				e.Add(tc.method, tc.route, tc.handler)
+			}
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+			if w.Code != tc.status {
+				t.Fatalf("response changed: %d", w.Code)
+			}
+			want := 0
+			if tc.wantMetric {
+				want = 1
+			}
+			if len(metrics) != want {
+				t.Fatalf("metrics=%d, want %d", len(metrics), want)
+			}
+			if want == 0 {
+				return
+			}
+			m := metrics[0]
+			if m.Name != "http.server.duration" || m.Unit != "millisecond" || m.Attributes["http.route"].AsInterface() != tc.route || m.Attributes["http.request.method"].AsInterface() != tc.method || m.Attributes["http.response.status_code"].AsInterface() != int64(tc.status) {
+				t.Fatalf("wrong metric: %+v", m)
+			}
+			value, ok := m.Value.Float64()
+			if !ok || value <= 0 {
+				t.Fatalf("invalid duration: %v", value)
+			}
+		})
 	}
 }

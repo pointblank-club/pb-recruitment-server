@@ -40,7 +40,6 @@ func InitSentry() error {
 		EnableTracing:    true,
 		TracesSampler:    sampleSentryTrace,
 		EnableLogs:       true,
-		DisableMetrics:   true,
 		BeforeSendLog: func(entry *sentry.Log) *sentry.Log {
 			for key := range entry.Attributes {
 				if strings.HasPrefix(key, "user.") {
@@ -48,6 +47,14 @@ func InitSentry() error {
 				}
 			}
 			return entry
+		},
+		BeforeSendMetric: func(metric *sentry.Metric) *sentry.Metric {
+			for key := range metric.Attributes {
+				if strings.HasPrefix(key, "user.") {
+					delete(metric.Attributes, key)
+				}
+			}
+			return metric
 		},
 		BeforeSend:            scrubSentryRequest,
 		BeforeSendTransaction: scrubSentryRequest,
@@ -57,7 +64,7 @@ func InitSentry() error {
 		return err
 	}
 
-	log.Printf("[Sentry] Initialized errors, traces and logs (environment: %s)", stage)
+	log.Printf("[Sentry] Initialized errors, traces, logs and request metrics (environment: %s)", stage)
 	return nil
 }
 

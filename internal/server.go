@@ -14,6 +14,7 @@ import (
 
 	"firebase.google.com/go/v4/auth"
 	"github.com/getsentry/sentry-go"
+	"github.com/getsentry/sentry-go/attribute"
 	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
@@ -34,9 +35,28 @@ func NewEchoServer(
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			started := time.Now()
+			status := http.StatusOK
 			defer func() {
-				if recovered := recover(); recovered != nil {
-					c.Response().Status = http.StatusInternalServerError
+				recovered := recover()
+				if recovered != nil {
+					status = http.StatusInternalServerError
+					c.Response().Status = status
+				}
+				if span := sentryecho.GetSpanFromContext(c); span != nil && c.Path() != "/health" && c.Request().Method != echo.OPTIONS {
+					route := c.Path()
+					if route == "" {
+						route = "unmatched"
+					}
+					sentry.NewMeter(span.Context()).Distribution("http.server.duration", float64(time.Since(started))/float64(time.Millisecond),
+						sentry.WithUnit(sentry.UnitMillisecond),
+						sentry.WithAttributes(
+							attribute.String("http.route", route),
+							attribute.String("http.request.method", c.Request().Method),
+							attribute.Int("http.response.status_code", status),
+						),
+					)
+				}
+				if recovered != nil {
 					panic(recovered)
 				}
 			}()
@@ -88,7 +108,7 @@ func NewEchoServer(
 
 			// Only sampled requests and server failures need a remote request log.
 			span := sentryecho.GetSpanFromContext(c)
-			status := c.Response().Status
+			status = c.Response().Status
 			if err != nil && !c.Response().Committed {
 				status = http.StatusInternalServerError
 				var he *echo.HTTPError

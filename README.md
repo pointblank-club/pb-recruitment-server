@@ -20,6 +20,13 @@ Structured request logs include route, method, status and duration for sampled
 requests and all non-panic 5xx responses. They share trace IDs. Existing console
 logs are not forwarded. Traces and logs exclude user identity and request data.
 
+The `http.server.duration` distribution records every completed API request in
+milliseconds (independent of trace sampling), with route template, HTTP method,
+and response status. Use it for count, throughput, average, median, p95/p99 and
+5xx percentage by route. Health checks and OPTIONS are excluded; unmatched paths
+share the `unmatched` label. Bodies, query strings and user identity are omitted.
+SDK buffers are bounded, so delivery is best effort; counts are not a billing ledger.
+
 HTTP error events retain method, URL path, route identifiers,
 and the authenticated Firebase UID; request bodies, query strings, headers,
 cookies, and email are not included. There is no public Sentry test endpoint.
