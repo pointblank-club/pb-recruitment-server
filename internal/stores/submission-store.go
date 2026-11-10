@@ -620,7 +620,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 		WHERE s.contest_id = $1 AND s.type = 'code'
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
-		  AND ($4 = '' OR LOWER(s.status) = LOWER($4))
+		  AND ($4 = '' OR LOWER(s.status::text) = LOWER($4))
 	`
 	var totalCount int
 	if err := s.db.QueryRowContext(ctx, countQ, contestID, userID, problemID, verdict).Scan(&totalCount); err != nil {
@@ -648,7 +648,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 		WHERE s.contest_id = $1 AND s.type = 'code'
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
-		  AND ($6 = '' OR LOWER(s.status) = LOWER($6))
+		  AND ($6 = '' OR LOWER(s.status::text) = LOWER($6))
 		ORDER BY s.created_at DESC, s.submission_seq DESC
 		LIMIT $4 OFFSET $5
 	`
