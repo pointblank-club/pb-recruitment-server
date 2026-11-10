@@ -6,10 +6,14 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 )
 
 type UserStore struct {
@@ -24,8 +28,11 @@ func NewUserStore(db *sql.DB) *UserStore {
 
 func (us *UserStore) CreateUser(ctx context.Context, user *auth.UserRecord, req *dto.CreateUserRequest) error {
 	if us == nil || us.db == nil {
-		return fmt.Errorf("contest store: db is not initialized")
+		return fmt.Errorf("user store: db is not initialized")
 	}
+
+	normalizedUSN := strings.ToUpper(strings.TrimSpace(req.USN))
+	normalizedMobile := strings.TrimSpace(req.MobileNumber)
 
 	const q = `
 	INSERT INTO users (id, name, email, usn, mobile_number, current_year, department)
@@ -33,8 +40,30 @@ func (us *UserStore) CreateUser(ctx context.Context, user *auth.UserRecord, req 
 	ON CONFLICT (id) DO NOTHING
 	`
 
-	res, err := us.db.ExecContext(ctx, q, user.UID, req.Name, user.Email, req.USN, req.MobileNumber, req.CurrentYear, req.Department)
+	res, err := us.db.ExecContext(ctx, q, user.UID, req.Name, user.Email, normalizedUSN, normalizedMobile, req.CurrentYear, req.Department)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if pgErr.ConstraintName == "users_usn_key" || strings.Contains(pgErr.Message, "users_usn_key") {
+				return common.USNAlreadyExistsError
+			}
+			if pgErr.ConstraintName == "users_email_key" || strings.Contains(pgErr.Message, "users_email_key") {
+				return common.EmailAlreadyExistsError
+			}
+			return common.UserAlreadyExistsError
+		}
+
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			if pqErr.Constraint == "users_usn_key" {
+				return common.USNAlreadyExistsError
+			}
+			if pqErr.Constraint == "users_email_key" {
+				return common.EmailAlreadyExistsError
+			}
+			return common.UserAlreadyExistsError
+		}
+
 		log.Printf("user-store: insert error %v", err)
 		return fmt.Errorf("insert error: %w", err)
 	}

@@ -46,7 +46,10 @@ func (us *UserService) Signup(ctx context.Context, req *dto.SignupRequest) (*dto
 		Password(req.Password).
 		DisplayName(req.Name))
 	if err != nil {
-		if auth.IsEmailAlreadyExists(err) || auth.IsUIDAlreadyExists(err) {
+		if auth.IsEmailAlreadyExists(err) {
+			return nil, common.EmailAlreadyExistsError
+		}
+		if auth.IsUIDAlreadyExists(err) {
 			return nil, common.UserAlreadyExistsError
 		}
 		return nil, fmt.Errorf("firebase create user: %w", err)

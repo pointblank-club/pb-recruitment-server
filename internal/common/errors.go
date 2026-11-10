@@ -5,6 +5,8 @@ import "errors"
 var (
 	ErrNotFound                    = errors.New("Resource not found")
 	UserAlreadyExistsError         = errors.New("user already exists")
+	USNAlreadyExistsError          = errors.New("USN or Application Number is already registered")
+	EmailAlreadyExistsError        = errors.New("email is already registered")
 	UserNotFoundError              = errors.New("user not found")
 	CreateUserFailedError          = errors.New("failed to create user")
 	FetchUserFailedError           = errors.New("failed to fetch user profile")

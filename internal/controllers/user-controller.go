@@ -24,27 +24,28 @@ func NewUserController(userService *services.UserService) *UserController {
 	}
 }
 
-func validateUserInput(usn string, mobile string, currentYear int) error {
-	usnPattern := `^1DS2[4-5](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
+func validateUserInput(usn string, mobile string, currentYear int) (error, string) {
+	usnPattern := `^1DS2[1-6](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
 	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 26UGDS1234
 	phonePattern := `^[0-9]{10}$`                                                                    // Example: 9234567890
 
-	usnUpper := strings.ToUpper(usn)
+	usnUpper := strings.ToUpper(strings.TrimSpace(usn))
+	mobileClean := strings.TrimSpace(mobile)
 
 	if currentYear == 1 {
 		if matched, _ := regexp.MatchString(appNumberPattern, usnUpper); !matched {
-			return common.InvalidApplicationNumberError
+			return common.InvalidApplicationNumberError, "id"
 		}
 	} else {
 		if matched, _ := regexp.MatchString(usnPattern, usnUpper); !matched {
-			return common.InvalidUSNError
+			return common.InvalidUSNError, "id"
 		}
 	}
 
-	if matched, _ := regexp.MatchString(phonePattern, mobile); !matched {
-		return common.InvalidMobileNumberError
+	if matched, _ := regexp.MatchString(phonePattern, mobileClean); !matched {
+		return common.InvalidMobileNumberError, "mobile"
 	}
-	return nil
+	return nil, ""
 }
 
 // CreateUser godoc
@@ -65,13 +66,19 @@ func (uc *UserController) CreateUser(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.CreateUserRequest)
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
-	if err := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear); err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
 	}
 
+	reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
+	reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
+
 	if err := uc.userService.CreateUser(ctx.Request().Context(), userID, reqBody); err != nil {
-		if errors.Is(err, common.UserAlreadyExistsError) {
-			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		if errors.Is(err, common.USNAlreadyExistsError) {
+			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error(), "field": "id"})
+		}
+		if errors.Is(err, common.EmailAlreadyExistsError) || errors.Is(err, common.UserAlreadyExistsError) {
+			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error(), "field": "email"})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.CreateUserFailedError.Error()})
 	}
@@ -157,14 +164,26 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 func (uc *UserController) Signup(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.SignupRequest)
 
-	if err := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear); err != nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
 	}
+
+	reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
+	reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
 
 	resp, err := uc.userService.Signup(ctx.Request().Context(), reqBody)
 	if err != nil {
-		if errors.Is(err, common.UserAlreadyExistsError) {
-			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		if errors.Is(err, common.USNAlreadyExistsError) {
+			return ctx.JSON(http.StatusConflict, map[string]string{
+				"error": common.USNAlreadyExistsError.Error(),
+				"field": "id",
+			})
+		}
+		if errors.Is(err, common.EmailAlreadyExistsError) || errors.Is(err, common.UserAlreadyExistsError) {
+			return ctx.JSON(http.StatusConflict, map[string]string{
+				"error": err.Error(),
+				"field": "email",
+			})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to sign up user"})
 	}
