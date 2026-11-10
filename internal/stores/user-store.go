@@ -13,7 +13,6 @@ import (
 
 	"firebase.google.com/go/v4/auth"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/lib/pq"
 )
 
 type UserStore struct {
@@ -44,24 +43,14 @@ func (us *UserStore) CreateUser(ctx context.Context, user *auth.UserRecord, req 
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			if pgErr.ConstraintName == "users_usn_key" || strings.Contains(pgErr.Message, "users_usn_key") {
+			switch pgErr.ConstraintName {
+			case "users_usn_key":
 				return common.USNAlreadyExistsError
-			}
-			if pgErr.ConstraintName == "users_email_key" || strings.Contains(pgErr.Message, "users_email_key") {
+			case "users_email_key":
 				return common.EmailAlreadyExistsError
+			case "users_pkey":
+				return common.UserAlreadyExistsError
 			}
-			return common.UserAlreadyExistsError
-		}
-
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
-			if pqErr.Constraint == "users_usn_key" {
-				return common.USNAlreadyExistsError
-			}
-			if pqErr.Constraint == "users_email_key" {
-				return common.EmailAlreadyExistsError
-			}
-			return common.UserAlreadyExistsError
 		}
 
 		log.Printf("user-store: insert error %v", err)

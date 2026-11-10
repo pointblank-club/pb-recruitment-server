@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"firebase.google.com/go/v4/auth"
 )
@@ -65,8 +66,10 @@ func (us *UserService) Signup(ctx context.Context, req *dto.SignupRequest) (*dto
 	}
 
 	if err := us.stores.Users.CreateUser(ctx, userRecord, createReq); err != nil {
-		// If DB insert fails, clean up Firebase user
-		if delErr := us.authClient.DeleteUser(ctx, userRecord.UID); delErr != nil {
+		// If DB insert fails, clean up Firebase user using a dedicated bounded context
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if delErr := us.authClient.DeleteUser(cleanupCtx, userRecord.UID); delErr != nil {
 			log.Printf("user-service: cleanup firebase user %s failed: %v", userRecord.UID, delErr)
 		}
 		return nil, err

@@ -3,9 +3,10 @@ package controllers
 import (
 	"app/internal/common"
 	_ "app/internal/middleware"
-	_ "app/internal/models"
+	"app/internal/models"
 	"app/internal/models/dto"
 	"app/internal/services"
+	"context"
 	"errors"
 	"net/http"
 	"regexp"
@@ -14,8 +15,15 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+type userServicer interface {
+	CreateUser(ctx context.Context, userID string, req *dto.CreateUserRequest) error
+	Signup(ctx context.Context, req *dto.SignupRequest) (*dto.SignupResponse, error)
+	GetUserProfile(ctx context.Context, userID string) (*models.User, error)
+	UpdateUserProfile(ctx context.Context, userID string, req *dto.UpdateUserProfileRequest) error
+}
+
 type UserController struct {
-	userService *services.UserService
+	userService userServicer
 }
 
 func NewUserController(userService *services.UserService) *UserController {
@@ -77,8 +85,11 @@ func (uc *UserController) CreateUser(ctx echo.Context) error {
 		if errors.Is(err, common.USNAlreadyExistsError) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error(), "field": "id"})
 		}
-		if errors.Is(err, common.EmailAlreadyExistsError) || errors.Is(err, common.UserAlreadyExistsError) {
+		if errors.Is(err, common.EmailAlreadyExistsError) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error(), "field": "email"})
+		}
+		if errors.Is(err, common.UserAlreadyExistsError) {
+			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.CreateUserFailedError.Error()})
 	}
@@ -179,10 +190,15 @@ func (uc *UserController) Signup(ctx echo.Context) error {
 				"field": "id",
 			})
 		}
-		if errors.Is(err, common.EmailAlreadyExistsError) || errors.Is(err, common.UserAlreadyExistsError) {
+		if errors.Is(err, common.EmailAlreadyExistsError) {
 			return ctx.JSON(http.StatusConflict, map[string]string{
-				"error": err.Error(),
+				"error": common.EmailAlreadyExistsError.Error(),
 				"field": "email",
+			})
+		}
+		if errors.Is(err, common.UserAlreadyExistsError) {
+			return ctx.JSON(http.StatusConflict, map[string]string{
+				"error": common.UserAlreadyExistsError.Error(),
 			})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to sign up user"})
