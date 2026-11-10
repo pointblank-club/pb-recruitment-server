@@ -96,6 +96,9 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 	if sub.UserID != userID {
 		return ctx.NoContent(http.StatusForbidden)
 	}
+	if sub.Type == models.MCQ {
+		return ctx.JSON(http.StatusOK, map[string]string{})
+	}
 
 	return ctx.JSON(http.StatusOK, map[string]string{
 		"status": string(sub.Status),
@@ -132,6 +135,9 @@ func (sc *SubmissionController) GetSubmissionDetails(ctx echo.Context) error {
 	if sub.UserID != userID {
 		return ctx.NoContent(http.StatusForbidden)
 	}
+	if sub.Type == models.MCQ {
+		sub.Status = ""
+	}
 
 	return ctx.JSON(http.StatusOK, sub)
 }
@@ -164,6 +170,11 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to list user submissions",
 		})
+	}
+	for i := range submissions {
+		if submissions[i].Type == models.MCQ {
+			submissions[i].Status = ""
+		}
 	}
 
 	return ctx.JSON(http.StatusOK, dto.ListProblemSubmissionsResponse{
