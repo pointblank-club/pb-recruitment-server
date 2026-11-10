@@ -316,3 +316,52 @@ func TestSentryMetricsCoverUnsampledRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestSentryConcurrentRequests(t *testing.T) {
+	transport := &capturedSentryEvents{}
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "http://public@127.0.0.1:1/1", Transport: transport,
+		EnableLogs: true, EnableTracing: true, TracesSampleRate: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := sentry.CurrentHub().Client()
+	t.Cleanup(func() { client.Close(); sentry.CurrentHub().BindClient(previous) })
+	sentry.CurrentHub().BindClient(client)
+	e := NewEchoServer(nil, nil)
+	e.Logger.SetOutput(io.Discard)
+	e.GET("/synthetic/:id", func(c echo.Context) error { return c.NoContent(http.StatusOK) })
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 600 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			response := httptest.NewRecorder()
+			e.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/synthetic/item", nil))
+			if response.Code != http.StatusOK {
+				t.Errorf("response changed: %d", response.Code)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if !client.Flush(3 * time.Second) {
+		t.Fatal("telemetry did not flush")
+	}
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	var traces, logs, metrics int
+	for _, event := range transport.events {
+		if event.Type == "transaction" {
+			traces++
+		}
+		logs += len(event.Logs)
+		metrics += len(event.Metrics)
+	}
+	if traces == 0 || logs == 0 || metrics == 0 {
+		t.Fatalf("missing telemetry: traces=%d logs=%d metrics=%d", traces, logs, metrics)
+	}
+}
