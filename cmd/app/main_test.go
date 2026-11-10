@@ -36,7 +36,7 @@ func TestRunFlushesAfterLifecycleFailures(t *testing.T) {
 			previous := sentry.CurrentHub().Client()
 			t.Cleanup(func() { sentry.CurrentHub().BindClient(previous) })
 			tr := &flushRecorder{}
-			client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "http://public@127.0.0.1:1/1", Transport: tr})
+			client, err := sentry.NewClient(sentry.ClientOptions{DisableMetrics: true, Dsn: "http://public@127.0.0.1:1/1", Transport: tr})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -78,3 +78,5 @@ func TestRunFlushesAfterLifecycleFailures(t *testing.T) {
 		})
 	}
 }
+
+func (tr *flushRecorder) FlushWithContext(context.Context) bool { return tr.Flush(time.Second) }

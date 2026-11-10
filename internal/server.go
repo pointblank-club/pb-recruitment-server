@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
 	_ "app/docs"
 	echoSwagger "github.com/swaggo/echo-swagger"
@@ -31,6 +33,13 @@ func NewEchoServer(
 	// Enrich Sentry scope with route tags and capture unhandled 5xx errors
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			started := time.Now()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					c.Response().Status = http.StatusInternalServerError
+					panic(recovered)
+				}
+			}()
 			hub := sentryecho.GetHubFromContext(c)
 			var previousEventID sentry.EventID
 			if hub != nil {
@@ -77,6 +86,24 @@ func NewEchoServer(
 				}
 			}
 
+			// Only sampled requests and server failures need a remote request log.
+			span := sentryecho.GetSpanFromContext(c)
+			status := c.Response().Status
+			if err != nil && !c.Response().Committed {
+				status = http.StatusInternalServerError
+				var he *echo.HTTPError
+				if errors.As(err, &he) {
+					status = he.Code
+				}
+			}
+			if span != nil && c.Path() != "" && c.Path() != "/health" && c.Request().Method != echo.OPTIONS && (span.Sampled == sentry.SampledTrue || status >= 500) {
+				entry := sentry.NewLogger(span.Context()).Info()
+				if status >= 500 {
+					entry = sentry.NewLogger(span.Context()).Error()
+				}
+				entry.String("http.route", c.Path()).String("http.request.method", c.Request().Method).
+					Int("http.response.status_code", status).Int64("duration_ms", time.Since(started).Milliseconds()).Emit("HTTP request completed")
+			}
 			return err
 		}
 	})

@@ -5,8 +5,8 @@ go 1.25.1
 require (
 	github.com/aws/aws-sdk-go-v2 v1.39.6
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.16
-	github.com/getsentry/sentry-go v0.31.1
-	github.com/getsentry/sentry-go/echo v0.31.1
+	github.com/getsentry/sentry-go v0.44.0
+	github.com/getsentry/sentry-go/echo v0.44.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/swaggo/echo-swagger v1.5.2
@@ -45,7 +45,7 @@ require (
 	github.com/sv-tools/openapi v0.2.1 // indirect
 	github.com/swaggo/files/v2 v2.0.0 // indirect
 	github.com/swaggo/swag/v2 v2.0.0-rc4 // indirect
-	golang.org/x/tools v0.36.0 // indirect
+	golang.org/x/tools v0.41.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
@@ -110,12 +110,12 @@ require (
 	go.uber.org/fx v1.24.0
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/crypto v0.42.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sync v0.17.0
-	golang.org/x/sys v0.36.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/sync v0.19.0
+	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/time v0.11.0 // indirect
 	google.golang.org/api v0.231.0
 	google.golang.org/appengine/v2 v2.0.6 // indirect
