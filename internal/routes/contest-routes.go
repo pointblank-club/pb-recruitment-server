@@ -56,4 +56,17 @@ func AddContestRoutes(
 		contestController.GetContestProblem,
 		middleware.OptionalFirebaseAuth(authClient),
 	)
+
+	// Ingest candidate tab switch events
+	e.POST("/contests/:id/tab-switch",
+		contestController.RecordTabSwitch,
+		middleware.RequireFirebaseAuth(authClient),
+		middleware.ValidateRequest(new(dto.TabSwitchRequest)),
+	)
+
+	// Get candidate session status
+	e.GET("/contests/:id/session-status",
+		contestController.GetCandidateSessionStatus,
+		middleware.RequireFirebaseAuth(authClient),
+	)
 }

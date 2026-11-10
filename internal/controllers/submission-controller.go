@@ -219,6 +219,27 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		return ctx.JSON(http.StatusForbidden, map[string]string{"error": common.ContestNotRunningError.Error()})
 	}
 
+	sessionStatus, err := sc.contestService.GetCandidateSessionStatus(reqCtx, req.ContestID, userID)
+	if err != nil {
+		if errors.Is(err, common.UserNotRegisteredError) || errors.Is(err, common.UserNotFoundError) {
+			return ctx.NoContent(http.StatusForbidden)
+		}
+		log.Errorf("failed to check candidate session status for user %s: %v", userID, err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to check candidate session status",
+		})
+	}
+	if sessionStatus.IsTabSwitchTerminated {
+		return ctx.JSON(http.StatusForbidden, map[string]string{
+			"error": "contest participation terminated due to tab switching",
+		})
+	}
+	if sessionStatus.IsSubmitted {
+		return ctx.JSON(http.StatusForbidden, map[string]string{
+			"error": "contest already submitted",
+		})
+	}
+
 	submissionType := req.Type
 
 	submissionID, err := sc.submissionService.CreateSubmission(reqCtx, userID, submissionType, req)

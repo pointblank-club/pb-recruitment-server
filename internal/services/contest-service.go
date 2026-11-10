@@ -463,6 +463,63 @@ func (cs *ContestService) GetContestRegistrations(ctx context.Context, contestID
 	return cs.stores.Contests.GetContestRegistrations(ctx, contestID)
 }
 
+func (cs *ContestService) RecordTabSwitch(ctx context.Context, contestID string, userID string, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error) {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return nil, fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
+	if err != nil {
+		return nil, err
+	}
+
+	if contest.GetRunningStatus() != models.ContestRunningOpen {
+		return nil, common.ContestNotRunningError
+	}
+
+	isRegistered, err := cs.stores.Contests.IsRegistered(ctx, contestID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isRegistered {
+		return nil, common.UserNotRegisteredError
+	}
+
+	return cs.stores.Contests.RecordTabSwitch(ctx, contestID, userID, count, ip, userAgent)
+}
+
+func (cs *ContestService) GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error) {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return nil, fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	if _, err := cs.stores.Contests.GetContest(ctx, contestID); err != nil {
+		return nil, err
+	}
+
+	isRegistered, err := cs.stores.Contests.IsRegistered(ctx, contestID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isRegistered {
+		return nil, common.UserNotRegisteredError
+	}
+
+	return cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
+}
+
+func (cs *ContestService) ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) error {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	if _, err := cs.stores.Contests.GetContest(ctx, contestID); err != nil {
+		return err
+	}
+
+	return cs.stores.Contests.ResetContestantTabSwitches(ctx, contestID, userID, adminID)
+}
+
 func (cs *ContestService) GetProblemTestcases(ctx context.Context, contestID, problemID string) ([]dto.TestCaseResponse, error) {
 
 	meta, err := cs.stores.Problems.GetProblem(ctx, problemID, contestID)

@@ -750,6 +750,154 @@ func (cc *ContestController) GetContestRegistrations(ctx echo.Context) error {
 	return ctx.JSON(http.StatusOK, registrations)
 }
 
+// RecordTabSwitch godoc
+// @Summary      Record candidate tab switch event
+// @Description  Atomically increments candidate tab switch count and sets termination flag if threshold (5) reached.
+// @Tags         Contests
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        contestId path string true "Contest ID"
+// @Param        request body dto.TabSwitchRequest true "Tab switch count event"
+// @Success      200 {object} dto.TabSwitchResponse
+// @Failure      400 {object} map[string]string "Bad Request"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Contest not running or candidate not registered"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /contests/{contestId}/tab-switch [post]
+func (cc *ContestController) RecordTabSwitch(ctx echo.Context) error {
+	contestID := ctx.Param("contestId")
+	if contestID == "" {
+		contestID = ctx.Param("id")
+	}
+	if contestID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "contest ID is required"})
+	}
+
+	userID, ok := ctx.Get(common.AUTH_USER_ID).(string)
+	if !ok || userID == "" {
+		return ctx.NoContent(http.StatusUnauthorized)
+	}
+
+	var req dto.TabSwitchRequest
+	if reqBody, ok := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.TabSwitchRequest); ok && reqBody != nil {
+		req = *reqBody
+	} else {
+		if err := ctx.Bind(&req); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		}
+	}
+
+	ip := ctx.RealIP()
+	userAgent := ctx.Request().UserAgent()
+
+	res, err := cc.contestService.RecordTabSwitch(ctx.Request().Context(), contestID, userID, req.Count, ip, userAgent)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.ContestNotRunningError) || errors.Is(err, common.UserNotRegisteredError) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("record tab switch failed: %v", err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to record tab switch"})
+	}
+
+	return ctx.JSON(http.StatusOK, res)
+}
+
+// GetCandidateSessionStatus godoc
+// @Summary      Get candidate session status
+// @Description  Get current session status of the candidate in a contest (tab switch count, termination, and submission flags)
+// @Tags         Contests
+// @Produce      json
+// @Security     BearerAuth
+// @Param        contestId path string true "Contest ID"
+// @Success      200 {object} dto.CandidateSessionStatusResponse
+// @Failure      400 {object} map[string]string "Bad Request"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Candidate not registered"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /contests/{contestId}/session-status [get]
+func (cc *ContestController) GetCandidateSessionStatus(ctx echo.Context) error {
+	contestID := ctx.Param("contestId")
+	if contestID == "" {
+		contestID = ctx.Param("id")
+	}
+	if contestID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "contest ID is required"})
+	}
+
+	userID, ok := ctx.Get(common.AUTH_USER_ID).(string)
+	if !ok || userID == "" {
+		return ctx.NoContent(http.StatusUnauthorized)
+	}
+
+	status, err := cc.contestService.GetCandidateSessionStatus(ctx.Request().Context(), contestID, userID)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.UserNotRegisteredError) || errors.Is(err, common.UserNotFoundError) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("get candidate session status failed: %v", err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get session status"})
+	}
+
+	return ctx.JSON(http.StatusOK, status)
+}
+
+// ResetContestantTabSwitches godoc
+// @Summary      Reset contestant tab switches (Admin)
+// @Description  Resets a contestant's tab switch count and termination lock, recording an audit entry, while preserving submissions
+// @Tags         Admin - Contests
+// @Produce      json
+// @Security     BearerAuth
+// @Param        contestId path string true "Contest ID"
+// @Param        userId path string true "User ID"
+// @Success      200 {object} dto.ResetTabSwitchesResponse
+// @Failure      400 {object} map[string]string "Bad Request"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Forbidden - Admin access required"
+// @Failure      404 {object} map[string]string "Contest or contestant registration not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/contests/{contestId}/contestants/{userId}/reset-tab-switches [post]
+func (cc *ContestController) ResetContestantTabSwitches(ctx echo.Context) error {
+	contestID := ctx.Param("contestId")
+	if contestID == "" {
+		contestID = ctx.Param("id")
+	}
+	userID := ctx.Param("userId")
+	if userID == "" {
+		userID = ctx.Param("userid")
+	}
+
+	if contestID == "" || userID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "contest ID and user ID are required",
+		})
+	}
+
+	adminID, _ := ctx.Get(common.AUTH_USER_ID).(string)
+
+	err := cc.contestService.ResetContestantTabSwitches(ctx.Request().Context(), contestID, userID, adminID)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) || errors.Is(err, common.UserNotFoundError) || errors.Is(err, common.UserNotRegisteredError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("reset contestant tab switches failed: %v", err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to reset tab switches"})
+	}
+
+	return ctx.JSON(http.StatusOK, dto.ResetTabSwitchesResponse{
+		Success: true,
+		Message: "Contestant tab switch count and termination lock have been reset.",
+	})
+}
+
 // HandleListProblemsAdmin godoc
 // @Summary      List problems in contest (Admin)
 // @Description  Get all problems of a contest including unreleased items

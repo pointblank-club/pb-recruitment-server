@@ -30,14 +30,40 @@ const (
 )
 
 type ContestRegistration struct {
-	UserID       string `json:"user_id"`
-	Name         string `json:"name"`
-	Email        string `json:"email"`
-	USN          string `json:"usn"`
-	Department   string `json:"department"`
-	CurrentYear  int    `json:"current_year"`
-	RegisteredAt int64  `json:"registered_at"`
-	Score        int    `json:"score"`
-	Hidden       bool   `json:"hidden"`
-	Disqualified bool   `json:"disqualified"`
+	UserID                string `json:"user_id"`
+	Name                  string `json:"name"`
+	Email                 string `json:"email"`
+	USN                   string `json:"usn"`
+	Department            string `json:"department"`
+	CurrentYear           int    `json:"current_year"`
+	RegisteredAt          int64  `json:"registered_at"`
+	Score                 int    `json:"score"`
+	Hidden                bool   `json:"hidden"`
+	Disqualified          bool   `json:"disqualified"`
+	TabSwitchCount        int    `json:"tab_switch_count"`
+	IsTabSwitchTerminated bool   `json:"is_tab_switch_terminated"`
+}
+
+// TabSwitchRequest represents the payload for reporting a tab switch event.
+type TabSwitchRequest struct {
+	Count int `json:"count"`
+}
+
+// TabSwitchResponse represents the result of ingesting a tab switch event.
+type TabSwitchResponse struct {
+	TabSwitchCount int  `json:"tab_switch_count"`
+	IsTerminated   bool `json:"is_terminated"`
+}
+
+// CandidateSessionStatusResponse represents the candidate's current contest session status.
+type CandidateSessionStatusResponse struct {
+	TabSwitchCount        int  `json:"tab_switch_count"`
+	IsTabSwitchTerminated bool `json:"is_tab_switch_terminated"`
+	IsSubmitted           bool `json:"is_submitted"`
+}
+
+// ResetTabSwitchesResponse represents the response when an admin resets tab switches.
+type ResetTabSwitchesResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }

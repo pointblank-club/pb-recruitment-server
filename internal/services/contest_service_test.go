@@ -404,3 +404,139 @@ func TestGetContestProblemsListMCQProgressMasking(t *testing.T) {
 		}
 	}
 }
+
+type tabSwitchServiceTestStore struct {
+	*stores.ContestStore
+	start, end   int64
+	isRegistered bool
+	err          error
+	count        int
+	isTerminated bool
+	isSubmitted  bool
+	resetCalled  bool
+}
+
+func (s *tabSwitchServiceTestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return &dto.GetContestResponse{Contest: models.Contest{StartTime: s.start, EndTime: s.end}}, nil
+}
+
+func (s *tabSwitchServiceTestStore) IsRegistered(context.Context, string, string) (bool, error) {
+	return s.isRegistered, nil
+}
+
+func (s *tabSwitchServiceTestStore) RecordTabSwitch(_ context.Context, _ string, _ string, count int, _ string, _ string) (*dto.TabSwitchResponse, error) {
+	if count > 0 && count > s.count {
+		s.count = count
+	} else {
+		s.count++
+	}
+	if s.count >= 5 {
+		s.isTerminated = true
+	}
+	return &dto.TabSwitchResponse{
+		TabSwitchCount: s.count,
+		IsTerminated:   s.isTerminated,
+	}, nil
+}
+
+func (s *tabSwitchServiceTestStore) GetCandidateSessionStatus(context.Context, string, string) (*dto.CandidateSessionStatusResponse, error) {
+	return &dto.CandidateSessionStatusResponse{
+		TabSwitchCount:        s.count,
+		IsTabSwitchTerminated: s.isTerminated,
+		IsSubmitted:           s.isSubmitted,
+	}, nil
+}
+
+func (s *tabSwitchServiceTestStore) ResetContestantTabSwitches(context.Context, string, string, string) error {
+	s.resetCalled = true
+	s.count = 0
+	s.isTerminated = false
+	s.isSubmitted = false
+	return nil
+}
+
+func TestContestServiceTabSwitch(t *testing.T) {
+	now := time.Now().UnixMilli()
+
+	t.Run("record tab switch during running contest", func(t *testing.T) {
+		store := &tabSwitchServiceTestStore{
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: true,
+		}
+		svc := NewContestService(&stores.Storage{Contests: store}, nil)
+		res, err := svc.RecordTabSwitch(context.Background(), "c1", "u1", 2, "127.0.0.1", "Mozilla")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.TabSwitchCount != 2 || res.IsTerminated {
+			t.Fatalf("unexpected result: %+v", res)
+		}
+	})
+
+	t.Run("record tab switch blocks when not running", func(t *testing.T) {
+		store := &tabSwitchServiceTestStore{
+			start:        now + 60_000,
+			end:          now + 120_000,
+			isRegistered: true,
+		}
+		svc := NewContestService(&stores.Storage{Contests: store}, nil)
+		_, err := svc.RecordTabSwitch(context.Background(), "c1", "u1", 1, "127.0.0.1", "Mozilla")
+		if !errors.Is(err, common.ContestNotRunningError) {
+			t.Fatalf("got error %v, want ContestNotRunningError", err)
+		}
+	})
+
+	t.Run("record tab switch blocks when not registered", func(t *testing.T) {
+		store := &tabSwitchServiceTestStore{
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: false,
+		}
+		svc := NewContestService(&stores.Storage{Contests: store}, nil)
+		_, err := svc.RecordTabSwitch(context.Background(), "c1", "u1", 1, "127.0.0.1", "Mozilla")
+		if !errors.Is(err, common.UserNotRegisteredError) {
+			t.Fatalf("got error %v, want UserNotRegisteredError", err)
+		}
+	})
+
+	t.Run("session status returns registration status", func(t *testing.T) {
+		store := &tabSwitchServiceTestStore{
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: true,
+			count:        3,
+			isTerminated: false,
+			isSubmitted:  false,
+		}
+		svc := NewContestService(&stores.Storage{Contests: store}, nil)
+		status, err := svc.GetCandidateSessionStatus(context.Background(), "c1", "u1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status.TabSwitchCount != 3 || status.IsTabSwitchTerminated || status.IsSubmitted {
+			t.Fatalf("unexpected status: %+v", status)
+		}
+	})
+
+	t.Run("admin reset clears switches", func(t *testing.T) {
+		store := &tabSwitchServiceTestStore{
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: true,
+			count:        5,
+			isTerminated: true,
+			isSubmitted:  true,
+		}
+		svc := NewContestService(&stores.Storage{Contests: store}, nil)
+		if err := svc.ResetContestantTabSwitches(context.Background(), "c1", "u1", "admin1"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !store.resetCalled || store.count != 0 || store.isTerminated || store.isSubmitted {
+			t.Fatalf("expected reset, got: count=%d, terminated=%v", store.count, store.isTerminated)
+		}
+	})
+}

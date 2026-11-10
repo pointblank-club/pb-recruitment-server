@@ -21,13 +21,28 @@ import (
 
 type submissionContestStore struct {
 	*stores.ContestStore
-	contest    models.Contest
-	registered bool
-	err        error
+	contest               models.Contest
+	registered            bool
+	err                   error
+	tabSwitchCount        int
+	isTabSwitchTerminated bool
+	isSubmitted           bool
 }
 
 func (s submissionContestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
 	return &dto.GetContestResponse{Contest: s.contest}, s.err
+}
+
+func (s submissionContestStore) IsRegistered(context.Context, string, string) (bool, error) {
+	return s.registered, nil
+}
+
+func (s submissionContestStore) GetCandidateSessionStatus(context.Context, string, string) (*dto.CandidateSessionStatusResponse, error) {
+	return &dto.CandidateSessionStatusResponse{
+		TabSwitchCount:        s.tabSwitchCount,
+		IsTabSwitchTerminated: s.isTabSwitchTerminated,
+		IsSubmitted:           s.isSubmitted,
+	}, nil
 }
 
 func TestSubmitSolutionMissingContest(t *testing.T) {
@@ -43,9 +58,6 @@ func TestSubmitSolutionMissingContest(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("HTTP %d, want 404", recorder.Code)
 	}
-}
-func (s submissionContestStore) IsRegistered(context.Context, string, string) (bool, error) {
-	return s.registered, nil
 }
 
 type submissionProblemStore struct{ *stores.ProblemStore }

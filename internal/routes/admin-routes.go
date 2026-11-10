@@ -53,6 +53,7 @@ func AddAdminRoutes(
 	adminGroup.PATCH("/contest/:id/plagiarism/pairs/:pairKey", contestController.ReviewDolosPair, middleware.ValidateRequest(new(dto.PlagiarismPairReviewRequest)))
 
 	adminGroup.GET("/contests/:contestId/registrations", contestController.GetContestRegistrations)
+	adminGroup.POST("/contests/:contestId/contestants/:userId/reset-tab-switches", contestController.ResetContestantTabSwitches)
 
 	//Submissions / Code Management
 	adminGroup.GET("/contests/:contestId/submissions", submissionController.GetAdminSubmissions)

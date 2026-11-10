@@ -6,6 +6,7 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -292,7 +293,9 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			cr.registered_at,
 			COALESCE(r.score, 0),
 			COALESCE(r.hidden, FALSE),
-			COALESCE(r.disqualified, FALSE)
+			COALESCE(r.disqualified, FALSE),
+			COALESCE(cr.tab_switch_count, 0),
+			COALESCE(cr.is_tab_switch_terminated, FALSE)
 		FROM contest_registrations cr
 		INNER JOIN users u ON cr.user_id = u.id
 		LEFT JOIN rankings r ON r.contest_id = cr.contest_id AND r.user_id = cr.user_id
@@ -321,6 +324,8 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.Score,
 			&reg.Hidden,
 			&reg.Disqualified,
+			&reg.TabSwitchCount,
+			&reg.IsTabSwitchTerminated,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
 			continue
@@ -334,4 +339,117 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 	}
 
 	return registrations, nil
+}
+
+func (s *ContestStore) RecordTabSwitch(ctx context.Context, contestID string, userID string, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("contest store: db is not initialized")
+	}
+
+	const q = `
+		WITH new_vals AS (
+			SELECT 
+				CASE WHEN $3 > 0 THEN GREATEST(COALESCE(tab_switch_count, 0) + 1, $3) ELSE COALESCE(tab_switch_count, 0) + 1 END AS new_count,
+				COALESCE(is_tab_switch_terminated, FALSE) AS was_terminated
+			FROM contest_registrations
+			WHERE contest_id = $1 AND user_id = $2
+		)
+		UPDATE contest_registrations cr
+		SET
+			tab_switch_count = nv.new_count,
+			is_tab_switch_terminated = (nv.was_terminated OR nv.new_count >= 5),
+			tab_switch_history = CASE
+				WHEN nv.was_terminated THEN cr.tab_switch_history
+				ELSE COALESCE(cr.tab_switch_history, '[]'::jsonb) || jsonb_build_array(
+					jsonb_build_object(
+						'timestamp', $4::bigint,
+						'count', nv.new_count,
+						'ip', $5::text,
+						'user_agent', $6::text
+					)
+				)
+			END
+		FROM new_vals nv
+		WHERE cr.contest_id = $1 AND cr.user_id = $2
+		RETURNING cr.tab_switch_count, cr.is_tab_switch_terminated;
+	`
+
+	now := time.Now().UnixMilli()
+	var res dto.TabSwitchResponse
+	err := s.db.QueryRowContext(ctx, q, contestID, userID, count, now, ip, userAgent).Scan(&res.TabSwitchCount, &res.IsTerminated)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, common.UserNotFoundError
+		}
+		log.Printf("contest-store: record tab switch failed: %v", err)
+		return nil, fmt.Errorf("record tab switch: %w", err)
+	}
+
+	return &res, nil
+}
+
+func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("contest store: db is not initialized")
+	}
+
+	const q = `
+		SELECT 
+			COALESCE(tab_switch_count, 0),
+			COALESCE(is_tab_switch_terminated, FALSE),
+			COALESCE(is_submitted, FALSE)
+		FROM contest_registrations
+		WHERE contest_id = $1 AND user_id = $2
+	`
+
+	var res dto.CandidateSessionStatusResponse
+	err := s.db.QueryRowContext(ctx, q, contestID, userID).Scan(&res.TabSwitchCount, &res.IsTabSwitchTerminated, &res.IsSubmitted)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, common.UserNotFoundError
+		}
+		log.Printf("contest-store: get session status failed: %v", err)
+		return nil, fmt.Errorf("get candidate session status: %w", err)
+	}
+
+	return &res, nil
+}
+
+func (s *ContestStore) ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("contest store: db is not initialized")
+	}
+
+	const q = `
+		UPDATE contest_registrations
+		SET
+			tab_switch_count = 0,
+			is_tab_switch_terminated = FALSE,
+			is_submitted = FALSE,
+			tab_switch_history = COALESCE(tab_switch_history, '[]'::jsonb) || jsonb_build_array(
+				jsonb_build_object(
+					'action', 'admin_reset',
+					'admin_id', $3::text,
+					'timestamp', $4::bigint
+				)
+			)
+		WHERE contest_id = $1 AND user_id = $2
+	`
+
+	now := time.Now().UnixMilli()
+	res, err := s.db.ExecContext(ctx, q, contestID, userID, adminID, now)
+	if err != nil {
+		log.Printf("contest-store: reset tab switches failed: %v", err)
+		return fmt.Errorf("reset contestant tab switches: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if affected == 0 {
+		return common.UserNotFoundError
+	}
+
+	return nil
 }
