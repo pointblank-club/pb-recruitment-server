@@ -26,13 +26,13 @@ func TestCORSExposesResponseHeaders(t *testing.T) {
 		return c.NoContent(http.StatusTooManyRequests)
 	})
 	req := httptest.NewRequest(http.MethodPost, "/submission/run", nil)
-	req.Header.Set(echo.HeaderOrigin, "http://localhost:5173")
+	req.Header.Set(echo.HeaderOrigin, "https://recruitment1.pointblank.club")
 	w := httptest.NewRecorder()
 	e.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatal("lost rate-limit response", w.Code, w.Header())
 	}
-	if w.Header().Get(echo.HeaderAccessControlAllowOrigin) != "http://localhost:5173" {
+	if w.Header().Get(echo.HeaderAccessControlAllowOrigin) != "https://recruitment1.pointblank.club" {
 		t.Fatal("frontend origin not allowed", w.Header())
 	}
 	exposed := strings.Split(w.Header().Get(echo.HeaderAccessControlExposeHeaders), ",")

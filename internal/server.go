@@ -24,6 +24,7 @@ func NewEchoServer(
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: []string{
 			"https://recruitment.pointblank.club",
+			"https://recruitment1.pointblank.club",
 			"http://recruitment.pointblank.club",
 			"https://pb-recruitment-website-green.vercel.app",
 			"http://localhost:5173",
