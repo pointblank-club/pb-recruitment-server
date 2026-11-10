@@ -106,7 +106,7 @@ The Consolidator is designed to run at contest conclusion:
 
 ## 6. Contestant API Contract
 
-- **Displayed Submission Counts**: The leaderboard's existing `problem_scores[].attempts` field counts all submissions for that problem, including pending submissions and `judge_error`. It is displayed as **Submissions** and is not the attempt penalty used for final ranking. Live ranks use score only; consolidated ranks apply the tie-breakers above.
+- **Displayed Submission Counts**: The leaderboard's existing `problem_scores[].attempts` field counts all submissions for that problem, including pending submissions and `judge_error`. It is displayed as **Submissions** and is not the attempt penalty used for final ranking. Live ranks order by score (descending), then finish time (ascending); consolidated ranks apply the full tie-breakers above.
 - **Status**: `GET /submission/:id/status` returns only the submission verdict in `status`.
 - **Details**: `GET /submission/:id/details` returns the verdict, per-testcase results, runtime and memory, along with submission metadata and the contestant's code.
 - **Internal Diagnostics**: `compile_output` and `stderr` remain internal. Contestant responses must never include them, hidden testcase input/output, or Judge0 tokens.
