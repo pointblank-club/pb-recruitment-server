@@ -205,14 +205,26 @@ func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	entriesQ := `
-		SELECT RANK() OVER (ORDER BY r.score DESC) AS rank, r.user_id, u.name, u.usn, r.score
+		WITH first_solves AS (
+			SELECT user_id, problem_id, MIN(created_at) AS solved_at
+			FROM submissions
+			WHERE contest_id = $1 AND status = 'accepted'
+			GROUP BY user_id, problem_id
+		),
+		user_solve_time AS (
+			SELECT user_id, MAX(solved_at) AS last_solve_time
+			FROM first_solves
+			GROUP BY user_id
+		)
+		SELECT RANK() OVER (ORDER BY r.score DESC, st.last_solve_time ASC NULLS LAST) AS rank, r.user_id, u.name, u.usn, r.score
 		FROM rankings r
 		INNER JOIN users u 
 		ON r.user_id = u.id
+		LEFT JOIN user_solve_time st ON r.user_id = st.user_id
 		WHERE r.contest_id = $1
 		AND r.hidden = false
 		AND r.disqualified = false
-		ORDER BY rank ASC, u.name ASC, r.user_id ASC
+		ORDER BY rank ASC, st.last_solve_time ASC NULLS LAST, u.name ASC, r.user_id ASC
 		LIMIT $2 OFFSET $3
 	`
 	if isConsolidated {

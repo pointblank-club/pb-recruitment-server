@@ -440,3 +440,76 @@ func TestUpdateLeaderboardUserParticipantValidationPostgres(t *testing.T) {
 		t.Fatalf("expected disqualified=true, hidden=true (COALESCE preserved disqualified), got disq=%v, hidden=%v", disq, hidden)
 	}
 }
+
+func TestLiveRankingResubmissionOrderPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	alice, bob := uuid.NewString(), uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+
+	for _, u := range []struct {
+		id   string
+		name string
+	}{
+		{alice, "Alice"},
+		{bob, "Bob"},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id, name, email, usn, current_year, department) VALUES($1, $2, $3, $1, 1, 'CS')`, u.id, u.name, u.id+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id, name, description, registration_start_time, registration_end_time, start_time, end_time) VALUES($1, 'Live Ranking Contest', '', 1, $2, $3, $2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Problem 1', 100, 'code')`, problem, contest); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, u := range []string{alice, bob} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1, $2, 100, 0, false, false)`, contest, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Alice accept at 1000, Bob accept at 2000
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 1000)`, uuid.NewString(), alice, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 2000)`, uuid.NewString(), bob, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	rankingStore := stores.NewRankingStore(db)
+
+	assertOrder := func(stage string) {
+		lb, err := rankingStore.GetLeaderboard(ctx, contest, 0)
+		if err != nil {
+			t.Fatalf("%s: GetLeaderboard failed: %v", stage, err)
+		}
+		if len(lb.Entries) != 2 {
+			t.Fatalf("%s: expected 2 entries, got %d", stage, len(lb.Entries))
+		}
+		if lb.Entries[0].UserID != alice || lb.Entries[0].Rank != 1 || lb.Entries[0].TotalScore != 100 || lb.Entries[0].LastSubmissionTime != 1_000_000 {
+			t.Errorf("%s: expected alice rank 1 score 100 finish 1000000, got user %s rank %d score %d finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
+		}
+		if lb.Entries[1].UserID != bob || lb.Entries[1].Rank != 2 || lb.Entries[1].TotalScore != 100 || lb.Entries[1].LastSubmissionTime != 2_000_000 {
+			t.Errorf("%s: expected bob rank 2 score 100 finish 2000000, got user %s rank %d score %d finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
+		}
+	}
+
+	assertOrder("before repeat submission")
+
+	// Repeat accept for Alice at 5000 must not change ranking
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 5000)`, uuid.NewString(), alice, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+	rankingStore.InvalidateCache(contest)
+
+	assertOrder("after repeat submission at 5000")
+}
