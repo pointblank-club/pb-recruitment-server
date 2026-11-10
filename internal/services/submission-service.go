@@ -66,6 +66,29 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 	return sub, nil
 }
 
+func (ss *SubmissionService) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
+	return ss.stores.Submissions.ListAdminSubmissions(ctx, contestID, userID, problemID, verdict, page, pageSize)
+}
+
+func (ss *SubmissionService) GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error) {
+	details, err := ss.stores.Submissions.GetAdminSubmissionDetails(ctx, submissionID)
+	if err != nil {
+		return nil, err
+	}
+	if details.Type == models.Code {
+		code, err := ss.s3.GetObject(ctx, details.ID)
+		if err != nil {
+			if !errors.Is(err, common.KeyNotFoundError) {
+				return nil, err
+			}
+			details.Code = ""
+		} else {
+			details.Code = code
+		}
+	}
+	return details, nil
+}
+
 func (ss *SubmissionService) rateLimitCooldown() int64 {
 	cooldown := int64(5) // default 5 seconds
 	if envVal := os.Getenv("SUBMISSION_RATE_LIMIT_SECONDS"); envVal != "" {

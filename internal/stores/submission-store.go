@@ -597,3 +597,153 @@ func (s *SubmissionStore) CheckRunCapacity(ctx context.Context) error {
 	}
 	return nil
 }
+
+func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, fmt.Errorf("submission store: db is not initialized")
+	}
+
+	if pageSize <= 0 {
+		pageSize = 50
+	} else if pageSize > 200 {
+		pageSize = 200
+	}
+	page = max(0, page)
+	if page > int(^uint(0)>>1)/pageSize {
+		return nil, 0, fmt.Errorf("invalid pagination offset")
+	}
+	offset := page * pageSize
+
+	const countQ = `
+		SELECT COUNT(*)
+		FROM submissions s
+		WHERE s.contest_id = $1 AND s.type = 'code'
+		  AND ($2 = '' OR s.user_id = $2)
+		  AND ($3 = '' OR s.problem_id = $3)
+		  AND ($4 = '' OR LOWER(s.status::text) = LOWER($4))
+	`
+	var totalCount int
+	if err := s.db.QueryRowContext(ctx, countQ, contestID, userID, problemID, verdict).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("count admin submissions: %w", err)
+	}
+
+	const q = `
+		SELECT 
+			s.id,
+			s.user_id,
+			COALESCE(u.name, 'Unknown'),
+			COALESCE(u.email, ''),
+			s.contest_id,
+			s.problem_id,
+			COALESCE(p.name, 'Unknown Problem'),
+			s.type,
+			COALESCE(s.language, ''),
+			s.status,
+			s.created_at,
+			COALESCE(s.runtime, 0),
+			COALESCE(s.memory, 0)
+		FROM submissions s
+		LEFT JOIN users u ON s.user_id = u.id
+		LEFT JOIN problems p ON s.problem_id = p.id
+		WHERE s.contest_id = $1 AND s.type = 'code'
+		  AND ($2 = '' OR s.user_id = $2)
+		  AND ($3 = '' OR s.problem_id = $3)
+		  AND ($6 = '' OR LOWER(s.status::text) = LOWER($6))
+		ORDER BY s.created_at DESC, s.submission_seq DESC
+		LIMIT $4 OFFSET $5
+	`
+
+	rows, err := s.db.QueryContext(ctx, q, contestID, userID, problemID, pageSize, offset, verdict)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query admin submissions: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]dto.AdminSubmissionItem, 0)
+	for rows.Next() {
+		var item dto.AdminSubmissionItem
+		if err := rows.Scan(
+			&item.ID,
+			&item.UserID,
+			&item.UserName,
+			&item.UserEmail,
+			&item.ContestID,
+			&item.ProblemID,
+			&item.ProblemName,
+			&item.Type,
+			&item.Language,
+			&item.Status,
+			&item.CreatedAt,
+			&item.Runtime,
+			&item.Memory,
+		); err != nil {
+			log.Printf("submission-store: failed to scan admin submission row: %v", err)
+			continue
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return items, totalCount, nil
+}
+
+func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("submission store: db is not initialized")
+	}
+
+	const q = `
+		SELECT 
+			s.id,
+			s.user_id,
+			COALESCE(u.name, 'Unknown'),
+			COALESCE(u.email, ''),
+			s.contest_id,
+			s.problem_id,
+			COALESCE(p.name, 'Unknown Problem'),
+			s.type,
+			COALESCE(s.language, ''),
+			s.status,
+			s.created_at,
+			COALESCE(s.runtime, 0),
+			COALESCE(s.memory, 0)
+		FROM submissions s
+		LEFT JOIN users u ON s.user_id = u.id
+		LEFT JOIN problems p ON s.problem_id = p.id
+		WHERE s.id = $1
+	`
+
+	var details dto.AdminSubmissionDetails
+	row := s.db.QueryRowContext(ctx, q, submissionID)
+	if err := row.Scan(
+		&details.ID,
+		&details.UserID,
+		&details.UserName,
+		&details.UserEmail,
+		&details.ContestID,
+		&details.ProblemID,
+		&details.ProblemName,
+		&details.Type,
+		&details.Language,
+		&details.Status,
+		&details.CreatedAt,
+		&details.Runtime,
+		&details.Memory,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, common.ErrNotFound
+		}
+		return nil, fmt.Errorf("scan admin submission details: %w", err)
+	}
+
+	testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, submissionID)
+	if err != nil {
+		return nil, fmt.Errorf("get test case results: %w", err)
+	}
+	details.TestCaseResults = testCaseResults
+
+	return &details, nil
+}

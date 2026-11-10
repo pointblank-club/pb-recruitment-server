@@ -230,3 +230,78 @@ func TestSubmitSolutionDuplicateMCQ(t *testing.T) {
 		t.Fatalf("body = %s, want to contain 'submission already exists'", recorder.Body.String())
 	}
 }
+
+type adminSubmissionTestStore struct {
+	*stores.SubmissionStore
+	details *dto.AdminSubmissionDetails
+	err     error
+}
+
+func (s *adminSubmissionTestStore) GetAdminSubmissionDetails(_ context.Context, _ string) (*dto.AdminSubmissionDetails, error) {
+	return s.details, s.err
+}
+
+func TestGetAdminSubmissionDetailsContestScoping(t *testing.T) {
+	storage := &stores.Storage{
+		Submissions: &adminSubmissionTestStore{
+			details: &dto.AdminSubmissionDetails{
+				AdminSubmissionItem: dto.AdminSubmissionItem{
+					ID:        "sub-1",
+					ContestID: "contest-1",
+				},
+			},
+		},
+	}
+	controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), nil, nil)
+
+	// Scoped request with matching contest ID should succeed (200)
+	{
+		recorder := httptest.NewRecorder()
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/admin/contests/contest-1/submissions/sub-1", nil)
+		ctx := e.NewContext(req, recorder)
+		ctx.SetParamNames("contestId", "id")
+		ctx.SetParamValues("contest-1", "sub-1")
+
+		if err := controller.GetAdminSubmissionDetails(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("matching contest: got %d, want 200", recorder.Code)
+		}
+	}
+
+	// Scoped request with mismatched contest ID should return 404
+	{
+		recorder := httptest.NewRecorder()
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/admin/contests/contest-2/submissions/sub-1", nil)
+		ctx := e.NewContext(req, recorder)
+		ctx.SetParamNames("contestId", "id")
+		ctx.SetParamValues("contest-2", "sub-1")
+
+		if err := controller.GetAdminSubmissionDetails(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("mismatched contest: got %d, want 404", recorder.Code)
+		}
+	}
+
+	// Global unscoped request should succeed (200)
+	{
+		recorder := httptest.NewRecorder()
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/admin/submissions/sub-1", nil)
+		ctx := e.NewContext(req, recorder)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("sub-1")
+
+		if err := controller.GetAdminSubmissionDetails(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("unscoped global route: got %d, want 200", recorder.Code)
+		}
+	}
+}

@@ -40,6 +40,8 @@ type Storage struct {
 		PendingCodeWithoutExecutions(context.Context, int64, int) ([]string, error)
 		CheckSubmissionRateLimit(context.Context, string, int64) error
 		CheckRunCapacity(context.Context) error
+		ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error)
+		GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error)
 	}
 	Executions interface {
 		InsertBatch(ctx context.Context, submissionID string, indexes []int, jobs ...[]judge0.SubmissionRequest) ([]models.Execution, error)

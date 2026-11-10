@@ -834,6 +834,182 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/contests/{contestId}/submissions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get all coding submissions made in a contest, optionally filtered by user_id and problem_id",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Get contest coding submissions (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID (optional)",
+                        "name": "user_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Problem ID (optional)",
+                        "name": "problem_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (defaults to 0)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (defaults to 50)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/app_internal_models_dto.AdminSubmissionItem"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Contest ID is required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/submissions/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get full execution and code details of a specific submission for admin viewing",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Get coding submission details (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Submission ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.AdminSubmissionDetails"
+                        }
+                    },
+                    "400": {
+                        "description": "Submission ID is required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Submission not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/{contestid}/leaderboard/{userid}": {
             "put": {
                 "security": [
@@ -2797,6 +2973,103 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "usn": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.AdminSubmissionDetails": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "contest_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "integer"
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "problem_name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "integer"
+                },
+                "status": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                },
+                "test_case_results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/app_internal_models.TestCaseResult"
+                    }
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "user_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.AdminSubmissionItem": {
+            "type": "object",
+            "properties": {
+                "contest_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "memory": {
+                    "type": "integer"
+                },
+                "problem_id": {
+                    "type": "string"
+                },
+                "problem_name": {
+                    "type": "string"
+                },
+                "runtime": {
+                    "type": "integer"
+                },
+                "status": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                },
+                "type": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionType"
+                },
+                "user_email": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "user_name": {
                     "type": "string"
                 }
             }
