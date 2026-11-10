@@ -41,7 +41,7 @@ type Submission struct {
 	Type            SubmissionType   `json:"type"`
 	Language        string           `json:"language,omitempty"` // For code submissions
 	Option          []int            `json:"option,omitempty"`   // Selected option(s) for MCQ submissions
-	Status          SubmissionStatus `json:"status"`             // e.g., "Pending", "Accepted", "Wrong Answer", etc.
+	Status          SubmissionStatus `json:"status,omitempty"`   // e.g., "Pending", "Accepted", "Wrong Answer", etc.
 	CreatedAt       int64            `json:"created_at"`         // Unix timestamp
 	Runtime         int64            `json:"runtime,omitempty"`
 	Memory          int64            `json:"memory,omitempty"`
