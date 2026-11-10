@@ -853,9 +853,10 @@ func (d *DolosService) Run(ctx context.Context) {
 		case <-ticker.C:
 			if err := d.process(ctx); err != nil {
 				log.Errorf("Dolos worker: %v", err)
-				sentry.WithScope(func(scope *sentry.Scope) {
+				hub := sentry.CurrentHub().Clone()
+				hub.WithScope(func(scope *sentry.Scope) {
 					scope.SetTag("worker", "dolos")
-					sentry.CaptureException(err)
+					hub.CaptureException(err)
 				})
 			}
 		}
@@ -1384,7 +1385,10 @@ func (d *DolosService) makeArchiveWithLease(ctx context.Context, contestID, prob
 		defer func() {
 			if r := recover(); r != nil {
 				log.Errorf("panic in Dolos archive lease renovator: %v", r)
-				sentry.CurrentHub().Recover(r)
+				hub := sentry.CurrentHub().Clone()
+				hub.Recover(r)
+				hub.Flush(2 * time.Second)
+				panic(r)
 			}
 		}()
 		ticker := time.NewTicker(30 * time.Second)
@@ -1499,8 +1503,10 @@ func NewDolosWorker(lc fx.Lifecycle, d *DolosService) {
 				defer func() {
 					if r := recover(); r != nil {
 						log.Errorf("panic in Dolos worker: %v", r)
-						sentry.CurrentHub().Recover(r)
-						sentry.Flush(2 * time.Second)
+						hub := sentry.CurrentHub().Clone()
+						hub.Recover(r)
+						hub.Flush(2 * time.Second)
+						panic(r)
 					}
 				}()
 				d.Run(workerCtx)

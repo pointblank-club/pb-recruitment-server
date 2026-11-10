@@ -3,7 +3,6 @@ package boot
 import (
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -27,36 +26,33 @@ func InitSentry() error {
 		stage = "development"
 	}
 
-	tracesSampleRate := 1.0
-	if stage == "production" {
-		tracesSampleRate = 0.2
-	}
-	if rateStr := os.Getenv("SENTRY_TRACES_SAMPLE_RATE"); rateStr != "" {
-		if rate, err := strconv.ParseFloat(rateStr, 64); err == nil && rate >= 0 && rate <= 1.0 {
-			tracesSampleRate = rate
-		}
-	}
-
 	release := os.Getenv("RELEASE_VERSION")
 	if release == "" {
 		release = os.Getenv("APP_VERSION")
 	}
 
 	err := sentry.Init(sentry.ClientOptions{
-		Dsn:              dsn,
-		Environment:      stage,
-		Release:          release,
-		AttachStacktrace: true,
-		EnableTracing:    true,
-		TracesSampleRate: tracesSampleRate,
-		Debug:            stage == "dev" || os.Getenv("SENTRY_DEBUG") == "true",
+		Dsn:                   dsn,
+		Environment:           stage,
+		Release:               release,
+		AttachStacktrace:      true,
+		BeforeSend:            scrubSentryRequest,
+		BeforeSendTransaction: scrubSentryRequest,
+		Debug:                 stage == "dev" || os.Getenv("SENTRY_DEBUG") == "true",
 	})
 	if err != nil {
 		return err
 	}
 
-	log.Printf("[Sentry] Initialized successfully (environment: %s, sample rate: %.2f)", stage, tracesSampleRate)
+	log.Printf("[Sentry] Initialized crash reporting (environment: %s)", stage)
 	return nil
+}
+
+func scrubSentryRequest(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
+	if event.Request != nil {
+		event.Request = &sentry.Request{URL: event.Request.URL, Method: event.Request.Method}
+	}
+	return event
 }
 
 // FlushSentry flushes any buffered events to Sentry within the given timeout.

@@ -56,7 +56,6 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 		if hub := sentryecho.GetHubFromContext(c); hub != nil {
 			hub.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("execution_id", id)
-				scope.SetTag("judge0_token", payload.Token)
 				hub.CaptureException(err)
 			})
 		}

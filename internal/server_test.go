@@ -117,65 +117,17 @@ func TestSwaggerGating(t *testing.T) {
 	}
 }
 
-
-func TestSentryEndpoints(t *testing.T) {
-	t.Setenv("STAGE", "dev")
-	e := NewEchoServer(nil, nil)
-
-	// Test default usage info
-	req := httptest.NewRequest(http.MethodGet, "/debug/sentry-test", nil)
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for usage, got %d", w.Code)
-	}
-
-	// Test message capture
-	req = httptest.NewRequest(http.MethodGet, "/debug/sentry-test?type=message", nil)
-	w = httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK for message, got %d", w.Code)
-	}
-
-	// Test error capture
-	req = httptest.NewRequest(http.MethodGet, "/debug/sentry-test?type=error", nil)
-	w = httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for error, got %d", w.Code)
-	}
-
-	// Test panic recovery
-	req = httptest.NewRequest(http.MethodGet, "/debug/sentry-test?type=panic", nil)
-	w = httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 for recovered panic, got %d", w.Code)
-	}
-}
-
-func TestSentryEndpointProductionGating(t *testing.T) {
-	// Gated when STAGE=production and ENABLE_SENTRY_TEST is unset
-	t.Setenv("STAGE", "production")
-	t.Setenv("ENABLE_SENTRY_TEST", "")
-	e := NewEchoServer(nil, nil)
-
-	req := httptest.NewRequest(http.MethodGet, "/debug/sentry-test", nil)
-	w := httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 Forbidden in production, got %d", w.Code)
-	}
-
-	// Allowed when ENABLE_SENTRY_TEST=true
-	t.Setenv("ENABLE_SENTRY_TEST", "true")
-	e = NewEchoServer(nil, nil)
-
-	req = httptest.NewRequest(http.MethodGet, "/debug/sentry-test", nil)
-	w = httptest.NewRecorder()
-	e.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK when ENABLE_SENTRY_TEST=true, got %d", w.Code)
+func TestSentryDebugEndpointAbsent(t *testing.T) {
+	for _, stage := range []string{"dev", "production"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Setenv("STAGE", stage)
+			t.Setenv("ENABLE_SENTRY_TEST", "true")
+			e := NewEchoServer(nil, nil)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/debug/sentry-test?type=panic", nil))
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("debug endpoint must not be exposed: HTTP %d", w.Code)
+			}
+		})
 	}
 }

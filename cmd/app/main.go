@@ -10,7 +10,9 @@ import (
 	"app/internal/s3"
 	"app/internal/services"
 	"app/internal/stores"
+	"context"
 	"log"
+	"os"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -40,10 +42,15 @@ func main() {
 	if err := boot.InitSentry(); err != nil {
 		log.Printf("[Sentry] Initialization error: %v", err)
 	}
-	defer boot.FlushSentry(2 * time.Second)
-	defer sentry.Recover()
+	defer func() {
+		if r := recover(); r != nil {
+			sentry.CurrentHub().Clone().Recover(r)
+			boot.FlushSentry(2 * time.Second)
+			panic(r)
+		}
+	}()
 
-	fx.New(
+	app := fx.New(
 		fx.Provide(
 			boot.NewFirebaseAuth,
 			controllers.NewContestController,
@@ -67,5 +74,30 @@ func main() {
 		fx.Invoke(services.NewDolosWorker),
 		fx.Invoke(routes.AddAdminRoutes),
 		fx.Invoke(internal.StartEchoServer),
-	).Run()
+	)
+	if code := run(app); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func run(app *fx.App) int {
+	// Fx.Run exits on lifecycle errors before main's defers can flush telemetry.
+	defer boot.FlushSentry(2 * time.Second)
+	startCtx, cancelStart := context.WithTimeout(context.Background(), app.StartTimeout())
+	err := app.Start(startCtx)
+	cancelStart()
+	if err != nil {
+		log.Printf("Application startup failed: %v", err)
+		return 1
+	}
+
+	signal := <-app.Wait()
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), app.StopTimeout())
+	err = app.Stop(stopCtx)
+	cancelStop()
+	if err != nil {
+		log.Printf("Application shutdown failed: %v", err)
+		return 1
+	}
+	return signal.ExitCode
 }

@@ -9,6 +9,21 @@
 - Raw JSON Spec: `http://localhost:8080/swagger/doc.json`
 - Enable Swagger with `STAGE=dev` or `ENABLE_SWAGGER=true`; otherwise these URLs return 404.
 
+## Crash reporting
+
+Set `SENTRY_BACKEND_DSN` (or `SENTRY_DSN`) to enable Sentry. Leave both unset to
+disable reporting. Set `RELEASE_VERSION` (or `APP_VERSION`) to the deployed commit
+and `STAGE` to the environment name.
+
+Tracing is disabled. HTTP events retain method, URL path, route identifiers,
+and the authenticated Firebase UID; request bodies, query strings, headers,
+cookies, and email are not included. There is no public Sentry test endpoint.
+
+Worker panics are reported, flushed for up to two seconds, and re-panicked so
+the process supervisor can restart the service. Ensure automatic restart is
+enabled in the deployment. Normal shutdown drains HTTP requests and stops
+workers before the final bounded flush; lifecycle errors also flush before exit.
+
 ## API Documentation (Swagger)
 
 To regenerate Swagger documentation after modifying route annotations or DTOs:

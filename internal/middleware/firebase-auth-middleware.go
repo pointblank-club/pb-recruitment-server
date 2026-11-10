@@ -59,13 +59,7 @@ func FirebaseAuth(authClient *auth.Client, optional bool) echo.MiddlewareFunc {
 			// Enrich Sentry hub scope with user identity
 			if hub := sentryecho.GetHubFromContext(c); hub != nil {
 				hub.ConfigureScope(func(scope *sentry.Scope) {
-					sentryUser := sentry.User{
-						ID: token.UID,
-					}
-					if email, ok := token.Claims["email"].(string); ok && email != "" {
-						sentryUser.Email = email
-					}
-					scope.SetUser(sentryUser)
+					scope.SetUser(sentry.User{ID: token.UID})
 				})
 			}
 

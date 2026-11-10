@@ -356,10 +356,11 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 	for _, result := range completed {
 		if err := ss.stores.Executions.ProcessFinal(ctx, result); err != nil {
 			log.Errorf("reconcile Judge0 result: %v", err)
-			sentry.WithScope(func(scope *sentry.Scope) {
+			hub := sentry.CurrentHub().Clone()
+			hub.WithScope(func(scope *sentry.Scope) {
 				scope.SetTag("worker", "judge0_recovery")
 				scope.SetTag("action", "process_final")
-				sentry.CaptureException(err)
+				hub.CaptureException(err)
 			})
 		}
 	}
@@ -372,7 +373,10 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Errorf("panic in Judge0 recovery worker loop: %v", r)
-					sentry.CurrentHub().Recover(r)
+					hub := sentry.CurrentHub().Clone()
+					hub.Recover(r)
+					hub.Flush(2 * time.Second)
+					panic(r)
 				}
 			}()
 			limit := ss.judge0.BatchSize()
@@ -380,10 +384,11 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 				items, err := ss.stores.Executions.ClaimRecovery(ctx, limit, withToken)
 				if err != nil {
 					log.Errorf("claim Judge0 recovery: %v", err)
-					sentry.WithScope(func(scope *sentry.Scope) {
+					hub := sentry.CurrentHub().Clone()
+					hub.WithScope(func(scope *sentry.Scope) {
 						scope.SetTag("worker", "judge0_recovery")
 						scope.SetTag("action", "claim_recovery")
-						sentry.CaptureException(err)
+						hub.CaptureException(err)
 					})
 					return
 				}
@@ -432,7 +437,10 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 			defer func() {
 				if r := recover(); r != nil {
 					log.Errorf("panic in recoverExecution %s: %v", e.ID, r)
-					sentry.CurrentHub().Recover(r)
+					hub := sentry.CurrentHub().Clone()
+					hub.Recover(r)
+					hub.Flush(2 * time.Second)
+					panic(r)
 				}
 			}()
 			if workCtx.Err() != nil {
@@ -586,8 +594,10 @@ func NewJudge0Recovery(lc fx.Lifecycle, ss *SubmissionService) {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Errorf("panic in Judge0 recovery worker: %v", r)
-					sentry.CurrentHub().Recover(r)
-					sentry.Flush(2 * time.Second)
+					hub := sentry.CurrentHub().Clone()
+					hub.Recover(r)
+					hub.Flush(2 * time.Second)
+					panic(r)
 				}
 			}()
 			ticker := time.NewTicker(15 * time.Second)
