@@ -68,15 +68,16 @@ func (s *SubmissionStore) GetSubmissionStatusByID(ctx context.Context, id string
 	}
 
 	const q = `
-		SELECT status, user_id
-		FROM submissions
-		WHERE id = $1
+		SELECT sub.status, sub.user_id, sub.type, sub.contest_id, c.end_time
+		FROM submissions sub
+		JOIN contests c ON c.id = sub.contest_id
+		WHERE sub.id = $1
 	`
 	var sub models.Submission
 	sub.ID = id
 
 	row := s.db.QueryRowContext(ctx, q, id)
-	if err := row.Scan(&sub.Status, &sub.UserID); err != nil {
+	if err := row.Scan(&sub.Status, &sub.UserID, &sub.Type, &sub.ContestID, &sub.ContestEndTime); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
 		}
@@ -93,9 +94,11 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 	}
 
 	const q = `
-		SELECT user_id, contest_id, problem_id, type, language, choices, status, created_at, runtime, memory
-		FROM submissions
-		WHERE id = $1
+		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.choices,
+		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time
+		FROM submissions sub
+		JOIN contests c ON c.id = sub.contest_id
+		WHERE sub.id = $1
 	`
 	var sub dto.GetSubmissionDetailsResponse
 	sub.ID = id
@@ -114,6 +117,7 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 		&sub.CreatedAt,
 		&sub.Runtime,
 		&sub.Memory,
+		&sub.ContestEndTime,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
@@ -203,10 +207,12 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 	offset := page * pageSize
 
 	const q = `
-		SELECT id, contest_id, problem_id, type, language, status, created_at, runtime, memory
-		FROM submissions
-		WHERE user_id = $1 AND problem_id = $2
-		ORDER BY created_at DESC
+		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.status,
+		       sub.created_at, sub.runtime, sub.memory, c.end_time
+		FROM submissions sub
+		JOIN contests c ON c.id = sub.contest_id
+		WHERE sub.user_id = $1 AND sub.problem_id = $2
+		ORDER BY sub.created_at DESC
 		LIMIT $3 OFFSET $4
 	`
 
@@ -231,6 +237,7 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 			&sub.CreatedAt,
 			&sub.Runtime,
 			&sub.Memory,
+			&sub.ContestEndTime,
 		); err != nil {
 			log.Printf("submission-store: failed to scan submission row: %v", err)
 			continue

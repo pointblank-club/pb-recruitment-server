@@ -1855,7 +1855,7 @@ const docTemplate = `{
         },
         "/contests/{id}/leaderboard": {
             "get": {
-                "description": "Get ranked participants and scores for a contest with pagination",
+                "description": "Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.",
                 "produces": [
                     "application/json"
                 ],
@@ -1934,7 +1934,7 @@ const docTemplate = `{
         },
         "/contests/{id}/problems": {
             "get": {
-                "description": "Get problems overview with the authenticated user's progress. Guests receive no progress. Open to all once contest ends; requires registration while open.",
+                "description": "Get problems with the user's progress. MCQs show attempted/unsolved while open and solved/failed after closing. Guests receive no progress. Requires registration while open.",
                 "produces": [
                     "application/json"
                 ],
@@ -2173,7 +2173,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get paginated submissions of the authenticated user for a specific problem",
+                "description": "Get the user's submissions for a problem. MCQ statuses are attempted until the contest ends, then their actual verdicts.",
                 "produces": [
                     "application/json"
                 ],
@@ -2414,7 +2414,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get full execution details of a specific submission including test cases, runtime, memory, and code",
+                "description": "Get submission details. MCQ status is attempted until the contest ends, then the actual verdict. Selected options remain visible.",
                 "produces": [
                     "application/json"
                 ],
@@ -2484,7 +2484,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get current status of a specific submission (e.g. pending, accepted, wrong_answer)",
+                "description": "Get a submission's status. MCQs return attempted until the contest ends, then their actual verdict. Code verdicts are always visible.",
                 "produces": [
                     "application/json"
                 ],
@@ -2897,6 +2897,7 @@ const docTemplate = `{
         "app_internal_models.SubmissionStatus": {
             "type": "string",
             "enum": [
+                "attempted",
                 "pending",
                 "accepted",
                 "wrong_answer",
@@ -2907,6 +2908,7 @@ const docTemplate = `{
                 "judge_error"
             ],
             "x-enum-varnames": [
+                "Attempted",
                 "Pending",
                 "Accepted",
                 "WrongAnswer",

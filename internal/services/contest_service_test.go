@@ -105,6 +105,10 @@ func (s serviceRankingTestStore) GetLeaderboard(ctx context.Context, contestID s
 
 func (s serviceRankingTestStore) InvalidateCache(contestID string) {}
 
+func (s serviceRankingTestStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	return s.GetLeaderboard(ctx, contestID, page)
+}
+
 func TestConsolidateContestService(t *testing.T) {
 	t.Run("nil ranking store error", func(t *testing.T) {
 		svc := NewContestService(&stores.Storage{}, nil)
@@ -192,12 +196,54 @@ func TestGetLeaderboard(t *testing.T) {
 					return &dto.GetLeaderboardResponse{Page: page}, nil
 				}},
 			}
-			_, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 1)
+			_, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 1, false)
 			if !errors.Is(err, tc.wantErr) || called != tc.wantCalled {
 				t.Fatalf("err = %v, ranking store called = %v", err, called)
 			}
 		})
 	}
+
+	t.Run("redacts problem scores for non-admin", func(t *testing.T) {
+		scores := []dto.ProblemScore{{ProblemID: "p1", Score: 10}}
+		storage := &stores.Storage{
+			Contests: problemContestTestStore{start: now - 60_000, end: now + 60_000},
+			Rankings: serviceRankingTestStore{leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+				return &dto.GetLeaderboardResponse{
+					Entries: []dto.LeaderboardEntry{
+						{UserID: "u1", ProblemScores: scores},
+					},
+				}, nil
+			}},
+		}
+		res, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, false)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Entries[0].ProblemScores != nil {
+			t.Fatalf("expected problem scores to be nil for non-admin, got %v", res.Entries[0].ProblemScores)
+		}
+	})
+
+	t.Run("preserves problem scores for admin", func(t *testing.T) {
+		scores := []dto.ProblemScore{{ProblemID: "p1", Score: 10}}
+		storage := &stores.Storage{
+			Contests: problemContestTestStore{start: now - 60_000, end: now + 60_000},
+			Rankings: serviceRankingTestStore{leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+				return &dto.GetLeaderboardResponse{
+					Entries: []dto.LeaderboardEntry{
+						{UserID: "u1", ProblemScores: scores},
+					},
+				}, nil
+			}},
+		}
+		res, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(res.Entries[0].ProblemScores) != 1 {
+			t.Fatalf("expected 1 problem score for admin, got %v", res.Entries[0].ProblemScores)
+		}
+	})
 }
 
 type visibilityContestTestStore struct {
@@ -296,5 +342,65 @@ func TestGetProblemVisibility(t *testing.T) {
 				t.Errorf("got error %v, want %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+type problemsListTestStore struct {
+	*stores.ProblemStore
+	problems []dto.ProblemOverview
+}
+
+func (s problemsListTestStore) GetProblemList(context.Context, string) ([]dto.ProblemOverview, error) {
+	return s.problems, nil
+}
+
+type progressSubmissionsTestStore struct {
+	*stores.SubmissionStore
+	progress map[string]string
+}
+
+func (s progressSubmissionsTestStore) GetUserProblemProgress(context.Context, string, string) (map[string]string, error) {
+	return s.progress, nil
+}
+
+func TestGetContestProblemsListMCQProgressMasking(t *testing.T) {
+	storage := &stores.Storage{
+		Contests: problemContestTestStore{start: 1, end: time.Now().Add(time.Minute).UnixMilli()},
+		Problems: problemsListTestStore{
+			problems: []dto.ProblemOverview{
+				{ID: "mcq1", Type: models.MCQ},
+				{ID: "mcq2", Type: models.MCQ},
+				{ID: "mcq3", Type: models.MCQ},
+				{ID: "code1", Type: models.Code},
+				{ID: "code2", Type: models.Code},
+			},
+		},
+		Submissions: progressSubmissionsTestStore{
+			progress: map[string]string{
+				"mcq1":  "solved",
+				"mcq2":  "failed",
+				"code1": "solved",
+				"code2": "failed",
+			},
+		},
+	}
+	svc := NewContestService(storage, nil)
+	list, err := svc.GetContestProblemsList(context.Background(), "contest-1", "user-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := map[string]string{
+		"mcq1":  "attempted",
+		"mcq2":  "attempted",
+		"mcq3":  "unsolved",
+		"code1": "solved",
+		"code2": "failed",
+	}
+
+	for _, p := range list {
+		if got := p.Progress; got != expected[p.ID] {
+			t.Errorf("problem %s progress: got %q, want %q", p.ID, got, expected[p.ID])
+		}
 	}
 }
