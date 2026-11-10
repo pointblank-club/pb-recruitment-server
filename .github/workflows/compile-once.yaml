@@ -1,0 +1,54 @@
+name: Compile-once Judge0 integration
+on:
+  pull_request:
+    paths: ['judge0/compile-once/**', '!judge0/compile-once/README.md', '.github/workflows/compile-once.yaml']
+permissions:
+  contents: read
+concurrency:
+  group: compile-once-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  judge0-runtime:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s --health-timeout=5s --health-retries=10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build against a resolved Judge0 1.13.1 digest
+        run: |
+          docker pull judge0/judge0:1.13.1
+          judge0_base=$(docker image inspect judge0/judge0:1.13.1 --format '{{index .RepoDigests 0}}')
+          docker build --build-arg JUDGE0_BASE_IMAGE="$judge0_base" \
+            --build-arg COMPILER_BUILD_ID="$judge0_base:$GITHUB_SHA" \
+            -t compile-once:test judge0/compile-once
+      - name: Validate migration, native Rails contract, artifacts and shared compilation
+        run: |
+          # Privileged access is confined to this disposable CI runner's isolate tests.
+          docker run --rm --privileged --network host \
+            -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=judge0_compile_once -e REDIS_HOST=127.0.0.1 \
+            -e COMPILATION_TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/judge0_compile_once \
+            -e COMPILATION_SANDBOX_TEST=1 -e MAX_MEMORY_LIMIT=4096000 \
+            -e LANG=C.UTF-8 -e LC_ALL=C.UTF-8 \
+            -e ALLOW_ENABLE_PER_PROCESS_AND_THREAD_TIME_LIMIT=true \
+            -e ALLOW_ENABLE_PER_PROCESS_AND_THREAD_MEMORY_LIMIT=true \
+            compile-once:test bash -c '
+              set -e
+              source /api/scripts/load-config
+              rails db:create db:migrate db:seed
+              ruby test/compilation_cache_test.rb
+              rails runner test/compilation_cache_postgres_test.rb
+              rails runner test/compilation_group_contract_test.rb
+              rails runner test/compilation_sandbox_test.rb
+            '

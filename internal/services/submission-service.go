@@ -182,10 +182,16 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 
 	cpuLimit, memLimit := judgeLimits(problem.TimeLimit, problem.MemoryLimit)
 	compilerOptions := judge0.CompilerOptions(languageID)
+	// Enable only after the API and every Judge0 worker support compilation groups.
+	compilationGroup := ""
+	if os.Getenv("JUDGE0_COMPILE_ONCE") == "true" && (languageID == 54 || languageID == 62) {
+		compilationGroup = submissionID
+	}
 	jobs := make([]judge0.SubmissionRequest, len(inputs))
 	for i := range inputs {
 		jobs[i] = judge0.SubmissionRequest{
-			SourceCode: source, LanguageID: languageID, Stdin: inputs[i], ExpectedOutput: &outputs[i],
+			CompilationGroup: compilationGroup,
+			SourceCode:       source, LanguageID: languageID, Stdin: inputs[i], ExpectedOutput: &outputs[i],
 			CPUTimeLimit: cpuLimit, MemoryLimit: memLimit, CompilerOptions: compilerOptions,
 		}
 	}
