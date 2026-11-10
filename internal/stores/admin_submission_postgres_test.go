@@ -13,7 +13,7 @@ func TestListAdminSubmissionsEnumVerdictFilterPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	ctx := context.Background()
 	userID, contestID, problemID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,joining_year,department) VALUES($1,'Admin list test',$2,$3,2024,'CS')`, userID, userID+"@example.test", userID); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Admin list test',$2,$3,2024,'CS')`, userID, userID+"@example.test", userID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Admin list test',1,2,3,4)`, contestID); err != nil {
@@ -23,7 +23,7 @@ func TestListAdminSubmissionsEnumVerdictFilterPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, status := range []string{"accepted", "wrong_answer", "accepted"} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,language,code,status,created_at) VALUES($1,$2,$3,$4,'code','go','', $5::submission_status,$6)`, fmt.Sprintf("submission-%d", i), userID, contestID, problemID, status, i+1); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id,user_id,contest_id,problem_id,type,language,status,created_at) VALUES($1,$2,$3,$4,'code','go',$5::submission_status,$6)`, fmt.Sprintf("submission-%d", i), userID, contestID, problemID, status, i+1); err != nil {
 			t.Fatal(err)
 		}
 	}
