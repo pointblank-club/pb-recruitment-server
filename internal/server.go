@@ -5,13 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
 	_ "app/docs"
 	echoSwagger "github.com/swaggo/echo-swagger"
 
 	"firebase.google.com/go/v4/auth"
 	"github.com/getsentry/sentry-go"
+	"github.com/getsentry/sentry-go/attribute"
 	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
@@ -22,6 +25,9 @@ func NewEchoServer(
 	authClient *auth.Client,
 	contestController *controllers.ContestController,
 ) *echo.Echo {
+	// Create these before requests: SDK v0.44 reads shared client metadata without locking.
+	meter := sentry.NewMeter(context.Background())
+	logger := sentry.NewLogger(context.Background())
 	e := echo.New()
 	e.Use(mdw.Recover())
 	e.Use(sentryecho.New(sentryecho.Options{
@@ -31,6 +37,32 @@ func NewEchoServer(
 	// Enrich Sentry scope with route tags and capture unhandled 5xx errors
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
+			started := time.Now()
+			status := http.StatusOK
+			defer func() {
+				recovered := recover()
+				if recovered != nil {
+					status = http.StatusInternalServerError
+					c.Response().Status = status
+				}
+				if span := sentryecho.GetSpanFromContext(c); span != nil && c.Path() != "/health" && c.Request().Method != echo.OPTIONS {
+					route := c.Path()
+					if route == "" {
+						route = "unmatched"
+					}
+					meter.WithCtx(span.Context()).Distribution("http.server.duration", float64(time.Since(started))/float64(time.Millisecond),
+						sentry.WithUnit(sentry.UnitMillisecond),
+						sentry.WithAttributes(
+							attribute.String("http.route", route),
+							attribute.String("http.request.method", c.Request().Method),
+							attribute.Int("http.response.status_code", status),
+						),
+					)
+				}
+				if recovered != nil {
+					panic(recovered)
+				}
+			}()
 			hub := sentryecho.GetHubFromContext(c)
 			var previousEventID sentry.EventID
 			if hub != nil {
@@ -77,6 +109,24 @@ func NewEchoServer(
 				}
 			}
 
+			// Only sampled requests and server failures need a remote request log.
+			span := sentryecho.GetSpanFromContext(c)
+			status = c.Response().Status
+			if err != nil && !c.Response().Committed {
+				status = http.StatusInternalServerError
+				var he *echo.HTTPError
+				if errors.As(err, &he) {
+					status = he.Code
+				}
+			}
+			if span != nil && c.Path() != "" && c.Path() != "/health" && c.Request().Method != echo.OPTIONS && (span.Sampled == sentry.SampledTrue || status >= 500) {
+				entry := logger.Info().WithCtx(span.Context())
+				if status >= 500 {
+					entry = logger.Error().WithCtx(span.Context())
+				}
+				entry.String("http.route", c.Path()).String("http.request.method", c.Request().Method).
+					Int("http.response.status_code", status).Int64("duration_ms", time.Since(started).Milliseconds()).Emit("HTTP request completed")
+			}
 			return err
 		}
 	})

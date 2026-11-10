@@ -52,7 +52,7 @@ func TestWorkerCapturesDoNotChangeGlobalScope(t *testing.T) {
 	t.Cleanup(func() { sentry.CurrentHub().BindClient(previous) })
 	entered, release := make(chan struct{}, 2), make(chan struct{})
 	tr := &workerCaptureTransport{}
-	client, err := sentry.NewClient(sentry.ClientOptions{
+	client, err := sentry.NewClient(sentry.ClientOptions{DisableMetrics: true,
 		Dsn: "http://public@127.0.0.1:1/1", Transport: tr,
 		BeforeSend: func(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
 			if event.Message != "global probe" {
@@ -90,7 +90,7 @@ func TestWorkerCapturesDoNotChangeGlobalScope(t *testing.T) {
 
 func TestWorkerPanicsRemainFatal(t *testing.T) {
 	if worker := os.Getenv("SENTRY_TEST_FATAL_WORKER"); worker != "" {
-		client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "http://public@127.0.0.1:1/1", Transport: &workerCaptureTransport{fatal: true}})
+		client, err := sentry.NewClient(sentry.ClientOptions{DisableMetrics: true, Dsn: "http://public@127.0.0.1:1/1", Transport: &workerCaptureTransport{fatal: true}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,4 +126,8 @@ func TestWorkerPanicsRemainFatal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (tr *workerCaptureTransport) FlushWithContext(context.Context) bool {
+	return tr.Flush(time.Second)
 }

@@ -9,13 +9,25 @@
 - Raw JSON Spec: `http://localhost:8080/swagger/doc.json`
 - Enable Swagger with `STAGE=dev` or `ENABLE_SWAGGER=true`; otherwise these URLs return 404.
 
-## Crash reporting
+## Sentry monitoring
 
 Set `SENTRY_BACKEND_DSN` (or `SENTRY_DSN`) to enable Sentry. Leave both unset to
 disable reporting. Set `RELEASE_VERSION` (or `APP_VERSION`) to the deployed commit
 and `STAGE` to the environment name.
 
-Tracing is disabled. HTTP events retain method, URL path, route identifiers,
+Traces sample 5% of routed requests, excluding health checks and OPTIONS.
+Structured request logs include route, method, status and duration for sampled
+requests and all non-panic 5xx responses. They share trace IDs. Existing console
+logs are not forwarded. Traces and logs exclude user identity and request data.
+
+The `http.server.duration` distribution records every completed API request in
+milliseconds (independent of trace sampling), with route template, HTTP method,
+and response status. Use it for count, throughput, average, median, p95/p99 and
+5xx percentage by route. Health checks and OPTIONS are excluded; unmatched paths
+share the `unmatched` label. Bodies, query strings and user identity are omitted.
+SDK buffers are bounded, so delivery is best effort; counts are not a billing ledger.
+
+HTTP error events retain method, URL path, route identifiers,
 and the authenticated Firebase UID; request bodies, query strings, headers,
 cookies, and email are not included. There is no public Sentry test endpoint.
 

@@ -60,3 +60,24 @@ func TestSentryScrubsErrorsAndTransactions(t *testing.T) {
 		}
 	}
 }
+
+func TestTraceSamplingAndPrivacy(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source sentry.TransactionSource
+		rate   float64
+	}{
+		{"GET /health", sentry.SourceRoute, 0},
+		{"OPTIONS /contests", sentry.SourceRoute, 0},
+		{"POST /auth/signup", sentry.SourceRoute, 0.05},
+		{"GET /unknown-sensitive-path", sentry.SourceURL, 0},
+	} {
+		if got := sampleSentryTrace(sentry.SamplingContext{Span: &sentry.Span{Name: tc.name, Source: tc.source}}); got != tc.rate {
+			t.Fatalf("%s: %v", tc.name, got)
+		}
+	}
+	event := scrubSentryRequest(&sentry.Event{Type: "transaction", Request: &sentry.Request{Data: "secret"}, User: sentry.User{ID: "participant"}, Tags: map[string]string{"id": "participant"}}, nil)
+	if event.Request != nil || !event.User.IsEmpty() || len(event.Tags) != 0 {
+		t.Fatalf("private trace data: %+v", event)
+	}
+}
