@@ -6,10 +6,13 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type UserStore struct {
@@ -24,8 +27,11 @@ func NewUserStore(db *sql.DB) *UserStore {
 
 func (us *UserStore) CreateUser(ctx context.Context, user *auth.UserRecord, req *dto.CreateUserRequest) error {
 	if us == nil || us.db == nil {
-		return fmt.Errorf("contest store: db is not initialized")
+		return fmt.Errorf("user store: db is not initialized")
 	}
+
+	normalizedUSN := strings.ToUpper(strings.TrimSpace(req.USN))
+	normalizedMobile := strings.TrimSpace(req.MobileNumber)
 
 	const q = `
 	INSERT INTO users (id, name, email, usn, mobile_number, current_year, department)
@@ -33,8 +39,20 @@ func (us *UserStore) CreateUser(ctx context.Context, user *auth.UserRecord, req 
 	ON CONFLICT (id) DO NOTHING
 	`
 
-	res, err := us.db.ExecContext(ctx, q, user.UID, req.Name, user.Email, req.USN, req.MobileNumber, req.CurrentYear, req.Department)
+	res, err := us.db.ExecContext(ctx, q, user.UID, req.Name, user.Email, normalizedUSN, normalizedMobile, req.CurrentYear, req.Department)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			switch pgErr.ConstraintName {
+			case "users_usn_key":
+				return common.USNAlreadyExistsError
+			case "users_email_key":
+				return common.EmailAlreadyExistsError
+			case "users_pkey":
+				return common.UserAlreadyExistsError
+			}
+		}
+
 		log.Printf("user-store: insert error %v", err)
 		return fmt.Errorf("insert error: %w", err)
 	}
