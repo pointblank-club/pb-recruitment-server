@@ -254,23 +254,27 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	if codeOnly {
 		// Recompute before pagination so neither stored MCQ points nor final ranks leak.
 		entriesQ = `
-		WITH code_scores AS (
-			SELECT solved.user_id, SUM(p.score) AS score
-			FROM (
-				SELECT DISTINCT user_id, problem_id
-				FROM submissions
-				WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
-			) solved
-			JOIN problems p ON p.id = solved.problem_id AND p.contest_id = $1
-			GROUP BY solved.user_id
+		WITH first_code_solves AS (
+			SELECT user_id, problem_id, MIN(created_at) AS solved_at
+			FROM submissions
+			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
+			GROUP BY user_id, problem_id
+		),
+		code_aggregates AS (
+			SELECT fcs.user_id,
+			       SUM(p.score) AS score,
+			       MAX(fcs.solved_at) AS last_solve_time
+			FROM first_code_solves fcs
+			JOIN problems p ON p.id = fcs.problem_id AND p.contest_id = $1
+			GROUP BY fcs.user_id
 		)
-		SELECT RANK() OVER (ORDER BY COALESCE(cs.score, 0) DESC),
-		       r.user_id, u.name, u.usn, COALESCE(cs.score, 0)
+		SELECT RANK() OVER (ORDER BY COALESCE(ca.score, 0) DESC, ca.last_solve_time ASC NULLS LAST) AS rank,
+		       r.user_id, u.name, u.usn, COALESCE(ca.score, 0)
 		FROM rankings r
 		JOIN users u ON u.id = r.user_id
-		LEFT JOIN code_scores cs ON cs.user_id = r.user_id
+		LEFT JOIN code_aggregates ca ON ca.user_id = r.user_id
 		WHERE r.contest_id = $1 AND r.hidden = false AND r.disqualified = false
-		ORDER BY 1 ASC, u.name ASC, r.user_id ASC
+		ORDER BY rank ASC, ca.last_solve_time ASC NULLS LAST, u.name ASC, r.user_id ASC
 		LIMIT $2 OFFSET $3
 		`
 	}
