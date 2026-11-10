@@ -598,7 +598,7 @@ func (s *SubmissionStore) CheckRunCapacity(ctx context.Context) error {
 	return nil
 }
 
-func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
+func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("submission store: db is not initialized")
 	}
@@ -609,6 +609,9 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 		pageSize = 200
 	}
 	page = max(0, page)
+	if page > int(^uint(0)>>1)/pageSize {
+		return nil, 0, fmt.Errorf("invalid pagination offset")
+	}
 	offset := page * pageSize
 
 	const countQ = `
@@ -617,9 +620,10 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 		WHERE s.contest_id = $1 AND s.type = 'code'
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
+		  AND ($4 = '' OR LOWER(s.status) = LOWER($4))
 	`
 	var totalCount int
-	if err := s.db.QueryRowContext(ctx, countQ, contestID, userID, problemID).Scan(&totalCount); err != nil {
+	if err := s.db.QueryRowContext(ctx, countQ, contestID, userID, problemID, verdict).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count admin submissions: %w", err)
 	}
 
@@ -644,11 +648,12 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 		WHERE s.contest_id = $1 AND s.type = 'code'
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
+		  AND ($6 = '' OR LOWER(s.status) = LOWER($6))
 		ORDER BY s.created_at DESC, s.submission_seq DESC
 		LIMIT $4 OFFSET $5
 	`
 
-	rows, err := s.db.QueryContext(ctx, q, contestID, userID, problemID, pageSize, offset)
+	rows, err := s.db.QueryContext(ctx, q, contestID, userID, problemID, pageSize, offset, verdict)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query admin submissions: %w", err)
 	}
@@ -742,4 +747,3 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 
 	return &details, nil
 }
-
