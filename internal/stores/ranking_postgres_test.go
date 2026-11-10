@@ -495,11 +495,11 @@ func TestLiveRankingResubmissionOrderPostgres(t *testing.T) {
 		if len(lb.Entries) != 2 {
 			t.Fatalf("%s: expected 2 entries, got %d", stage, len(lb.Entries))
 		}
-		if lb.Entries[0].UserID != alice || lb.Entries[0].Rank != 1 {
-			t.Errorf("%s: expected alice rank 1, got user %s rank %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank)
+		if lb.Entries[0].UserID != alice || lb.Entries[0].Rank != 1 || lb.Entries[0].TotalScore != 100 || lb.Entries[0].LastSubmissionTime != 1_000_000 {
+			t.Errorf("%s: expected alice rank 1 score 100 finish 1000000, got user %s rank %d score %d finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
 		}
-		if lb.Entries[1].UserID != bob || lb.Entries[1].Rank != 2 {
-			t.Errorf("%s: expected bob rank 2, got user %s rank %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank)
+		if lb.Entries[1].UserID != bob || lb.Entries[1].Rank != 2 || lb.Entries[1].TotalScore != 100 || lb.Entries[1].LastSubmissionTime != 2_000_000 {
+			t.Errorf("%s: expected bob rank 2 score 100 finish 2000000, got user %s rank %d score %d finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
 		}
 	}
 
