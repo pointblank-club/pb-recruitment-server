@@ -116,3 +116,18 @@ func TestSwaggerGating(t *testing.T) {
 		})
 	}
 }
+
+func TestSentryDebugEndpointAbsent(t *testing.T) {
+	for _, stage := range []string{"dev", "production"} {
+		t.Run(stage, func(t *testing.T) {
+			t.Setenv("STAGE", stage)
+			t.Setenv("ENABLE_SENTRY_TEST", "true")
+			e := NewEchoServer(nil, nil)
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/debug/sentry-test?type=panic", nil))
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("debug endpoint must not be exposed: HTTP %d", w.Code)
+			}
+		})
+	}
+}

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
@@ -52,6 +54,12 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 	payload.Attempt = attempt
 	if err := sc.submissionService.HandleJudge0Callback(c.Request().Context(), id, payload); err != nil {
 		log.Errorf("judge0 callback failed for execution %s: %v", id, err)
+		if hub := sentryecho.GetHubFromContext(c); hub != nil {
+			hub.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("execution_id", id)
+				hub.CaptureException(err)
+			})
+		}
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	return c.NoContent(http.StatusOK)
@@ -227,6 +235,14 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 			})
 		}
 		log.Errorf("create submission for user %s: %v", userID, err)
+		if hub := sentryecho.GetHubFromContext(ctx); hub != nil {
+			hub.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("user_id", userID)
+				scope.SetTag("contest_id", req.ContestID)
+				scope.SetTag("problem_id", req.ProblemID)
+				hub.CaptureException(err)
+			})
+		}
 		return ctx.NoContent(http.StatusInternalServerError)
 	}
 
@@ -234,6 +250,13 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		judgeCtx, cancelJudge := context.WithTimeout(context.WithoutCancel(ctx.Request().Context()), 5*time.Second)
 		defer cancelJudge()
 		if err := sc.submissionService.JudgeMCQ(judgeCtx, submissionID); err != nil {
+			if hub := sentryecho.GetHubFromContext(ctx); hub != nil {
+				hub.WithScope(func(scope *sentry.Scope) {
+					scope.SetTag("user_id", userID)
+					scope.SetTag("submission_id", submissionID)
+					hub.CaptureException(err)
+				})
+			}
 			return ctx.JSON(http.StatusInternalServerError, map[string]string{
 				"error": "failed to judge MCQ submission",
 			})

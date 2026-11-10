@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/labstack/gommon/log"
 	"go.uber.org/fx"
 )
@@ -378,6 +379,12 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 	for _, result := range completed {
 		if err := ss.stores.Executions.ProcessFinal(ctx, result); err != nil {
 			log.Errorf("reconcile Judge0 result: %v", err)
+			hub := sentry.CurrentHub().Clone()
+			hub.WithScope(func(scope *sentry.Scope) {
+				scope.SetTag("worker", "judge0_recovery")
+				scope.SetTag("action", "process_final")
+				hub.CaptureException(err)
+			})
 		}
 	}
 	// Slow tokenless dispatches must not delay polling healthy jobs.
@@ -386,11 +393,26 @@ func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Errorf("panic in Judge0 recovery worker loop: %v", r)
+					hub := sentry.CurrentHub().Clone()
+					hub.Recover(r)
+					hub.Flush(2 * time.Second)
+					panic(r)
+				}
+			}()
 			limit := ss.judge0.BatchSize()
 			for ctx.Err() == nil {
 				items, err := ss.stores.Executions.ClaimRecovery(ctx, limit, withToken)
 				if err != nil {
 					log.Errorf("claim Judge0 recovery: %v", err)
+					hub := sentry.CurrentHub().Clone()
+					hub.WithScope(func(scope *sentry.Scope) {
+						scope.SetTag("worker", "judge0_recovery")
+						scope.SetTag("action", "claim_recovery")
+						hub.CaptureException(err)
+					})
 					return
 				}
 				if len(items) == 0 {
@@ -435,6 +457,15 @@ func (ss *SubmissionService) recoverBatch(ctx context.Context, items []models.Ex
 		batch.Add(1)
 		go func(i int, e models.Execution) {
 			defer batch.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Errorf("panic in recoverExecution %s: %v", e.ID, r)
+					hub := sentry.CurrentHub().Clone()
+					hub.Recover(r)
+					hub.Flush(2 * time.Second)
+					panic(r)
+				}
+			}()
 			if workCtx.Err() != nil {
 				return
 			}
@@ -583,6 +614,15 @@ func NewJudge0Recovery(lc fx.Lifecycle, ss *SubmissionService) {
 	lc.Append(fx.Hook{OnStart: func(context.Context) error {
 		go func() {
 			defer close(done)
+			defer func() {
+				if r := recover(); r != nil {
+					log.Errorf("panic in Judge0 recovery worker: %v", r)
+					hub := sentry.CurrentHub().Clone()
+					hub.Recover(r)
+					hub.Flush(2 * time.Second)
+					panic(r)
+				}
+			}()
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
 			for {

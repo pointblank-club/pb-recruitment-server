@@ -3,15 +3,19 @@ package internal
 import (
 	"app/internal/controllers"
 	"context"
+	"errors"
+	"fmt"
+	"os"
 
 	_ "app/docs"
 	echoSwagger "github.com/swaggo/echo-swagger"
 
 	"firebase.google.com/go/v4/auth"
+	"github.com/getsentry/sentry-go"
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
-	"os"
 )
 
 func NewEchoServer(
@@ -20,6 +24,63 @@ func NewEchoServer(
 ) *echo.Echo {
 	e := echo.New()
 	e.Use(mdw.Recover())
+	e.Use(sentryecho.New(sentryecho.Options{
+		Repanic: true,
+	}))
+
+	// Enrich Sentry scope with route tags and capture unhandled 5xx errors
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			hub := sentryecho.GetHubFromContext(c)
+			var previousEventID sentry.EventID
+			if hub != nil {
+				previousEventID = hub.LastEventID()
+				hub.ConfigureScope(func(scope *sentry.Scope) {
+					if path := c.Path(); path != "" {
+						scope.SetTag("route", path)
+					}
+					for _, name := range c.ParamNames() {
+						val := c.Param(name)
+						if val != "" {
+							scope.SetTag(name, val)
+						}
+					}
+				})
+			}
+
+			err := next(c)
+
+			if hub != nil && hub.LastEventID() == previousEventID {
+				if err != nil {
+					var he *echo.HTTPError
+					if errors.As(err, &he) {
+						if he.Code >= 500 {
+							hub.WithScope(func(scope *sentry.Scope) {
+								scope.SetTag("error_type", "http_error")
+								scope.SetTag("status_code", fmt.Sprintf("%d", he.Code))
+								hub.CaptureException(err)
+							})
+						}
+					} else {
+						hub.WithScope(func(scope *sentry.Scope) {
+							scope.SetTag("error_type", "unhandled_error")
+							hub.CaptureException(err)
+						})
+					}
+				} else if c.Response().Status >= 500 {
+					hub.WithScope(func(scope *sentry.Scope) {
+						scope.SetLevel(sentry.LevelError)
+						scope.SetTag("error_type", "server_error_status")
+						scope.SetTag("status_code", fmt.Sprintf("%d", c.Response().Status))
+						hub.CaptureMessage(fmt.Sprintf("HTTP %d on %s %s", c.Response().Status, c.Request().Method, c.Path()))
+					})
+				}
+			}
+
+			return err
+		}
+	})
+
 	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: []string{
