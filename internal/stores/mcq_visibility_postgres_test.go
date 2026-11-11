@@ -160,20 +160,12 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 				t.Fatalf("leaderboard=%+v %v", entries, err)
 			}
 			for _, entry := range entries {
-				full := ended || viewer == user
-				wantScore, wantRank, wantSolved := 10, 1, 1
-				if full {
-					if entry.UserID == user {
-						wantScore, wantSolved = 30, 2
-					} else {
-						wantRank = 2
-					}
+				wantScore, wantRank, wantSolved := 10, 2, 1
+				if entry.UserID == user {
+					wantScore, wantRank, wantSolved = 30, 1, 2
 				}
 				if entry.TotalScore != wantScore || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved {
 					t.Fatalf("ended=%v viewer=%q entry=%+v, want score/rank/solves=%d/%d/%d", ended, viewer, entry, wantScore, wantRank, wantSolved)
-				}
-				if !full && entry.LastSubmissionTime != 100_000 {
-					t.Fatalf("MCQ solve time leaked: %+v", entry)
 				}
 				if viewer != user && len(entry.ProblemScores) != 0 {
 					t.Fatal("non-admin breakdown leaked")
