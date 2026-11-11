@@ -8,16 +8,21 @@ import (
 	"app/internal/models/dto"
 	"app/internal/services"
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
 )
@@ -201,6 +206,36 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 // @Failure      429 {object} map[string]string "Too many requests: rate limit exceeded"
 // @Failure      500 "Internal server error"
 // @Router       /submission/submit [post]
+func submissionTemporarilyUnavailable(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, sql.ErrConnDone) || errors.Is(err, driver.ErrBadConn) {
+		return true
+	}
+	var connectionError *pgconn.ConnectError
+	var operationError *net.OpError
+	if errors.As(err, &connectionError) || errors.As(err, &operationError) {
+		return true
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return true
+	}
+	var pgError *pgconn.PgError
+	if errors.As(err, &pgError) {
+		switch pgError.Code {
+		case "40001", "40P01", "53300", "55P03", "57014", "57P01", "57P02", "57P03":
+			return true
+		}
+		return strings.HasPrefix(pgError.Code, "08")
+	}
+	return false
+}
+
+func submissionBusy(c echo.Context, stage string, err error) error {
+	log.Errorf("submission %s temporarily unavailable: %v", stage, err)
+	c.Response().Header().Set(echo.HeaderRetryAfter, "1")
+	return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "Submission service is busy. Please wait before retrying."})
+}
+
 func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 	reqCtx, cancelPreparation := context.WithTimeout(ctx.Request().Context(), 5*time.Second)
 	defer cancelPreparation()
@@ -223,8 +258,7 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		if errors.Is(err, common.ErrIdempotencyConflict) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		}
-		ctx.Response().Header().Set(echo.HeaderRetryAfter, "5")
-		return ctx.NoContent(http.StatusServiceUnavailable)
+		return submissionBusy(ctx, "replay lookup", err)
 	} else if id != "" {
 		return ctx.JSON(http.StatusCreated, dto.SubmitSubmissionResponse{SubmissionID: id})
 	}
@@ -233,6 +267,9 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.NoContent(http.StatusNotFound)
+		}
+		if submissionTemporarilyUnavailable(err) {
+			return submissionBusy(ctx, "registration lookup", err)
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to check contest registration",
@@ -274,6 +311,9 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 			return ctx.JSON(http.StatusTooManyRequests, map[string]string{
 				"error": err.Error(),
 			})
+		}
+		if submissionTemporarilyUnavailable(err) {
+			return submissionBusy(ctx, "preparation", err)
 		}
 		log.Errorf("create submission for user %s: %v", userID, err)
 		if hub := sentryecho.GetHubFromContext(ctx); hub != nil {

@@ -2,7 +2,8 @@
 
 Apply the database migrations before starting this build. Shared route admission and code replay fail
 closed with HTTP 503 if PostgreSQL or the request limiter table is unavailable.
-Later submission preparation/admission failures return HTTP 500 with an uncertainty message.
+Known transient submission connection/pool/registration failures return JSON 503
+with a one-second retry hint; unexpected failures remain JSON 500 and are logged.
 HTTP 429 responses include `Retry-After` in seconds. Route budgets are shared in
 PostgreSQL and survive API restarts; the pre-authentication ingress guard is local
 to each API process and resets on restart.
@@ -19,8 +20,10 @@ process during successful admissions.
 | Profile creation/updates | 60/minute | Firebase UID |
 | Contest registration changes and tab-switch ingestion | 60/minute | Firebase UID |
 | Tab-switch ingestion burst (per process) | 20 burst, 5/second refill | Firebase UID |
+| Run and Submit burst (per process, before SQL) | 4 burst, 1/second refill | Firebase UID |
 | Run and Submit requests | 60/minute | Firebase UID |
-| Signup | 1,200/hour and 30/second fleet-wide | IP and shared fleet key |
+| Signup | 1,200/hour/IP and 100/10 seconds fleet-wide | IP and shared fleet key |
+| Signup work (per process) | 8 active, 100 active + queued, 20-second queue wait | Capacity slots |
 | Admin requests | 180/minute | Firebase UID |
 | Consolidation and plagiarism report/pair reads | 6/minute | Firebase UID |
 
@@ -32,8 +35,7 @@ reuses bounded in-memory token buckets (at most 10,000 client IPs). Below the
 local ingress budget, missing/malformed-token requests return 401 without
 acquiring a DB connection, including when the DB pool is exhausted. Valid
 requests still pass their shared route budgets before business work; a route
-budget DB error remains 503. This ingress-only change needs no new migration or
-pool-size adjustment.
+budget DB error remains 503. The ingress guard needs no database access or pool-size adjustment.
 
 The ingress guard is a per-process burst guard, not a network denial-of-service
 protection or fleet-wide quota; use the proxy for a fleet-wide ceiling when
@@ -70,33 +72,66 @@ be split/reduced before publication through this API.
 
 ## Code submission admission and retries
 
-Migration 38 is reserved for tab switching. Migration 39 adds durable code request IDs; migration 40 adds shared HTTP budgets.
-Apply both before deploying the API. Scored code uses a PostgreSQL transaction and
-fleet advisory lock to enforce `SUBMISSION_MAX_PENDING` (default 600 pending
-submissions across all contests) and one pending code submission per UID. This is
-a bounded queue, not a claim that the judge can execute 600 jobs at once. Measure
-worker capacity before changing the bound. Admission reserves the parent before
-S3 testcase reads; preparation failures release it and recovery fails abandoned
-parents after 30 seconds. Each problem admits at most 100 testcases; testcase and
-answer object reads are capped at 8 MiB each. Source is limited to 64 KiB decoded
-and 128 KiB encoded. Scored jobs explicitly disable networking and set a 10-second
-wall limit and 1 MiB file limit in addition to trusted CPU/memory limits.
+Migration 38 is reserved for tab switching. Migration 39 adds durable code request
+IDs; migration 40 adds shared HTTP budgets; migration 41 adds pending admission
+slots. **Stop old API writers and finish in-flight preparation before applying
+migration 41, then start the new API. Do not mix old and new writers.** Migration
+41 backfills pending parents and adds a partial unique index on pending slots.
+
+`SUBMISSION_MAX_PENDING` (default 600 across all contests) is enforced by independent
+slot reservations; unrelated users no longer queue behind one global admission
+lock. Per-UID/registration lock waits are bounded at 500 ms and return a one-second
+429 retry hint on contention. All replicas must use the same capacity setting.
+Completion, failure or deletion releases a slot through the partial index. An
+unassigned legacy pending parent or a slot outside a newly lowered capacity blocks
+fresh admission until those parents drain, even if the total count is below the
+new cap. These checks reject ambiguous legacy capacity; they do not make mixed-version
+writes safe.
+
+The bound counts queued parents, not native judge concurrency. Each problem admits
+at most 100 testcases. Admission precedes S3 reads; preparation failures release
+the parent and recovery fails abandoned parents after 30 seconds. Source remains
+limited to 64 KiB decoded / 128 KiB encoded, testcase and answer objects to 8 MiB
+each. Scored jobs retain disabled networking, a 10-second wall limit and a 1 MiB
+file limit alongside trusted CPU/memory settings.
 
 The Submit cooldown defaults to five database-clock seconds per UID across all
 contests. `SUBMISSION_RATE_LIMIT_SECONDS` must be positive to override the default;
 zero/negative values no longer disable the service's protection. Cooldown
 rejections return 429 with the remaining database-clock seconds in `Retry-After`.
-A full queue or pending user returns an advisory `Retry-After: 5`; completion
-time is unknown and that interval does not guarantee available capacity.
+A previous pending submission no longer blocks a fresh request after cooldown;
+the interval is no longer tied to verdict latency. A full queue
+still returns an advisory `Retry-After: 5`; completion time is unknown and the
+hint does not guarantee available capacity.
 
 Code clients should send a UUID `Idempotency-Key`. Its binding to UID, exact
 payload and submission ID commits with admission. Reusing it returns the original
 ID (including after the contest closes); changing its payload returns 409. The
-website retains this key for uncertain network/5xx/408/429 responses in the current
-tab and clears it after success or definitive client errors. Reload/new-tab requests
-need a retained key to be retries; legacy clients without keys remain limited but
-cannot recover a lost request ID. A failed prepared submission is replayed as its
-original failed record; a deliberate new attempt uses a new key.
+website retains this key for every unsuccessful attempt and clears it only after
+success. Code Submit automatically retries network failures and 429/500/502/503/504
+responses at most twice (three attempts total), within one 30-second deadline
+including token lookup. Retries honor `Retry-After`, add jitter and retain the
+same payload, key and account. Account changes, cancellation, permanent errors,
+or an exhausted budget stop retries. Run, MCQ, signup and registration POSTs are
+not automatically retried. Reload/new-tab requests need a retained key to be
+retries; a failed prepared submission replays as its original failed record.
+
+## Signup bursts and work limits
+
+Signup's shared fleet policy now admits 100 attempts per 10 seconds rather than
+30 per second: a larger initial burst with a lower sustained rate. The shared
+1,200/hour/IP budget remains for campus NATs. Before binding JSON or reaching SQL
+and Firebase, each API process admits at most 100 active/queued requests, with
+8 active handlers. JSON is bound after obtaining a worker slot and before the
+SQL budgets, so parsing is bounded and does not wait behind SQL before the HTTP
+body-read deadline. Queue waits are capped at 20 seconds; overflow/expiry returns
+429 and cancellation releases its reservation without calling Firebase.
+
+These are initial safety budgets, not proof that 600 simultaneous signups or
+600 native judging jobs meet latency targets. Larger bursts can still be rejected
+intentionally. Recalibrate against measured Firebase/Judge0 latency; multiple
+API replicas multiply the local concurrency limits while SQL budgets remain
+shared. Admission errors now log their budget/stage and cause for diagnosis.
 
 ## Active EC2 deployment
 

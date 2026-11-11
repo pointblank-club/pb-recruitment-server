@@ -15,8 +15,9 @@ func AddSubmissionRoutes(
 	submissionController *controllers.SubmissionController,
 	limiter middleware.RequestLimiter,
 ) {
+	burstLimit := middleware.SubmissionBurstLimit()
 	if os.Getenv("ENABLE_RUN") == "true" {
-		e.POST("/submission/run", submissionController.Run, middleware.RequireFirebaseAuth(authClient), middleware.LimitRequests(limiter, "submission-write", 60, 60))
+		e.POST("/submission/run", submissionController.Run, middleware.RequireFirebaseAuth(authClient), burstLimit, middleware.LimitRequests(limiter, "submission-write", 60, 60))
 	}
 	e.PUT("/internal/judge0/callback/:execution_id", submissionController.Judge0Callback)
 	// // Get the status of a specific submission
@@ -53,6 +54,7 @@ func AddSubmissionRoutes(
 	e.POST("/submission/submit",
 		submissionController.SubmitSolution,
 		middleware.RequireFirebaseAuth(authClient),
+		burstLimit,
 		middleware.LimitRequests(limiter, "submission-write", 60, 60),
 		middleware.ValidateRequest(new(dto.SubmitSubmissionRequest)),
 	)

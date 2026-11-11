@@ -88,7 +88,7 @@ func executionSubmission(t *testing.T, db *sql.DB, user, contest, problem string
 		t.Fatal(err)
 	}
 	var sub string
-	err := db.QueryRow(`INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at,runtime,memory,language,choices) VALUES($1,$2,$3,$4,'code','pending',extract(epoch from now())::bigint,0,0,'','{}') RETURNING id`, uuid.NewString(), user, contest, problem).Scan(&sub)
+	err := db.QueryRow(`INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at,runtime,memory,language,choices,admission_slot) SELECT $1,$2,$3,$4,'code','pending',extract(epoch from now())::bigint,0,0,'','{}',COALESCE(max(admission_slot),0)+1 FROM submissions WHERE type='code' AND status='pending' RETURNING id`, uuid.NewString(), user, contest, problem).Scan(&sub)
 	if err != nil {
 		t.Fatal(err)
 	}

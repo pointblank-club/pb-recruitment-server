@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -119,8 +120,11 @@ func TestCodeAdmissionCapacityAndRetryPostgres(t *testing.T) {
 	if _, err := db.Exec(`UPDATE submission_rate_limits SET last_submission_at=last_submission_at-10 WHERE user_id=$1`, user); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.CreateCodeSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code}, uuid.NewString(), "same-payload", 5, 4); !errors.Is(err, common.ErrRateLimitExceeded) {
-		t.Fatal("pending user bypass", err)
+	if next, replay, err := store.CreateCodeSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code}, uuid.NewString(), "same-payload", 5, 4); err != nil || replay || next == id {
+		t.Fatal("completed cooldown must admit while the earlier submission remains pending", next, replay, err)
+	}
+	if _, err := db.Exec(`UPDATE submission_rate_limits SET last_submission_at=last_submission_at-10 WHERE user_id=$1`, user); err != nil {
+		t.Fatal(err)
 	}
 	if err := store.MarkFailed(ctx, id); err != nil {
 		t.Fatal(err)
@@ -269,5 +273,137 @@ func TestSubmissionCooldownRemainingPostgres(t *testing.T) {
 	var cooldown *common.SubmissionCooldownError
 	if !errors.Is(err, common.ErrRateLimitExceeded) || !errors.As(err, &cooldown) || cooldown.RetryAfter < 19 || cooldown.RetryAfter > 20 {
 		t.Fatalf("remaining cooldown: %v", err)
+	}
+}
+
+func TestCodeAdmissionUnrelatedLocksPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, problem := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
+	other := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Other',$2,$1,1,'CS')`, other, other+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, other); err != nil {
+		t.Fatal(err)
+	}
+	held, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback()
+	if _, err = held.Exec(`SELECT pg_advisory_xact_lock(hashtextextended('code:user:' || $1,0)),pg_advisory_xact_lock(hashtextextended('code:slot:1',0)),pg_advisory_xact_lock(hashtext('code:admission'))`, user); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	sub := &models.Submission{UserID: other, ContestID: contest, ProblemID: problem, Type: models.Code}
+	id, _, err := stores.NewSubmissionStore(db).CreateCodeSubmission(ctx, sub, uuid.NewString(), "independent", 5, 2)
+	if err != nil {
+		t.Fatal("another user's/admission/slot lock blocked admission", err)
+	}
+	var slot int
+	if err = db.QueryRow(`SELECT admission_slot FROM submissions WHERE id=$1`, id).Scan(&slot); err != nil || slot != 2 {
+		t.Fatal(slot, err)
+	}
+	sub.UserID = user
+	_, _, err = stores.NewSubmissionStore(db).CreateCodeSubmission(ctx, sub, uuid.NewString(), "same-user", 5, 2)
+	var retry *common.SubmissionCooldownError
+	if !errors.Is(err, common.ErrRateLimitExceeded) || !errors.As(err, &retry) || retry.RetryAfter != 1 {
+		t.Fatal("same-user lock must return bounded retry", err)
+	}
+}
+
+func TestCodeAdmissionSlotLifecyclePostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, problem := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
+	store := stores.NewSubmissionStore(db)
+	ctx := context.Background()
+	admit := func() (string, error) {
+		id, _, err := store.CreateCodeSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code}, uuid.NewString(), "lifecycle", 5, 1)
+		return id, err
+	}
+	id, err := admit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE submission_rate_limits SET last_submission_at=1 WHERE user_id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admit(); !errors.Is(err, common.ErrRateLimitExceeded) {
+		t.Fatal("full slot admitted", err)
+	}
+	if err = store.MarkFailed(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	next, err := admit()
+	if err != nil || next == id {
+		t.Fatal("failed parent did not release slot", next, err)
+	}
+	if _, err = db.Exec(`DELETE FROM submissions WHERE id=$1`, next); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(`UPDATE submission_rate_limits SET last_submission_at=1 WHERE user_id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = admit(); err != nil {
+		t.Fatal("deleted parent did not release slot", err)
+	}
+}
+
+func TestCodeAdmissionLegacyAndReducedCapacityPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, problem := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
+	store := stores.NewSubmissionStore(db)
+	ctx := context.Background()
+	sub := func() *models.Submission {
+		return &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code}
+	}
+	id, _, err := store.CreateCodeSubmission(ctx, sub(), uuid.NewString(), "seed", 5, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []any{nil, 2} {
+		if _, err = db.Exec(`UPDATE submissions SET admission_slot=$2 WHERE id=$1`, id, slot); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.Exec(`UPDATE submission_rate_limits SET last_submission_at=1 WHERE user_id=$1`, user); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err = store.CreateCodeSubmission(ctx, sub(), uuid.NewString(), "reduced", 5, 1); !errors.Is(err, common.ErrRateLimitExceeded) {
+			t.Fatal("untracked/out-of-range parent bypassed capacity", err)
+		}
+	}
+	if err = store.MarkFailed(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateCodeSubmission(ctx, sub(), uuid.NewString(), "released", 5, 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCodeAdmissionMigrationBackfillsPendingPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, problem, first, _ := executionFixture(t, db, 0)
+	executionSubmission(t, db, user, contest, problem, 0)
+	if err := stores.NewSubmissionStore(db).MarkFailed(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP INDEX idx_pending_code_slot;ALTER TABLE submissions DROP COLUMN admission_slot`); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../migrations/000041_code_admission_slots.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	var total, assigned, distinct int
+	if err = db.QueryRow(`SELECT count(*),count(admission_slot),count(DISTINCT admission_slot) FROM submissions WHERE type='code' AND status='pending'`).Scan(&total, &assigned, &distinct); err != nil || total != 1 || assigned != 1 || distinct != 1 {
+		t.Fatal(total, assigned, distinct, err)
+	}
+	var terminalSlot *int
+	if err = db.QueryRow(`SELECT admission_slot FROM submissions WHERE id=$1`, first).Scan(&terminalSlot); err != nil || terminalSlot != nil {
+		t.Fatal(terminalSlot, err)
 	}
 }

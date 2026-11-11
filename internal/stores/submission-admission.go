@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (s *SubmissionStore) FindCodeSubmissionRequest(ctx context.Context, userID, requestID, fingerprint string) (string, error) {
@@ -28,7 +29,13 @@ func (s *SubmissionStore) FindCodeSubmissionRequest(ctx context.Context, userID,
 }
 
 // Reserve a durable parent before object reads; the recovery worker handles interrupted preparation.
-func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, requestID, fingerprint string, cooldown int64, maxPending int) (string, bool, error) {
+func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, requestID, fingerprint string, cooldown int64, maxPending int) (id string, replay bool, err error) {
+	defer func() {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && (pgErr.Code == "55P03" || (pgErr.Code == "23505" && pgErr.ConstraintName == "idx_pending_code_slot")) {
+			err = &common.SubmissionCooldownError{RetryAfter: 1}
+		}
+	}()
 	if s == nil || s.db == nil || maxPending < 1 || cooldown < 1 {
 		return "", false, fmt.Errorf("invalid submission admission configuration")
 	}
@@ -37,8 +44,11 @@ func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.
 		return "", false, err
 	}
 	defer tx.Rollback()
-	// The fleet lock covers counting and insertion across every API process.
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('code:admission'))`); err != nil {
+	// Bound same-user/registration waits without serializing unrelated participants.
+	if _, err = tx.ExecContext(ctx, `SET LOCAL lock_timeout='500ms'`); err != nil {
+		return "", false, err
+	}
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('code:user:' || $1,0))`, sub.UserID); err != nil {
 		return "", false, err
 	}
 	if requestID != "" {
@@ -57,18 +67,14 @@ func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.
 	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID); err != nil {
 		return "", false, err
 	}
-	var pending int
-	var userPending bool
-	if err = tx.QueryRowContext(ctx, `SELECT count(*),COALESCE(bool_or(user_id=$1),false) FROM submissions WHERE type='code' AND status='pending'`, sub.UserID).Scan(&pending, &userPending); err != nil {
+	slot, err := reserveCodeAdmissionSlot(ctx, tx, maxPending)
+	if err != nil {
 		return "", false, err
-	}
-	if pending >= maxPending || userPending {
-		return "", false, common.ErrRateLimitExceeded
 	}
 	if err := checkSubmissionRateLimit(ctx, tx, sub.UserID, cooldown); err != nil {
 		return "", false, err
 	}
-	id, err := s.insertSubmission(ctx, tx, sub)
+	id, err = s.insertSubmission(ctx, tx, sub, &slot)
 	if err != nil {
 		return "", false, err
 	}
@@ -78,4 +84,33 @@ func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.
 		}
 	}
 	return id, false, tx.Commit()
+}
+
+// The partial unique index releases a slot when its parent completes or is deleted.
+func reserveCodeAdmissionSlot(ctx context.Context, tx *sql.Tx, maxPending int) (int, error) {
+	next := 1
+	for next <= maxPending {
+		var slot int
+		err := tx.QueryRowContext(ctx, `SELECT candidate FROM generate_series($1::bigint,$2::bigint) AS candidate
+   WHERE NOT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending' AND (admission_slot IS NULL OR admission_slot>$2))
+   AND NOT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending' AND admission_slot=candidate)
+   AND pg_try_advisory_xact_lock(hashtextextended('code:slot:' || candidate::text,0))
+   LIMIT 1`, next, maxPending).Scan(&slot)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, common.ErrRateLimitExceeded
+		}
+		if err != nil {
+			return 0, err
+		}
+		// A former holder may have committed after the candidate query's snapshot.
+		var occupied bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending' AND admission_slot=$1)`, slot).Scan(&occupied); err != nil {
+			return 0, err
+		}
+		if !occupied {
+			return slot, nil
+		}
+		next = slot + 1
+	}
+	return 0, common.ErrRateLimitExceeded
 }
