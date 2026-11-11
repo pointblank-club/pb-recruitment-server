@@ -36,7 +36,7 @@ func (mcqProblemStore) GetProblem(context.Context, string, string) (*dto.GetProb
 func TestProblemRoutesAllowGuestsAfterContestEnds(t *testing.T) {
 	cs := services.NewContestService(&stores.Storage{Contests: endedContestStore{}, Problems: mcqProblemStore{}}, nil)
 	e := echo.New()
-	AddContestRoutes(e, nil, controllers.NewContestController(cs, nil))
+	AddContestRoutes(e, nil, controllers.NewContestController(cs, nil), allowRequests{})
 	for _, path := range []string{"/contests/c1/problems", "/contests/c1/problems/p1"} {
 		w := httptest.NewRecorder()
 		e.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
@@ -45,3 +45,7 @@ func TestProblemRoutesAllowGuestsAfterContestEnds(t *testing.T) {
 		}
 	}
 }
+
+type allowRequests struct{}
+
+func (allowRequests) Allow(context.Context, string, int, int) (int, error) { return 0, nil }

@@ -50,14 +50,15 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000038`: submission cooldowns
+- The current schema requires migrations through `000040`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
   progress index (`000034`), stable submission ordering (`000035`), unique MCQ
   submissions (`000036`), contest submission status/solves indexing (`000037`), and
-  tab-switching enforcement & observation deduplication (`000038`). Apply
-  through `000038` before running this backend revision. `make migrate-up`
+  tab-switching enforcement & observation deduplication (`000038`), code request
+  replay (`000039`), and shared HTTP budgets (`000040`). Apply
+  through `000040` before running this backend revision. `make migrate-up`
   applies only pending migrations; do not force the version or roll back a
   production database.
 

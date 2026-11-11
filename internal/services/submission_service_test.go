@@ -36,19 +36,19 @@ func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userI
 	return nil
 }
 
-func (s submissionTestStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
+func (s submissionTestStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, _ string, _ string, cooldown int64, _ int) (string, bool, error) {
 	if s.createCodeSubmission != nil {
-		return s.createCodeSubmission(ctx, sub, cooldown)
+		id, err := s.createCodeSubmission(ctx, sub, cooldown)
+		return id, false, err
 	}
-	if s.checkRateLimit != nil {
-		if err := s.checkRateLimit(ctx, sub.UserID, cooldown); err != nil {
-			return "", err
-		}
+	if err := s.CheckSubmissionRateLimit(ctx, sub.UserID, cooldown); err != nil {
+		return "", false, err
 	}
 	if s.createSubmission != nil {
-		return s.createSubmission(ctx, sub)
+		id, err := s.createSubmission(ctx, sub)
+		return id, false, err
 	}
-	return "submission", nil
+	return "submission", false, nil
 }
 
 func (s submissionTestStore) CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
@@ -620,5 +620,49 @@ func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
 	}
 	if successes != 1 || duplicates != 1 {
 		t.Errorf("expected 1 success and 1 duplicate rejection, got %d successes and %d duplicates", successes, duplicates)
+	}
+}
+
+func TestCodeAdmissionRejectsBeforeObjectRead(t *testing.T) {
+	service := NewSubmissionService(&stores.Storage{Problems: problemTestStore{}, Submissions: submissionTestStore{checkRateLimit: func(context.Context, string, int64) error { return common.ErrRateLimitExceeded }}}, nil, nil)
+	_, err := service.CreateSubmission(context.Background(), "user", models.Code, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Language: "python", Code: "print(1)"})
+	if !errors.Is(err, common.ErrRateLimitExceeded) {
+		t.Fatal(err)
+	}
+}
+
+func TestSubmissionCooldownCannotBeDisabled(t *testing.T) {
+	for _, raw := range []string{"0", "-1", "invalid"} {
+		t.Setenv("SUBMISSION_RATE_LIMIT_SECONDS", raw)
+		if got := new(SubmissionService).rateLimitCooldown(); got != 5 {
+			t.Fatal(raw, got)
+		}
+	}
+}
+
+func TestRecoverySnapshotExecutionBounds(t *testing.T) {
+	service := NewSubmissionService(nil, nil, nil)
+	for _, original := range []judge0.SubmissionRequest{
+		{SourceCode: "print(1)", LanguageID: 71},
+		{SourceCode: "print(1)", LanguageID: 71, WallTimeLimit: 5, MaxFileSize: 64},
+	} {
+		payload, err := json.Marshal(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		job, err := service.recoveryJob(context.Background(), models.Execution{DispatchPayload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wall, file := original.WallTimeLimit, original.MaxFileSize
+		if wall == 0 {
+			wall = 10
+		}
+		if file == 0 {
+			file = 1024
+		}
+		if job.WallTimeLimit != wall || job.MaxFileSize != file || job.EnableNetwork || job.SourceCode != original.SourceCode {
+			t.Fatalf("recovered bounds: %+v", job)
+		}
 	}
 }

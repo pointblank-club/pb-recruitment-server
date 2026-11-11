@@ -2633,6 +2633,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/app_internal_models_dto.SubmitSubmissionRequest"
                         }
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID reused only for retries of the same code submission",
+                        "name": "Idempotency-Key",
+                        "in": "header"
                     }
                 ],
                 "responses": {
@@ -3449,6 +3455,7 @@ const docTemplate = `{
             "properties": {
                 "answer": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 1,
                     "uniqueItems": true,
                     "items": {
@@ -3456,7 +3463,8 @@ const docTemplate = `{
                     }
                 },
                 "description": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 262144
                 },
                 "memory_limit": {
                     "description": "MB; Judge0 accepts 2048-512000 KB",
@@ -3465,10 +3473,12 @@ const docTemplate = `{
                     "minimum": 2
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "options": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 2,
                     "items": {
                         "type": "string"
@@ -3479,6 +3489,7 @@ const docTemplate = `{
                 },
                 "testcases": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "$ref": "#/definitions/app_internal_models_dto.CreateTestCaseRequest"
                     }
@@ -3510,10 +3521,12 @@ const docTemplate = `{
             ],
             "properties": {
                 "expected_output": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1048576
                 },
                 "input": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1048576
                 },
                 "is_sample": {
                     "type": "boolean"
@@ -3536,16 +3549,19 @@ const docTemplate = `{
                     "minimum": 1
                 },
                 "department": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "mobile_number": {
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "usn": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 32
                 }
             }
         },
@@ -3982,23 +3998,28 @@ const docTemplate = `{
                     "minimum": 1
                 },
                 "department": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 254
                 },
                 "mobile_number": {
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "password": {
                     "type": "string",
+                    "maxLength": 128,
                     "minLength": 6
                 },
                 "usn": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 32
                 }
             }
         },
@@ -4019,16 +4040,19 @@ const docTemplate = `{
             ],
             "properties": {
                 "code": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 131072
                 },
                 "contest_id": {
                     "type": "string"
                 },
                 "language": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 32
                 },
                 "option": {
                     "type": "array",
+                    "maxItems": 100,
                     "minItems": 1,
                     "items": {
                         "type": "integer"
@@ -4149,13 +4173,15 @@ const docTemplate = `{
             ],
             "properties": {
                 "department": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "mobile_number": {
                     "type": "string"
                 },
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 }
             }
         },

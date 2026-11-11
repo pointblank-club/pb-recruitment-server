@@ -13,9 +13,10 @@ func AddSubmissionRoutes(
 	e *echo.Echo,
 	authClient *auth.Client,
 	submissionController *controllers.SubmissionController,
+	limiter middleware.RequestLimiter,
 ) {
 	if os.Getenv("ENABLE_RUN") == "true" {
-		e.POST("/submission/run", submissionController.Run, middleware.RequireFirebaseAuth(authClient))
+		e.POST("/submission/run", submissionController.Run, middleware.RequireFirebaseAuth(authClient), middleware.LimitRequests(limiter, "submission-write", 60, 60))
 	}
 	e.PUT("/internal/judge0/callback/:execution_id", submissionController.Judge0Callback)
 	// // Get the status of a specific submission
@@ -23,6 +24,7 @@ func AddSubmissionRoutes(
 	e.GET("/submission/:id/status",
 		submissionController.GetSubmissionStatus,
 		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "submission-read", 180, 60),
 	)
 
 	// // Get details of a specific submission (which test case passed/failed, runtime, memory, etc.)
@@ -30,6 +32,7 @@ func AddSubmissionRoutes(
 	e.GET("/submission/:id/details",
 		submissionController.GetSubmissionDetails,
 		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "submission-read", 180, 60),
 	)
 
 	// // List all submissions of the authenticated user for a specific Code problem
@@ -38,6 +41,7 @@ func AddSubmissionRoutes(
 	e.GET("/submission/list",
 		submissionController.ListUserSubmissions,
 		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "submission-read", 180, 60),
 		middleware.ValidateRequest(new(dto.ListProblemSubmissionsRequest)),
 	)
 
@@ -49,6 +53,7 @@ func AddSubmissionRoutes(
 	e.POST("/submission/submit",
 		submissionController.SubmitSolution,
 		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "submission-write", 60, 60),
 		middleware.ValidateRequest(new(dto.SubmitSubmissionRequest)),
 	)
 }

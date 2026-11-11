@@ -32,20 +32,20 @@ type GetProblemStatementResponse struct {
 }
 
 type CreateProblemRequest struct {
-	Name        string                  `json:"name" validate:"required"`
-	Description string                  `json:"description" validate:"required"`
+	Name        string                  `json:"name" validate:"required,max=200"`
+	Description string                  `json:"description" validate:"required,max=262144"`
 	Score       int                     `json:"score" validate:"required,gt=0"`
 	Type        models.SubmissionType   `json:"type" validate:"required,oneof=mcq code"`
-	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,unique,dive,gte=0"`
-	Options     []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,dive,required"`
-	Testcases   []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,dive"`
+	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
+	Options     []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,max=100,dive,required,max=4096"`
+	Testcases   []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,max=100,dive"`
 	TimeLimit   int                     `json:"time_limit,omitempty" validate:"omitempty,min=1,max=10000"` // milliseconds; submissions run under Judge0's 10s default wall_time_limit
 	MemoryLimit int                     `json:"memory_limit,omitempty" validate:"omitempty,min=2,max=500"` // MB; Judge0 accepts 2048-512000 KB
 }
 
 type CreateTestCaseRequest struct {
-	Input          string `json:"input" binding:"required"`
-	ExpectedOutput string `json:"expected_output" binding:"required"`
+	Input          string `json:"input" binding:"required" validate:"max=1048576"`
+	ExpectedOutput string `json:"expected_output" binding:"required" validate:"max=1048576"`
 	IsSample       bool   `json:"is_sample"`
 }
 

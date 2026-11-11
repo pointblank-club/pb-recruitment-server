@@ -551,6 +551,10 @@ func (cc *ContestController) HandleUpdateLeaderboardUser(ctx echo.Context) error
 
 	var req dto.UpdateLeaderboardUserRequest
 	if err := ctx.Bind(&req); err != nil {
+		var bodyErr *echo.HTTPError
+		if errors.As(err, &bodyErr) && bodyErr.Code == http.StatusRequestEntityTooLarge {
+			return err
+		}
 		return ctx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "invalid request body",
 		})
@@ -789,6 +793,10 @@ func (cc *ContestController) RecordTabSwitch(ctx echo.Context) error {
 		req = *reqBody
 	} else {
 		if err := ctx.Bind(&req); err != nil {
+			var bodyErr *echo.HTTPError
+			if errors.As(err, &bodyErr) && bodyErr.Code == http.StatusRequestEntityTooLarge {
+				return err
+			}
 			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		}
 		if err := middleware.NewValidator().Validate(&req); err != nil {

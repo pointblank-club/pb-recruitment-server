@@ -24,10 +24,11 @@ var (
 	InvalidYearError               = errors.New("you are not eligible for this contest based on your academic year")
 	KeyNotFoundError               = errors.New("key not found")
 	KeyAlreadyExistsError          = errors.New("key already exists")
+	ErrIdempotencyConflict         = errors.New("request ID already used for a different submission")
 	ErrSubmissionAlreadyExists     = errors.New("submission already exists")
 	ErrUnsupportedLanguage         = errors.New("unsupported language")
 	ErrNoTestcases                 = errors.New("problem has no testcases")
-	ErrInvalidCode                 = errors.New("code must be non-empty UTF-8 text")
+	ErrInvalidCode                 = errors.New("code must be non-empty UTF-8 text up to 64 KiB")
 	ErrInvalidAnswer               = errors.New("MCQ answer must refer to an existing option")
 	ErrProblemsLocked              = errors.New("problems cannot be edited or deleted after the contest starts")
 	ErrContestStartTimeLocked      = errors.New("start time cannot be changed after the contest starts")
@@ -55,3 +56,9 @@ type TabSwitchStaleGenerationError struct {
 func (e *TabSwitchStaleGenerationError) Error() string {
 	return "stale tab switch generation"
 }
+
+// SubmissionCooldownError carries the remaining database-clock cooldown.
+type SubmissionCooldownError struct{ RetryAfter int64 }
+
+func (e *SubmissionCooldownError) Error() string { return ErrRateLimitExceeded.Error() }
+func (e *SubmissionCooldownError) Unwrap() error { return ErrRateLimitExceeded }

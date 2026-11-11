@@ -115,6 +115,7 @@ func newTabSwitchRateLimitWithLimiter(limiter *userRateLimiter) echo.MiddlewareF
 				key = c.RealIP()
 			}
 			if !limiter.allow(key) {
+				c.Response().Header().Set(echo.HeaderRetryAfter, "1")
 				return c.JSON(http.StatusTooManyRequests, map[string]string{
 					"error": "too many tab switch requests",
 				})

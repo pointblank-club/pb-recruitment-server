@@ -43,8 +43,12 @@ func TestDispatchOutagePreservesScoredWorkPostgres(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			queueFull := failure == "queue full"
 			db := postgresTestDB(t)
-			user, contest, problem, _, _ := executionFixture(t, db, 0)
-			if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1) ON CONFLICT (contest_id, user_id) DO NOTHING`, contest, user); err != nil {
+			user, contest, problem, fixture, _ := executionFixture(t, db, 0)
+			// The fixture parent is not pending work submitted by this participant.
+			if _, err := db.Exec(`DELETE FROM submissions WHERE id=$1`, fixture); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1) ON CONFLICT DO NOTHING`, contest, user); err != nil {
 				t.Fatal(err)
 			}
 			var posts, admitted atomic.Int32
