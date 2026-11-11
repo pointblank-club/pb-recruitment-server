@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"app/internal/common"
 	"app/internal/models"
@@ -112,24 +115,74 @@ func TestBodyBoundsBeforeBinding(t *testing.T) {
 }
 
 func TestIngressCannotBeSkippedWithHeaders(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_CIDRS", "")
+	now := time.Unix(1700000000, 0)
 	e := echo.New()
-	l := &recordingLimiter{retry: 60}
-	AddRequestLimits(e, l)
-	e.GET("/users/profile", func(c echo.Context) error { return c.NoContent(204) })
+	ConfigureRequestBounds(e)
+	limiter := newUserRateLimiter(1, 1, func() time.Time { return now })
+	e.Use(newIngressRateLimitWithLimiter(limiter))
+	e.GET("/users/profile", func(c echo.Context) error { return c.NoContent(401) })
 	e.PUT("/internal/judge0/callback/:execution_id", func(c echo.Context) error { return c.NoContent(401) })
 	e.GET("/health", func(c echo.Context) error { return c.NoContent(200) })
 	for _, tc := range []struct {
-		method, path string
-		want         int
-	}{{"GET", "/users/profile", 429}, {"PUT", "/internal/judge0/callback/test", 401}, {"GET", "/health", 200}} {
+		method, path, remote, forwarded string
+		want                            int
+	}{
+		{"GET", "/users/profile", "192.0.2.1:1234", "203.0.113.1", 401},
+		{"GET", "/users/profile", "192.0.2.1:1234", "203.0.113.2", 429},
+		{"PUT", "/internal/judge0/callback/test", "192.0.2.1:1234", "", 401},
+		{"GET", "/health", "192.0.2.1:1234", "", 200},
+		{"OPTIONS", "/users/profile", "192.0.2.1:1234", "", 204},
+		{"GET", "/users/profile", "192.0.2.2:1234", "", 401},
+	} {
 		w := httptest.NewRecorder()
-		e.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		r.RemoteAddr = tc.remote
+		r.Header.Set("X-Forwarded-For", tc.forwarded)
+		e.ServeHTTP(w, r)
 		if w.Code != tc.want {
-			t.Fatal(w.Code, tc.want)
+			t.Fatalf("%s %s: got %d want %d", tc.method, tc.path, w.Code, tc.want)
+		}
+		if w.Code == 429 && w.Header().Get("Retry-After") != "1" {
+			t.Fatal("missing retry delay", w.Header())
 		}
 	}
-	if len(l.keys) != 1 {
-		t.Fatal(l.keys)
+	now = now.Add(time.Second)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/users/profile", nil)
+	r.RemoteAddr = "192.0.2.1:1234"
+	e.ServeHTTP(w, r)
+	if w.Code != 401 {
+		t.Fatal("ingress budget did not refill", w.Code)
+	}
+}
+
+func TestIngressConcurrentAdmission(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	e := echo.New()
+	e.Use(newIngressRateLimitWithLimiter(newUserRateLimiter(20, 1, func() time.Time { return now })))
+	e.GET("/read", func(c echo.Context) error { return c.NoContent(401) })
+	var admitted, limited atomic.Int32
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, httptest.NewRequest("GET", "/read", nil))
+			switch w.Code {
+			case 401:
+				admitted.Add(1)
+			case 429:
+				limited.Add(1)
+			default:
+				t.Errorf("unexpected status %d", w.Code)
+			}
+		}()
+	}
+	wg.Wait()
+	if admitted.Load() != 20 || limited.Load() != 80 {
+		t.Fatal("non-atomic ingress budget", admitted.Load(), limited.Load())
 	}
 }
 

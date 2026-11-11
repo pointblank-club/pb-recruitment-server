@@ -1,16 +1,17 @@
 # Request admission and execution bounds
 
-Apply the new database migrations before starting this build. HTTP budget admission and code replay fail
+Apply the database migrations before starting this build. Shared route admission and code replay fail
 closed with HTTP 503 if PostgreSQL or the request limiter table is unavailable.
 Later submission preparation/admission failures return HTTP 500 with an uncertainty message.
-HTTP 429 responses include `Retry-After` in seconds. These are shared PostgreSQL
-budgets, not process-local counters. Replacing/restarting an API does not reset them.
+HTTP 429 responses include `Retry-After` in seconds. Route budgets are shared in
+PostgreSQL and survive API restarts; the pre-authentication ingress guard is local
+to each API process and resets on restart.
 Expired request-budget rows are removed after one day, at most once per minute per
 process during successful admissions.
 
 | Scope | Budget | Key |
 | --- | --- | --- |
-| Before authentication, including invalid tokens | 60,000/minute | Client IP |
+| Before authentication, including invalid tokens (per process) | 60,000 burst, 1,000/second refill | Client IP |
 | Public contest/leaderboard/problem reads | 6,000/minute | Client IP |
 | Authenticated contest/leaderboard/problem/session-status reads | 180/minute | Firebase UID |
 | Submission status/details/history | 180/minute | Firebase UID |
@@ -26,9 +27,17 @@ process during successful admissions.
 Authenticated limits apply after Firebase verification. Admin limits follow both
 Firebase and admin-role checks. Public IP limits intentionally accommodate a campus
 NAT shared by 600 participants; they do not replace participant limits. These
-initial budgets need workload measurement before being raised. The ingress budget
-adds a database check before authentication; it is not a network denial-of-service
-protection. Firebase login and password-reset traffic bypasses this API and still
+initial budgets need workload measurement before being raised. The ingress guard
+reuses bounded in-memory token buckets (at most 10,000 client IPs). Below the
+local ingress budget, missing/malformed-token requests return 401 without
+acquiring a DB connection, including when the DB pool is exhausted. Valid
+requests still pass their shared route budgets before business work; a route
+budget DB error remains 503. This ingress-only change needs no new migration or
+pool-size adjustment.
+
+The ingress guard is a per-process burst guard, not a network denial-of-service
+protection or fleet-wide quota; use the proxy for a fleet-wide ceiling when
+scaling. Firebase login and password-reset traffic bypasses this API and still
 requires provider-side abuse controls.
 
 Judge0 callbacks are excluded from the general database request limiter so invalid
