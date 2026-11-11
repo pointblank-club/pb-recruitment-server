@@ -287,19 +287,19 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	if contest.GetRunningStatus() == models.ContestRunningUpcoming {
 		return nil, common.ErrContestNotStarted
 	}
-	var res *dto.GetLeaderboardResponse
-	if !isAdmin && contest.GetRunningStatus() != models.ContestRunningClosed {
-		res, err = cs.stores.Rankings.GetCodeLeaderboard(ctx, contestID, page)
-	} else {
-		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
-	}
+	res, err := cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
 	if err != nil {
 		return nil, err
 	}
 	if !isAdmin {
-		for i := range res.Entries {
-			res.Entries[i].ProblemScores = nil
+		sanitizedEntries := make([]dto.LeaderboardEntry, len(res.Entries))
+		for i, entry := range res.Entries {
+			entry.ProblemScores = nil
+			sanitizedEntries[i] = entry
 		}
+		resCopy := *res
+		resCopy.Entries = sanitizedEntries
+		return &resCopy, nil
 	}
 	return res, nil
 }
