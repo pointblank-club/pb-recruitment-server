@@ -223,8 +223,14 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 
 	submissionID, err := sc.submissionService.CreateSubmission(reqCtx, userID, submissionType, req)
 	if err != nil {
-		if errors.Is(err, common.ErrNotFound) {
+		if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ContestNotFoundError) {
 			return ctx.NoContent(http.StatusNotFound)
+		}
+		if errors.Is(err, common.UserNotRegisteredError) {
+			return ctx.NoContent(http.StatusForbidden)
+		}
+		if errors.Is(err, common.ContestNotRunningError) || errors.Is(err, common.ErrTabSwitchTerminated) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 		}
 		if errors.Is(err, common.KeyAlreadyExistsError) || errors.Is(err, common.ErrSubmissionAlreadyExists) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})

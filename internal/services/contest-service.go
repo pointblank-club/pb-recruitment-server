@@ -8,10 +8,10 @@ import (
 	"app/internal/stores"
 	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"slices"
 	"strings"
-
-	"fmt"
 
 	"github.com/google/uuid"
 
@@ -80,6 +80,10 @@ func (cs *ContestService) ModifyRegistration(ctx context.Context, contestID stri
 		return cs.stores.Contests.RegisterUser(ctx, contestID, userID)
 
 	case dto.UnregisterAction:
+		if contest.GetRunningStatus() != models.ContestRunningUpcoming {
+			log.Errorf("user %s attempted to unregister after contest %s started", userID, contestID)
+			return common.ErrCannotUnregisterAfterStart
+		}
 		return cs.stores.Contests.UnregisterUser(ctx, contestID, userID)
 
 	default:
@@ -461,6 +465,41 @@ func (cs *ContestService) GetContest(ctx context.Context, contestID string, user
 
 func (cs *ContestService) GetContestRegistrations(ctx context.Context, contestID string) ([]dto.ContestRegistration, error) {
 	return cs.stores.Contests.GetContestRegistrations(ctx, contestID)
+}
+
+func (cs *ContestService) RecordTabSwitch(ctx context.Context, contestID string, userID string, observationID string, generation int, count int) (*dto.TabSwitchResponse, error) {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return nil, fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	parsedUUID, err := uuid.Parse(observationID)
+	if err != nil {
+		return nil, common.ErrInvalidTabSwitchRequest
+	}
+	if generation < 0 || generation > math.MaxInt32 {
+		return nil, common.ErrInvalidTabSwitchRequest
+	}
+	if count != 1 {
+		return nil, common.ErrInvalidTabSwitchRequest
+	}
+
+	return cs.stores.Contests.RecordTabSwitch(ctx, contestID, userID, parsedUUID.String(), generation, count)
+}
+
+func (cs *ContestService) GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error) {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return nil, fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	return cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
+}
+
+func (cs *ContestService) ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) (int, error) {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return 0, fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	return cs.stores.Contests.ResetContestantTabSwitches(ctx, contestID, userID, adminID)
 }
 
 func (cs *ContestService) GetProblemTestcases(ctx context.Context, contestID, problemID string) ([]dto.TestCaseResponse, error) {

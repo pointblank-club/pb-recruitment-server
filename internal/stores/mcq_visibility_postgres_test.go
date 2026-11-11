@@ -54,11 +54,6 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO admin(user_id) VALUES($1)`, user); err != nil {
 		t.Fatal(err)
 	}
-	for _, uid := range []string{user, other} {
-		if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, uid); err != nil {
-			t.Fatal(err)
-		}
-	}
 	correct, err := storage.Submissions.CreateMCQSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{1}}, 0)
 	if err != nil {
 		t.Fatal(err)

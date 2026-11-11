@@ -84,7 +84,10 @@ func executionFixture(t *testing.T, db *sql.DB, count int) (string, string, stri
 
 func executionSubmission(t *testing.T, db *sql.DB, user, contest, problem string, count int) (string, []models.Execution) {
 	t.Helper()
-	sub, err := stores.NewSubmissionStore(db).CreateSubmission(context.Background(), &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code})
+	if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1) ON CONFLICT DO NOTHING`, contest, user); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := stores.NewSubmissionStore(db).CreateCodeSubmission(context.Background(), &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +216,7 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 	if err := stores.NewProblemStore(db).CreateProblem(context.Background(), &models.Problem{ID: mcq, ContestID: contest, Name: "MCQ", Score: 20, Type: models.MCQ, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
 		t.Fatal(err)
 	}
-	id, err := stores.NewSubmissionStore(db).CreateSubmission(context.Background(), &models.Submission{UserID: user, ContestID: contest, ProblemID: mcq, Type: models.MCQ, Option: []int{1}})
+	id, err := stores.NewSubmissionStore(db).CreateMCQSubmission(context.Background(), &models.Submission{UserID: user, ContestID: contest, ProblemID: mcq, Type: models.MCQ, Option: []int{1}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

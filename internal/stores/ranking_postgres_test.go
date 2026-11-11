@@ -34,6 +34,11 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Ranking Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
+	for _, u := range []string{user1, user2} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, u); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	problemStore := stores.NewProblemStore(db)
 	if err := problemStore.CreateProblem(ctx, &models.Problem{ID: mcqProblem, ContestID: contest, Name: "MCQ Problem", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
@@ -45,18 +50,18 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 
 	subStore := stores.NewSubmissionStore(db)
 	// User1: MCQ choice [1] (correct)
-	_, err := subStore.CreateSubmission(ctx, &models.Submission{UserID: user1, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{1}})
+	_, err := subStore.CreateMCQSubmission(ctx, &models.Submission{UserID: user1, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{1}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// User2: MCQ choice [0] (incorrect)
-	_, err = subStore.CreateSubmission(ctx, &models.Submission{UserID: user2, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{0}})
+	_, err = subStore.CreateMCQSubmission(ctx, &models.Submission{UserID: user2, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{0}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Code submission for user1 (accepted)
-	codeSub1, err := subStore.CreateSubmission(ctx, &models.Submission{UserID: user1, ContestID: contest, ProblemID: codeProblem, Type: models.Code})
+	codeSub1, err := subStore.CreateCodeSubmission(ctx, &models.Submission{UserID: user1, ContestID: contest, ProblemID: codeProblem, Type: models.Code}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +141,9 @@ func TestConsolidationConcurrentWithJudgeMCQPostgres(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Concurrent Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, user); err != nil {
+		t.Fatal(err)
+	}
 
 	problemStore := stores.NewProblemStore(db)
 	if err := problemStore.CreateProblem(ctx, &models.Problem{ID: mcqProblem, ContestID: contest, Name: "MCQ Problem", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
@@ -143,7 +151,7 @@ func TestConsolidationConcurrentWithJudgeMCQPostgres(t *testing.T) {
 	}
 
 	subStore := stores.NewSubmissionStore(db)
-	subID, err := subStore.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{1}})
+	subID, err := subStore.CreateMCQSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{1}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

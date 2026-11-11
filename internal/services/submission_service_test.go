@@ -21,11 +21,12 @@ import (
 
 type submissionTestStore struct {
 	*stores.SubmissionStore
-	markFailed          func(context.Context, string) error
-	judgeMCQ            func(context.Context, string) error
-	createSubmission    func(context.Context, *models.Submission) (string, error)
-	createMCQSubmission func(context.Context, *models.Submission, int64) (string, error)
-	checkRateLimit      func(context.Context, string, int64) error
+	markFailed           func(context.Context, string) error
+	judgeMCQ             func(context.Context, string) error
+	createSubmission     func(context.Context, *models.Submission) (string, error)
+	createCodeSubmission func(context.Context, *models.Submission, int64) (string, error)
+	createMCQSubmission  func(context.Context, *models.Submission, int64) (string, error)
+	checkRateLimit       func(context.Context, string, int64) error
 }
 
 func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldown int64) error {
@@ -35,7 +36,15 @@ func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userI
 	return nil
 }
 
-func (s submissionTestStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
+func (s submissionTestStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
+	if s.createCodeSubmission != nil {
+		return s.createCodeSubmission(ctx, sub, cooldown)
+	}
+	if s.checkRateLimit != nil {
+		if err := s.checkRateLimit(ctx, sub.UserID, cooldown); err != nil {
+			return "", err
+		}
+	}
 	if s.createSubmission != nil {
 		return s.createSubmission(ctx, sub)
 	}
@@ -384,6 +393,11 @@ func TestSubmissionServiceRateLimit(t *testing.T) {
 	var checkedCooldown int64
 	var checkedUser string
 	storage := &stores.Storage{
+		Problems: problemTestStore{
+			getProblem: func(ctx context.Context, problemID, contestID string) (*dto.GetProblemStatementResponse, error) {
+				return &dto.GetProblemStatementResponse{Type: models.MCQ}, nil
+			},
+		},
 		Submissions: submissionTestStore{
 			checkRateLimit: func(_ context.Context, userID string, cooldown int64) error {
 				checkedUser = userID
@@ -396,15 +410,16 @@ func TestSubmissionServiceRateLimit(t *testing.T) {
 		},
 	}
 	svc := NewSubmissionService(storage, nil, nil)
+	req := &dto.SubmitSubmissionRequest{ContestID: "c1", ProblemID: "p1", Type: models.MCQ, Option: []int{1}}
 
 	t.Setenv("SUBMISSION_RATE_LIMIT_SECONDS", "7")
-	if err := svc.CheckRateLimit(context.Background(), "bob"); err != nil {
+	if _, err := svc.CreateSubmission(context.Background(), "bob", models.MCQ, req); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if checkedUser != "bob" || checkedCooldown != 7 {
 		t.Errorf("checkedUser=%s, checkedCooldown=%d", checkedUser, checkedCooldown)
 	}
-	if err := svc.CheckRateLimit(context.Background(), "spammer"); !errors.Is(err, common.ErrRateLimitExceeded) {
+	if _, err := svc.CreateSubmission(context.Background(), "spammer", models.MCQ, req); !errors.Is(err, common.ErrRateLimitExceeded) {
 		t.Fatalf("expected ErrRateLimitExceeded, got %v", err)
 	}
 }

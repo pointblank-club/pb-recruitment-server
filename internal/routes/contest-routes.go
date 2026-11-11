@@ -7,6 +7,7 @@ import (
 
 	"firebase.google.com/go/v4/auth"
 	"github.com/labstack/echo/v4"
+	echomdw "github.com/labstack/echo/v4/middleware"
 )
 
 func AddContestRoutes(
@@ -55,5 +56,20 @@ func AddContestRoutes(
 	e.GET("/contests/:id/problems/:problem_id",
 		contestController.GetContestProblem,
 		middleware.OptionalFirebaseAuth(authClient),
+	)
+
+	// Ingest candidate tab switch events
+	e.POST("/contests/:id/tab-switch",
+		contestController.RecordTabSwitch,
+		echomdw.BodyLimit("4K"),
+		middleware.RequireFirebaseAuth(authClient),
+		middleware.TabSwitchRateLimit(),
+		middleware.ValidateRequest(new(dto.TabSwitchRequest)),
+	)
+
+	// Get candidate session status
+	e.GET("/contests/:id/session-status",
+		contestController.GetCandidateSessionStatus,
+		middleware.RequireFirebaseAuth(authClient),
 	)
 }

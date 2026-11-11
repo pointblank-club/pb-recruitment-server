@@ -761,6 +761,92 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/contests/{contestId}/contestants/{userId}/reset-tab-switches": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Resets a contestant's tab switch count and termination lock, increments reset generation, and records an audit entry while preserving submissions",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Reset contestant tab switches (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "User ID",
+                        "name": "userId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.ResetTabSwitchesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin access required",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest or contestant registration not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/contests/{contestId}/registrations": {
             "get": {
                 "security": [
@@ -1801,6 +1887,200 @@ const docTemplate = `{
                 }
             }
         },
+        "/contests/{contestId}/session-status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get current session status of the candidate in a contest (tab switch count, termination flag, and reset generation)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get candidate session status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.CandidateSessionStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Candidate not registered",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{contestId}/tab-switch": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Idempotently records a candidate tab-switch observation for the current reset generation, atomically incrementing count up to 5 and setting sticky termination if reached.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Record candidate tab switch event",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Tab switch observation event",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.TabSwitchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.TabSwitchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - Contest not running or candidate not registered",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict - Stale reset generation",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.TabSwitchConflictResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Payload too large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/contests/{id}": {
             "get": {
                 "security": [
@@ -2128,7 +2408,7 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Registration closed or invalid student year",
+                        "description": "Registration closed, cannot unregister after start, or invalid student year",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3076,6 +3356,20 @@ const docTemplate = `{
                 }
             }
         },
+        "app_internal_models_dto.CandidateSessionStatusResponse": {
+            "type": "object",
+            "properties": {
+                "generation": {
+                    "type": "integer"
+                },
+                "is_tab_switch_terminated": {
+                    "type": "boolean"
+                },
+                "tab_switch_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "app_internal_models_dto.ConsolidationResponse": {
             "type": "object",
             "properties": {
@@ -3117,13 +3411,22 @@ const docTemplate = `{
                 "hidden": {
                     "type": "boolean"
                 },
+                "is_tab_switch_terminated": {
+                    "type": "boolean"
+                },
                 "name": {
                     "type": "string"
                 },
                 "registered_at": {
                     "type": "integer"
                 },
+                "reset_generation": {
+                    "type": "integer"
+                },
                 "score": {
+                    "type": "integer"
+                },
+                "tab_switch_count": {
                     "type": "integer"
                 },
                 "user_id": {
@@ -3604,6 +3907,20 @@ const docTemplate = `{
                 "UnregisterAction"
             ]
         },
+        "app_internal_models_dto.ResetTabSwitchesResponse": {
+            "type": "object",
+            "properties": {
+                "generation": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "app_internal_models_dto.RunRequest": {
             "type": "object",
             "required": [
@@ -3738,6 +4055,60 @@ const docTemplate = `{
             "properties": {
                 "submission_id": {
                     "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.TabSwitchConflictResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "integer"
+                },
+                "is_terminated": {
+                    "type": "boolean"
+                },
+                "tab_switch_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "app_internal_models_dto.TabSwitchRequest": {
+            "type": "object",
+            "required": [
+                "count",
+                "generation",
+                "observation_id"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "maximum": 1,
+                    "minimum": 1
+                },
+                "generation": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 0
+                },
+                "observation_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.TabSwitchResponse": {
+            "type": "object",
+            "properties": {
+                "generation": {
+                    "type": "integer"
+                },
+                "is_terminated": {
+                    "type": "boolean"
+                },
+                "tab_switch_count": {
+                    "type": "integer"
                 }
             }
         },

@@ -71,6 +71,9 @@ func TestJudge0ContestLoadPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			rows.Close()
+			if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) SELECT $1,id,1 FROM users ON CONFLICT (contest_id, user_id) DO NOTHING`, contest); err != nil {
+				t.Fatal(err)
+			}
 			objects := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPut {
 					w.WriteHeader(200)

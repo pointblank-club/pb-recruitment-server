@@ -39,4 +39,19 @@ var (
 	ErrReportNotReady              = errors.New("plagiarism report is not finished yet")
 	ErrPairNotFound                = errors.New("plagiarism pair not found in report")
 	ErrInvalidPairKey              = errors.New("invalid pair key")
+	ErrTabSwitchTerminated         = errors.New("contest participation terminated due to tab switching")
+	ErrInvalidTabSwitchRequest     = errors.New("invalid tab switch payload")
+	ErrCannotUnregisterAfterStart  = errors.New("cannot unregister after contest has started")
 )
+
+// TabSwitchStaleGenerationError indicates that a tab-switch observation belongs
+// to an older reset generation and carries the authoritative registration state.
+type TabSwitchStaleGenerationError struct {
+	TabSwitchCount int
+	IsTerminated   bool
+	Generation     int
+}
+
+func (e *TabSwitchStaleGenerationError) Error() string {
+	return "stale tab switch generation"
+}
