@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"app/internal/common"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -55,6 +56,10 @@ func ValidateRequest(i interface{}) echo.MiddlewareFunc {
 
 			// Bind request to struct
 			if err := c.Bind(req); err != nil {
+				var httpErr *echo.HTTPError
+				if errors.As(err, &httpErr) && httpErr.Code == http.StatusRequestEntityTooLarge {
+					return err
+				}
 				return c.JSON(http.StatusBadRequest, map[string]string{
 					"error": "Invalid request format",
 				})
@@ -89,6 +94,10 @@ func ValidateRequest(i interface{}) echo.MiddlewareFunc {
 // Standalone validation function for use in controllers
 func Validate(c echo.Context, i interface{}) error {
 	if err := c.Bind(i); err != nil {
+		var httpErr *echo.HTTPError
+		if errors.As(err, &httpErr) && httpErr.Code == http.StatusRequestEntityTooLarge {
+			return err
+		}
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request format")
 	}
 

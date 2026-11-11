@@ -2,6 +2,7 @@ package internal
 
 import (
 	"app/internal/controllers"
+	"app/internal/middleware"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ func NewEchoServer(
 	meter := sentry.NewMeter(context.Background())
 	logger := sentry.NewLogger(context.Background())
 	e := echo.New()
+	middleware.ConfigureRequestBounds(e)
 	e.Use(mdw.Recover())
 	e.Use(sentryecho.New(sentryecho.Options{
 		Repanic: true,
@@ -154,6 +156,7 @@ func NewEchoServer(
 			echo.HeaderContentType,
 			echo.HeaderAccept,
 			echo.HeaderAuthorization,
+			"Idempotency-Key",
 		},
 		ExposeHeaders: []string{
 			echo.HeaderRetryAfter,

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
 )
@@ -184,6 +185,9 @@ func TestSubmitSolutionLogsCreateFailure(t *testing.T) {
 	if logged := output.String(); !strings.Contains(logged, "create submission for user user") || !strings.Contains(logged, storeErr.Error()) {
 		t.Fatalf("missing user or database error in log: %s", logged)
 	}
+	if !strings.HasPrefix(recorder.Header().Get("Content-Type"), "application/json") || !strings.Contains(recorder.Body.String(), `"error":`) {
+		t.Fatal("submission failure must return a JSON error", recorder.Header(), recorder.Body.String())
+	}
 	if strings.Contains(recorder.Body.String(), storeErr.Error()) {
 		t.Fatal("database error exposed in response")
 	}
@@ -302,6 +306,36 @@ func TestGetAdminSubmissionDetailsContestScoping(t *testing.T) {
 		}
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("unscoped global route: got %d, want 200", recorder.Code)
+		}
+	}
+}
+
+type replaySubmissionStore struct{ *stores.SubmissionStore }
+
+func (replaySubmissionStore) FindCodeSubmissionRequest(context.Context, string, string, string) (string, error) {
+	return "original", nil
+}
+
+func TestCodeSubmissionRetryReturnsOriginalWithoutContestLookup(t *testing.T) {
+	controller := NewSubmissionController(services.NewSubmissionService(&stores.Storage{Submissions: replaySubmissionStore{}}, nil, nil), nil, nil)
+	for _, tc := range []struct {
+		key  string
+		want int
+	}{{uuid.NewString(), 201}, {"invalid", 400}} {
+		request := httptest.NewRequest(http.MethodPost, "/submission/submit", nil)
+		request.Header.Set("Idempotency-Key", tc.key)
+		w := httptest.NewRecorder()
+		c := echo.New().NewContext(request, w)
+		c.Set(common.AUTH_USER_ID, "user")
+		c.Set(common.VALIDATED_REQUEST_BODY, &dto.SubmitSubmissionRequest{ContestID: "ended", ProblemID: "problem", Type: models.Code, Language: "python", Code: "print(1)"})
+		if err := controller.SubmitSolution(c); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != tc.want {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if tc.want == 201 && !strings.Contains(w.Body.String(), "original") {
+			t.Fatal(w.Body.String())
 		}
 	}
 }

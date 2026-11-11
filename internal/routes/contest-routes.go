@@ -13,11 +13,13 @@ func AddContestRoutes(
 	e *echo.Echo,
 	authClient *auth.Client,
 	contestController *controllers.ContestController,
+	limiter middleware.RequestLimiter,
 ) {
 	// List all contests
 	e.GET("/contests/list",
 		contestController.ListContests,
 		middleware.OptionalFirebaseAuth(authClient),
+		middleware.LimitReads(limiter),
 	)
 
 	// Get details of a specific contest
@@ -26,6 +28,7 @@ func AddContestRoutes(
 	e.GET("/contests/:id",
 		contestController.GetContest,
 		middleware.OptionalFirebaseAuth(authClient),
+		middleware.LimitReads(limiter),
 	)
 
 	// // Get the leaderboard of a specific contest
@@ -33,6 +36,7 @@ func AddContestRoutes(
 	e.GET("/contests/:id/leaderboard",
 		contestController.GetLeaderboard,
 		middleware.OptionalFirebaseAuth(authClient),
+		middleware.LimitReads(limiter),
 	)
 
 	// Register/Unregister the authenticated user for a specific contest
@@ -40,6 +44,7 @@ func AddContestRoutes(
 	e.POST("/contests/:id/registration",
 		contestController.ModifyRegistration,
 		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "registration", 60, 60),
 		middleware.ValidateRequest(new(dto.ModifyRegistrationRequest)),
 	)
 
@@ -48,6 +53,7 @@ func AddContestRoutes(
 	e.GET("/contests/:id/problems",
 		contestController.GetContestProblemsList,
 		middleware.OptionalFirebaseAuth(authClient),
+		middleware.LimitReads(limiter),
 	)
 
 	// Get the problem statement of a specific problem in a contest.
@@ -55,5 +61,6 @@ func AddContestRoutes(
 	e.GET("/contests/:id/problems/:problem_id",
 		contestController.GetContestProblem,
 		middleware.OptionalFirebaseAuth(authClient),
+		middleware.LimitReads(limiter),
 	)
 }

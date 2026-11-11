@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"firebase.google.com/go/v4/auth"
 	"github.com/getsentry/sentry-go"
@@ -45,7 +46,9 @@ func FirebaseAuth(authClient *auth.Client, optional bool) echo.MiddlewareFunc {
 			}
 
 			// Verify the ID token using the Firebase Auth client
-			token, err := authClient.VerifyIDToken(context.Background(), idToken)
+			authCtx, cancelAuth := context.WithTimeout(c.Request().Context(), 5*time.Second)
+			token, err := authClient.VerifyIDToken(authCtx, idToken)
+			cancelAuth()
 			if err != nil {
 				log.Errorf("Failed to verify ID token: %v", err)
 				return c.JSON(http.StatusUnauthorized, map[string]string{

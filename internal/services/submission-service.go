@@ -8,6 +8,7 @@ import (
 	"app/internal/s3"
 	"app/internal/stores"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -105,7 +106,7 @@ func (ss *SubmissionService) GetAdminSubmissionDetails(ctx context.Context, subm
 func (ss *SubmissionService) rateLimitCooldown() int64 {
 	cooldown := int64(5) // default 5 seconds
 	if envVal := os.Getenv("SUBMISSION_RATE_LIMIT_SECONDS"); envVal != "" {
-		if val, err := strconv.ParseInt(envVal, 10, 64); err == nil {
+		if val, err := strconv.ParseInt(envVal, 10, 64); err == nil && val > 0 {
 			cooldown = val
 		}
 	}
@@ -114,7 +115,7 @@ func (ss *SubmissionService) rateLimitCooldown() int64 {
 
 func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) error {
 	if ss == nil || ss.stores == nil || ss.stores.Submissions == nil {
-		return nil
+		return fmt.Errorf("submission database unavailable")
 	}
 	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, ss.rateLimitCooldown())
 }
@@ -124,6 +125,20 @@ func (ss *SubmissionService) JudgeMCQ(ctx context.Context, submissionID string) 
 		return ss.markSubmissionFailed(ctx, submissionID, err)
 	}
 	return nil
+}
+
+func submissionFingerprint(req *dto.SubmitSubmissionRequest, kind models.SubmissionType) string {
+	value := *req
+	value.Type = kind
+	data, _ := json.Marshal(value)
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+func (ss *SubmissionService) ReplaySubmission(ctx context.Context, userID string, req *dto.SubmitSubmissionRequest) (string, error) {
+	if req.Type != models.Code || req.RequestID == "" {
+		return "", nil
+	}
+	return ss.stores.Submissions.FindCodeSubmissionRequest(ctx, userID, req.RequestID, submissionFingerprint(req, req.Type))
 }
 
 func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string, submissionType models.SubmissionType, req *dto.SubmitSubmissionRequest) (string, error) {
@@ -154,11 +169,14 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		return ss.stores.Submissions.CreateMCQSubmission(ctx, sub, ss.rateLimitCooldown())
 	}
 
+	if len(req.Code) > 128<<10 {
+		return "", common.ErrInvalidCode
+	}
 	source, err := decodeSource(req.Code)
 	if err != nil {
 		return "", err
 	}
-	if strings.TrimSpace(source) == "" {
+	if strings.TrimSpace(source) == "" || len(source) > 64<<10 {
 		return "", common.ErrInvalidCode
 	}
 
@@ -167,21 +185,28 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		return "", common.ErrUnsupportedLanguage
 	}
 
+	fingerprint := submissionFingerprint(req, submissionType)
+	maxPending := 600
+	if raw := os.Getenv("SUBMISSION_MAX_PENDING"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			return "", fmt.Errorf("SUBMISSION_MAX_PENDING must be positive")
+		}
+		maxPending = n
+	}
+	submissionID, replayed, err := ss.stores.Submissions.CreateCodeSubmission(ctx, sub, req.RequestID, fingerprint, ss.rateLimitCooldown(), maxPending)
+	if err != nil {
+		return "", err
+	}
+	if replayed {
+		return submissionID, nil
+	}
 	inputs, outputs, err := ss.loadTestcases(ctx, req.ContestID, req.ProblemID, problem.TestcasesKey)
 	if err != nil {
-		return "", err
+		return "", ss.markSubmissionFailed(ctx, submissionID, err)
 	}
-	if len(inputs) == 0 {
-		return "", common.ErrNoTestcases
-	}
-
-	if err := ss.CheckRateLimit(ctx, userID); err != nil {
-		return "", err
-	}
-
-	submissionID, err := ss.stores.Submissions.CreateSubmission(ctx, sub)
-	if err != nil {
-		return "", err
+	if len(inputs) == 0 || len(inputs) > 100 {
+		return "", ss.markSubmissionFailed(ctx, submissionID, common.ErrNoTestcases)
 	}
 
 	if err := ss.s3.PutObject(ctx, submissionID, req.Code); err != nil {
@@ -199,7 +224,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 	for i := range inputs {
 		jobs[i] = judge0.SubmissionRequest{
 			SourceCode: source, LanguageID: languageID, Stdin: inputs[i], ExpectedOutput: &outputs[i],
-			CPUTimeLimit: cpuLimit, MemoryLimit: memLimit, CompilerOptions: compilerOptions,
+			CPUTimeLimit: cpuLimit, MemoryLimit: memLimit, CompilerOptions: compilerOptions, WallTimeLimit: 10, MaxFileSize: 1024,
 		}
 	}
 	executions, err := ss.stores.Executions.InsertBatch(ctx, submissionID, indexes, jobs)
@@ -612,7 +637,7 @@ func (ss *SubmissionService) recoveryJob(ctx context.Context, e models.Execution
 			return job, err
 		}
 		cpu, memory := judgeLimits(problem.TimeLimit, problem.MemoryLimit)
-		job = judge0.SubmissionRequest{SourceCode: source, LanguageID: language, Stdin: inputs[e.TestCaseIndex], ExpectedOutput: &outputs[e.TestCaseIndex], CPUTimeLimit: cpu, MemoryLimit: memory, CompilerOptions: judge0.CompilerOptions(language)}
+		job = judge0.SubmissionRequest{SourceCode: source, LanguageID: language, Stdin: inputs[e.TestCaseIndex], ExpectedOutput: &outputs[e.TestCaseIndex], CPUTimeLimit: cpu, MemoryLimit: memory, CompilerOptions: judge0.CompilerOptions(language), WallTimeLimit: 10, MaxFileSize: 1024}
 		if err := ss.stores.Executions.SaveRecoveryPayload(ctx, e, job); err != nil {
 			return job, err
 		}
@@ -682,11 +707,11 @@ func (ss *SubmissionService) loadTestcases(ctx context.Context, contestID, probl
 func (ss *SubmissionService) readTestcases(ctx context.Context, testcasesKey string) ([]string, []string, error) {
 	answersKey := testcaseAnswersKey(testcasesKey)
 
-	tcRaw, err := ss.s3.GetObject(ctx, testcasesKey)
+	tcRaw, err := ss.s3.GetObjectLimit(ctx, testcasesKey, 8<<20)
 	if err != nil {
 		return nil, nil, mapObjectReadError(err)
 	}
-	ansRaw, err := ss.s3.GetObject(ctx, answersKey)
+	ansRaw, err := ss.s3.GetObjectLimit(ctx, answersKey, 8<<20)
 	if err != nil {
 		return nil, nil, mapObjectReadError(err)
 	}

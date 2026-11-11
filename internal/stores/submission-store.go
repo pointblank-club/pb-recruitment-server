@@ -553,7 +553,7 @@ func (s *SubmissionStore) PendingCodeWithoutExecutions(ctx context.Context, cuto
 
 func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldownSeconds int64) error {
 	if s == nil || s.db == nil {
-		return nil
+		return fmt.Errorf("submission database unavailable")
 	}
 
 	if cooldownSeconds <= 0 {

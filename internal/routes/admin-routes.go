@@ -19,10 +19,12 @@ func AddAdminRoutes(
 	authClient *auth.Client,
 	userService *services.UserService,
 	adminService *services.AdminService,
+	limiter middleware.RequestLimiter,
 ) {
 	adminGroup := e.Group("/admin")
 	adminGroup.Use(middleware.RequireFirebaseAuth(authClient))
 	adminGroup.Use(middleware.RequireAdminRole(userService, adminService))
+	adminGroup.Use(middleware.LimitRequests(limiter, "admin", 180, 60))
 
 	// Check Is Admin
 	adminGroup.GET("/", func(c echo.Context) error {
@@ -47,9 +49,9 @@ func AddAdminRoutes(
 
 	//Leaderboard/User Management
 	adminGroup.PUT("/:contestid/leaderboard/:userid", contestController.HandleUpdateLeaderboardUser)
-	adminGroup.POST("/contest/:id/consolidate", contestController.HandleConsolidateContest)
-	adminGroup.GET("/contest/:id/plagiarism", contestController.GetDolosReport)
-	adminGroup.GET("/contest/:id/plagiarism/pairs", contestController.GetDolosPairs)
+	adminGroup.POST("/contest/:id/consolidate", contestController.HandleConsolidateContest, middleware.LimitRequests(limiter, "admin-expensive", 6, 60))
+	adminGroup.GET("/contest/:id/plagiarism", contestController.GetDolosReport, middleware.LimitRequests(limiter, "admin-expensive", 6, 60))
+	adminGroup.GET("/contest/:id/plagiarism/pairs", contestController.GetDolosPairs, middleware.LimitRequests(limiter, "admin-expensive", 6, 60))
 	adminGroup.PATCH("/contest/:id/plagiarism/pairs/:pairKey", contestController.ReviewDolosPair, middleware.ValidateRequest(new(dto.PlagiarismPairReviewRequest)))
 
 	adminGroup.GET("/contests/:contestId/registrations", contestController.GetContestRegistrations)

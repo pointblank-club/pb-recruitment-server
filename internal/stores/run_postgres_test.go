@@ -145,7 +145,7 @@ func TestRunAuthenticationAndInvalidInput(t *testing.T) {
 	for _, setting := range []string{"", "false", "true"} {
 		t.Setenv("ENABLE_RUN", setting)
 		e := echo.New()
-		routes.AddSubmissionRoutes(e, nil, controllers.NewSubmissionController(nil, nil, nil))
+		routes.AddSubmissionRoutes(e, nil, controllers.NewSubmissionController(nil, nil, nil), nil)
 		w := httptest.NewRecorder()
 		e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/submission/run", nil))
 		want := http.StatusNotFound

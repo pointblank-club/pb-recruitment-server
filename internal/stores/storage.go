@@ -34,6 +34,8 @@ type Storage struct {
 		ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error)
 		GetUserProblemProgress(context.Context, string, string) (map[string]string, error)
 		CreateSubmission(context.Context, *models.Submission) (string, error)
+		CreateCodeSubmission(context.Context, *models.Submission, string, string, int64, int) (string, bool, error)
+		FindCodeSubmissionRequest(context.Context, string, string, string) (string, error)
 		CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error)
 		JudgeMCQ(context.Context, string) error
 		MarkFailed(context.Context, string) error
