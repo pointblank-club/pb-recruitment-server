@@ -270,6 +270,9 @@ func TestCreateMCQSubmissionConcurrentPostgres(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'MCQ Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, user); err != nil {
+		t.Fatal(err)
+	}
 	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{ID: problem, ContestID: contest, Name: "MCQ Problem", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -340,6 +343,9 @@ func TestMCQHistoricalSurplusPreservedPostgres(t *testing.T) {
 	}
 	now := time.Now().UnixMilli()
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Surplus Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, user); err != nil {
 		t.Fatal(err)
 	}
 	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{ID: problem, ContestID: contest, Name: "Surplus Problem", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {

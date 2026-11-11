@@ -175,11 +175,7 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		return "", common.ErrNoTestcases
 	}
 
-	if err := ss.CheckRateLimit(ctx, userID); err != nil {
-		return "", err
-	}
-
-	submissionID, err := ss.stores.Submissions.CreateSubmission(ctx, sub)
+	submissionID, err := ss.stores.Submissions.CreateCodeSubmission(ctx, sub, ss.rateLimitCooldown())
 	if err != nil {
 		return "", err
 	}

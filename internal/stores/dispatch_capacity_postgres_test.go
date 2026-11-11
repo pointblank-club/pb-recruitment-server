@@ -44,6 +44,9 @@ func TestDispatchOutagePreservesScoredWorkPostgres(t *testing.T) {
 			queueFull := failure == "queue full"
 			db := postgresTestDB(t)
 			user, contest, problem, _, _ := executionFixture(t, db, 0)
+			if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1) ON CONFLICT (contest_id, user_id) DO NOTHING`, contest, user); err != nil {
+				t.Fatal(err)
+			}
 			var posts, admitted atomic.Int32
 			var outage atomic.Bool
 			outage.Store(true)

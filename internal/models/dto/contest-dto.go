@@ -29,6 +29,13 @@ const (
 	UnregisterAction RegisterationAction = "unregister"
 )
 
+const (
+	TabSwitchTerminationThreshold = 5
+	TabSwitchMaxHistoryEntries    = 100
+	TabSwitchMaxIPBytes           = 64
+	TabSwitchMaxUserAgentBytes    = 256
+)
+
 type ContestRegistration struct {
 	UserID                string `json:"user_id"`
 	Name                  string `json:"name"`
@@ -42,28 +49,41 @@ type ContestRegistration struct {
 	Disqualified          bool   `json:"disqualified"`
 	TabSwitchCount        int    `json:"tab_switch_count"`
 	IsTabSwitchTerminated bool   `json:"is_tab_switch_terminated"`
+	ResetGeneration       int    `json:"reset_generation"`
 }
 
 // TabSwitchRequest represents the payload for reporting a tab switch event.
 type TabSwitchRequest struct {
-	Count int `json:"count"`
+	ObservationID string `json:"observation_id" validate:"required,uuid"`
+	Generation    *int   `json:"generation" validate:"required,min=0,max=2147483647"`
+	Count         *int   `json:"count" validate:"required,min=1,max=5"`
 }
 
 // TabSwitchResponse represents the result of ingesting a tab switch event.
 type TabSwitchResponse struct {
 	TabSwitchCount int  `json:"tab_switch_count"`
 	IsTerminated   bool `json:"is_terminated"`
+	Generation     int  `json:"generation"`
+}
+
+// TabSwitchConflictResponse is returned with HTTP 409 when a report references a stale reset generation.
+type TabSwitchConflictResponse struct {
+	Error          string `json:"error"`
+	TabSwitchCount int    `json:"tab_switch_count"`
+	IsTerminated   bool   `json:"is_terminated"`
+	Generation     int    `json:"generation"`
 }
 
 // CandidateSessionStatusResponse represents the candidate's current contest session status.
 type CandidateSessionStatusResponse struct {
 	TabSwitchCount        int  `json:"tab_switch_count"`
 	IsTabSwitchTerminated bool `json:"is_tab_switch_terminated"`
-	IsSubmitted           bool `json:"is_submitted"`
+	Generation            int  `json:"generation"`
 }
 
 // ResetTabSwitchesResponse represents the response when an admin resets tab switches.
 type ResetTabSwitchesResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	Generation int    `json:"generation"`
 }

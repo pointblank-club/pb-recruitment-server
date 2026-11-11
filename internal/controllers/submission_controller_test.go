@@ -26,7 +26,6 @@ type submissionContestStore struct {
 	err                   error
 	tabSwitchCount        int
 	isTabSwitchTerminated bool
-	isSubmitted           bool
 }
 
 func (s submissionContestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
@@ -41,7 +40,6 @@ func (s submissionContestStore) GetCandidateSessionStatus(context.Context, strin
 	return &dto.CandidateSessionStatusResponse{
 		TabSwitchCount:        s.tabSwitchCount,
 		IsTabSwitchTerminated: s.isTabSwitchTerminated,
-		IsSubmitted:           s.isSubmitted,
 	}, nil
 }
 
@@ -68,6 +66,7 @@ func (submissionProblemStore) GetProblem(context.Context, string, string) (*dto.
 
 type controllerSubmissionStore struct {
 	*stores.SubmissionStore
+	contests        *tabSwitchMockStore
 	created, judged bool
 }
 
@@ -75,7 +74,17 @@ func (s *controllerSubmissionStore) CreateSubmission(context.Context, *models.Su
 	s.created = true
 	return "submission", nil
 }
+func (s *controllerSubmissionStore) CreateCodeSubmission(context.Context, *models.Submission, int64) (string, error) {
+	if s.contests != nil && s.contests.isTerminated {
+		return "", common.ErrTabSwitchTerminated
+	}
+	s.created = true
+	return "submission", nil
+}
 func (s *controllerSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
+	if s.contests != nil && s.contests.isTerminated {
+		return "", common.ErrTabSwitchTerminated
+	}
 	s.created = true
 	return "submission", nil
 }
@@ -131,6 +140,12 @@ func (s *rateLimitedSubmissionStore) CheckSubmissionRateLimit(ctx context.Contex
 	return s.rateLimitErr
 }
 func (s *rateLimitedSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
+	return "submission", nil
+}
+func (s *rateLimitedSubmissionStore) CreateCodeSubmission(context.Context, *models.Submission, int64) (string, error) {
+	if s.rateLimitErr != nil {
+		return "", s.rateLimitErr
+	}
 	return "submission", nil
 }
 func (s *rateLimitedSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {
@@ -207,6 +222,9 @@ type duplicateSubmissionStore struct {
 
 func (s *duplicateSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
 	// Simulate DB unique constraint violation (concurrent insert race).
+	return "", common.ErrSubmissionAlreadyExists
+}
+func (s *duplicateSubmissionStore) CreateCodeSubmission(context.Context, *models.Submission, int64) (string, error) {
 	return "", common.ErrSubmissionAlreadyExists
 }
 func (s *duplicateSubmissionStore) CreateMCQSubmission(context.Context, *models.Submission, int64) (string, error) {

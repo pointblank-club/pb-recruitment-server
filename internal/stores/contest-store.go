@@ -6,11 +6,13 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/gommon/log"
 )
@@ -251,27 +253,68 @@ func (s *ContestStore) RegisterUser(ctx context.Context, contestID string, userI
 }
 
 func (s *ContestStore) UnregisterUser(ctx context.Context, contestID string, userID string) error {
-	const q = `
-		DELETE FROM contest_registrations
-		WHERE contest_id = $1 AND user_id = $2
-		`
-
-	res, err := s.db.ExecContext(ctx, q, contestID, userID)
-	if err != nil {
-		log.Errorf("contest-store: query failed: %v", err)
-		return fmt.Errorf("query contest registration: %w", err)
+	if s == nil || s.db == nil {
+		return fmt.Errorf("contest store: db is not initialized")
 	}
 
-	// If rows affected is 0, then the user never registered
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin unregister tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	const lockQ = `
+		SELECT c.start_time
+		FROM contest_registrations cr
+		INNER JOIN contests c ON c.id = cr.contest_id
+		WHERE cr.contest_id = $1 AND cr.user_id = $2
+		FOR UPDATE OF cr
+	`
+	var startTime int64
+	if err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			exists, existsErr := s.contestExists(ctx, tx, contestID)
+			if existsErr != nil {
+				return fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !exists {
+				return common.ContestNotFoundError
+			}
+			log.Errorf("user-store: user %s not registered", userID)
+			return common.UserNotFoundError
+		}
+		log.Errorf("contest-store: lock registration failed: %v", err)
+		return fmt.Errorf("lock contest registration: %w", err)
+	}
+
+	// Sample time after acquiring the row lock to avoid stale pre-lock eligibility checks.
+	now := time.Now().UnixMilli()
+	if startTime <= now {
+		return common.ErrCannotUnregisterAfterStart
+	}
+
+	const delQ = `
+		DELETE FROM contest_registrations
+		WHERE contest_id = $1 AND user_id = $2
+	`
+	res, err := tx.ExecContext(ctx, delQ, contestID, userID)
+	if err != nil {
+		log.Errorf("contest-store: query failed: %v", err)
+		return fmt.Errorf("delete contest registration: %w", err)
+	}
+
 	affected, err := res.RowsAffected()
 	if err != nil {
 		log.Errorf("user-store: rows error %v", err)
 		return fmt.Errorf("rows error: %w", err)
 	}
-
 	if affected == 0 {
 		log.Errorf("user-store: user %s not registered", userID)
 		return common.UserNotFoundError
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit unregister tx: %w", err)
 	}
 
 	return nil
@@ -295,7 +338,8 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			COALESCE(r.hidden, FALSE),
 			COALESCE(r.disqualified, FALSE),
 			COALESCE(cr.tab_switch_count, 0),
-			COALESCE(cr.is_tab_switch_terminated, FALSE)
+			COALESCE(cr.is_tab_switch_terminated, FALSE),
+			COALESCE(cr.reset_generation, 0)
 		FROM contest_registrations cr
 		INNER JOIN users u ON cr.user_id = u.id
 		LEFT JOIN rankings r ON r.contest_id = cr.contest_id AND r.user_id = cr.user_id
@@ -326,6 +370,7 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.Disqualified,
 			&reg.TabSwitchCount,
 			&reg.IsTabSwitchTerminated,
+			&reg.ResetGeneration,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
 			continue
@@ -341,51 +386,183 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 	return registrations, nil
 }
 
-func (s *ContestStore) RecordTabSwitch(ctx context.Context, contestID string, userID string, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error) {
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.ValidString(s[:maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
+}
+
+func boundedTabSwitchHistoryExpr(entryParamIdx, maxEntriesParamIdx int) string {
+	return fmt.Sprintf(`(
+		WITH combined AS (
+			SELECT value, ord
+			FROM jsonb_array_elements(COALESCE(contest_registrations.tab_switch_history, '[]'::jsonb) || $%d::jsonb) WITH ORDINALITY AS t(value, ord)
+		),
+		total AS (
+			SELECT count(*) AS n FROM combined
+		)
+		SELECT COALESCE(jsonb_agg(c.value ORDER BY c.ord), '[]'::jsonb)
+		FROM combined c, total
+		WHERE c.ord > GREATEST(0, total.n - $%d)
+	)`, entryParamIdx, maxEntriesParamIdx)
+}
+
+func (s *ContestStore) contestExists(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, contestID string) (bool, error) {
+	var exists bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM contests WHERE id = $1)`, contestID).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func (s *ContestStore) RecordTabSwitch(
+	ctx context.Context,
+	contestID string,
+	userID string,
+	observationID string,
+	generation int,
+	count int,
+	ip string,
+	userAgent string,
+) (*dto.TabSwitchResponse, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("contest store: db is not initialized")
 	}
 
-	const q = `
-		WITH new_vals AS (
-			SELECT 
-				CASE WHEN $3 > 0 THEN GREATEST(COALESCE(tab_switch_count, 0) + 1, $3) ELSE COALESCE(tab_switch_count, 0) + 1 END AS new_count,
-				COALESCE(is_tab_switch_terminated, FALSE) AS was_terminated
-			FROM contest_registrations
-			WHERE contest_id = $1 AND user_id = $2
-		)
-		UPDATE contest_registrations cr
-		SET
-			tab_switch_count = nv.new_count,
-			is_tab_switch_terminated = (nv.was_terminated OR nv.new_count >= 5),
-			tab_switch_history = CASE
-				WHEN nv.was_terminated THEN cr.tab_switch_history
-				ELSE COALESCE(cr.tab_switch_history, '[]'::jsonb) || jsonb_build_array(
-					jsonb_build_object(
-						'timestamp', $4::bigint,
-						'count', nv.new_count,
-						'ip', $5::text,
-						'user_agent', $6::text
-					)
-				)
-			END
-		FROM new_vals nv
-		WHERE cr.contest_id = $1 AND cr.user_id = $2
-		RETURNING cr.tab_switch_count, cr.is_tab_switch_terminated;
-	`
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tab switch tx: %w", err)
+	}
+	defer tx.Rollback()
 
-	now := time.Now().UnixMilli()
-	var res dto.TabSwitchResponse
-	err := s.db.QueryRowContext(ctx, q, contestID, userID, count, now, ip, userAgent).Scan(&res.TabSwitchCount, &res.IsTerminated)
+	const lockQ = `
+		SELECT
+			c.start_time,
+			c.end_time,
+			COALESCE(cr.tab_switch_count, 0),
+			COALESCE(cr.is_tab_switch_terminated, FALSE),
+			COALESCE(cr.reset_generation, 0)
+		FROM contest_registrations cr
+		INNER JOIN contests c ON c.id = cr.contest_id
+		WHERE cr.contest_id = $1 AND cr.user_id = $2
+		FOR UPDATE OF cr
+	`
+	var startTime, endTime int64
+	var currentCount, currentGen int
+	var currentTerminated bool
+	err = tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime, &endTime, &currentCount, &currentTerminated, &currentGen)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, common.UserNotFoundError
+			exists, existsErr := s.contestExists(ctx, tx, contestID)
+			if existsErr != nil {
+				return nil, fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !exists {
+				return nil, common.ContestNotFoundError
+			}
+			return nil, common.UserNotRegisteredError
 		}
-		log.Printf("contest-store: record tab switch failed: %v", err)
-		return nil, fmt.Errorf("record tab switch: %w", err)
+		log.Printf("contest-store: lock registration for tab switch failed: %v", err)
+		return nil, fmt.Errorf("lock registration for tab switch: %w", err)
 	}
 
-	return &res, nil
+	now := time.Now().UnixMilli()
+	if now < startTime || now > endTime {
+		return nil, common.ContestNotRunningError
+	}
+
+	if generation != currentGen {
+		return nil, &common.TabSwitchStaleGenerationError{
+			TabSwitchCount: currentCount,
+			IsTerminated:   currentTerminated,
+			Generation:     currentGen,
+		}
+	}
+
+	// Termination is sticky until an authorized admin reset; avoid mutating count or history afterward.
+	if currentTerminated {
+		return &dto.TabSwitchResponse{
+			TabSwitchCount: currentCount,
+			IsTerminated:   true,
+			Generation:     currentGen,
+		}, nil
+	}
+
+	const dedupQ = `
+		INSERT INTO tab_switch_observations (contest_id, user_id, generation, observation_id, created_at)
+		VALUES ($1, $2, $3, $4::uuid, $5)
+		ON CONFLICT (contest_id, user_id, generation, observation_id) DO NOTHING
+	`
+	dedupRes, err := tx.ExecContext(ctx, dedupQ, contestID, userID, currentGen, observationID, now)
+	if err != nil {
+		log.Printf("contest-store: insert tab switch observation failed: %v", err)
+		return nil, fmt.Errorf("insert tab switch observation: %w", err)
+	}
+	inserted, err := dedupRes.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("observation rows affected: %w", err)
+	}
+	if inserted == 0 {
+		// Retry/duplicate observation returns the previously persisted state.
+		return &dto.TabSwitchResponse{
+			TabSwitchCount: currentCount,
+			IsTerminated:   currentTerminated,
+			Generation:     currentGen,
+		}, nil
+	}
+
+	newCount := currentCount + count
+	if newCount > dto.TabSwitchTerminationThreshold {
+		newCount = dto.TabSwitchTerminationThreshold
+	}
+	newTerminated := newCount >= dto.TabSwitchTerminationThreshold
+
+	safeIP := truncateUTF8(ip, dto.TabSwitchMaxIPBytes)
+	safeUA := truncateUTF8(userAgent, dto.TabSwitchMaxUserAgentBytes)
+	entryBytes, err := json.Marshal([]map[string]any{{
+		"timestamp":      now,
+		"count":          newCount,
+		"delta":          count,
+		"observation_id": observationID,
+		"generation":     currentGen,
+		"ip":             safeIP,
+		"user_agent":     safeUA,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("marshal tab switch history: %w", err)
+	}
+
+	updateQ := `
+		UPDATE contest_registrations
+		SET
+			tab_switch_count = $3,
+			is_tab_switch_terminated = $4,
+			tab_switch_history = ` + boundedTabSwitchHistoryExpr(5, 6) + `
+		WHERE contest_id = $1 AND user_id = $2
+	`
+	if _, err := tx.ExecContext(ctx, updateQ, contestID, userID, newCount, newTerminated, string(entryBytes), dto.TabSwitchMaxHistoryEntries); err != nil {
+		log.Printf("contest-store: update tab switch state failed: %v", err)
+		return nil, fmt.Errorf("update tab switch state: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit tab switch tx: %w", err)
+	}
+
+	return &dto.TabSwitchResponse{
+		TabSwitchCount: newCount,
+		IsTerminated:   newTerminated,
+		Generation:     currentGen,
+	}, nil
 }
 
 func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error) {
@@ -394,62 +571,110 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 	}
 
 	const q = `
-		SELECT 
-			COALESCE(tab_switch_count, 0),
-			COALESCE(is_tab_switch_terminated, FALSE),
-			COALESCE(is_submitted, FALSE)
-		FROM contest_registrations
-		WHERE contest_id = $1 AND user_id = $2
+		SELECT
+			(cr.user_id IS NOT NULL) AS is_registered,
+			COALESCE(cr.tab_switch_count, 0),
+			COALESCE(cr.is_tab_switch_terminated, FALSE),
+			COALESCE(cr.reset_generation, 0)
+		FROM contests c
+		LEFT JOIN contest_registrations cr
+			ON cr.contest_id = c.id AND cr.user_id = $2
+		WHERE c.id = $1
 	`
 
+	var isRegistered bool
 	var res dto.CandidateSessionStatusResponse
-	err := s.db.QueryRowContext(ctx, q, contestID, userID).Scan(&res.TabSwitchCount, &res.IsTabSwitchTerminated, &res.IsSubmitted)
+	err := s.db.QueryRowContext(ctx, q, contestID, userID).Scan(
+		&isRegistered,
+		&res.TabSwitchCount,
+		&res.IsTabSwitchTerminated,
+		&res.Generation,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, common.UserNotFoundError
+			return nil, common.ContestNotFoundError
 		}
 		log.Printf("contest-store: get session status failed: %v", err)
 		return nil, fmt.Errorf("get candidate session status: %w", err)
+	}
+	if !isRegistered {
+		return nil, common.UserNotRegisteredError
 	}
 
 	return &res, nil
 }
 
-func (s *ContestStore) ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) error {
+func (s *ContestStore) ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) (int, error) {
 	if s == nil || s.db == nil {
-		return fmt.Errorf("contest store: db is not initialized")
+		return 0, fmt.Errorf("contest store: db is not initialized")
 	}
 
-	const q = `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin reset tab switches tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	const lockQ = `
+		SELECT COALESCE(reset_generation, 0)
+		FROM contest_registrations
+		WHERE contest_id = $1 AND user_id = $2
+		FOR UPDATE
+	`
+	var currentGen int
+	if err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&currentGen); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			exists, existsErr := s.contestExists(ctx, tx, contestID)
+			if existsErr != nil {
+				return 0, fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !exists {
+				return 0, common.ContestNotFoundError
+			}
+			return 0, common.UserNotRegisteredError
+		}
+		log.Printf("contest-store: lock registration for reset failed: %v", err)
+		return 0, fmt.Errorf("lock registration for reset: %w", err)
+	}
+
+	newGen := currentGen + 1
+	now := time.Now().UnixMilli()
+	auditBytes, err := json.Marshal([]map[string]any{{
+		"action":     "admin_reset",
+		"admin_id":   adminID,
+		"generation": newGen,
+		"timestamp":  now,
+	}})
+	if err != nil {
+		return 0, fmt.Errorf("marshal admin reset audit: %w", err)
+	}
+
+	updateQ := `
 		UPDATE contest_registrations
 		SET
 			tab_switch_count = 0,
 			is_tab_switch_terminated = FALSE,
-			is_submitted = FALSE,
-			tab_switch_history = COALESCE(tab_switch_history, '[]'::jsonb) || jsonb_build_array(
-				jsonb_build_object(
-					'action', 'admin_reset',
-					'admin_id', $3::text,
-					'timestamp', $4::bigint
-				)
-			)
+			reset_generation = $3,
+			tab_switch_history = ` + boundedTabSwitchHistoryExpr(4, 5) + `
 		WHERE contest_id = $1 AND user_id = $2
 	`
-
-	now := time.Now().UnixMilli()
-	res, err := s.db.ExecContext(ctx, q, contestID, userID, adminID, now)
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, updateQ, contestID, userID, newGen, string(auditBytes), dto.TabSwitchMaxHistoryEntries); err != nil {
 		log.Printf("contest-store: reset tab switches failed: %v", err)
-		return fmt.Errorf("reset contestant tab switches: %w", err)
+		return 0, fmt.Errorf("reset contestant tab switches: %w", err)
 	}
 
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("rows affected: %w", err)
-	}
-	if affected == 0 {
-		return common.UserNotFoundError
+	const cleanupQ = `
+		DELETE FROM tab_switch_observations
+		WHERE contest_id = $1 AND user_id = $2 AND generation < $3
+	`
+	if _, err := tx.ExecContext(ctx, cleanupQ, contestID, userID, newGen); err != nil {
+		log.Printf("contest-store: cleanup prior tab switch observations failed: %v", err)
+		return 0, fmt.Errorf("cleanup prior tab switch observations: %w", err)
 	}
 
-	return nil
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit reset tab switches tx: %w", err)
+	}
+
+	return newGen, nil
 }

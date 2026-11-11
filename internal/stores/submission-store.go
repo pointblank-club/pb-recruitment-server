@@ -315,6 +315,77 @@ func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Subm
 	return s.insertSubmission(ctx, s.db, sub)
 }
 
+func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, userID string) error {
+	const lockQ = `
+		SELECT
+			c.start_time,
+			c.end_time,
+			COALESCE(cr.is_tab_switch_terminated, FALSE)
+		FROM contest_registrations cr
+		INNER JOIN contests c ON c.id = cr.contest_id
+		WHERE cr.contest_id = $1 AND cr.user_id = $2
+		FOR UPDATE OF cr
+	`
+	var startTime, endTime int64
+	var isTerminated bool
+	err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime, &endTime, &isTerminated)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			var contestExists bool
+			if existsErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM contests WHERE id = $1)`, contestID).Scan(&contestExists); existsErr != nil {
+				return fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !contestExists {
+				return common.ContestNotFoundError
+			}
+			return common.UserNotRegisteredError
+		}
+		return fmt.Errorf("lock contest registration: %w", err)
+	}
+
+	now := time.Now().UnixMilli()
+	if now < startTime || now > endTime {
+		return common.ContestNotRunningError
+	}
+	if isTerminated {
+		return common.ErrTabSwitchTerminated
+	}
+	return nil
+}
+
+func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error) {
+	if s == nil || s.db == nil {
+		return "", fmt.Errorf("submission store: db is not initialized")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin code submission tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID); err != nil {
+		return "", err
+	}
+
+	if cooldownSeconds > 0 {
+		if err := checkSubmissionRateLimit(ctx, tx, sub.UserID, cooldownSeconds); err != nil {
+			return "", err
+		}
+	}
+
+	submissionID, err := s.insertSubmission(ctx, tx, sub)
+	if err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit code submission: %w", err)
+	}
+
+	return submissionID, nil
+}
+
 func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error) {
 	if s == nil || s.db == nil {
 		return "", fmt.Errorf("submission store: db is not initialized")
@@ -325,6 +396,10 @@ func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.S
 		return "", fmt.Errorf("begin mcq submission tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID); err != nil {
+		return "", err
+	}
 
 	// ponytail: advisory user lock serializes MCQ admission per user to prevent duplicate/rate-limit races
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('sub:user:' || $1))`, sub.UserID); err != nil {
@@ -346,23 +421,8 @@ func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.S
 	}
 
 	if cooldownSeconds > 0 {
-		const rateLimitQ = `
-			INSERT INTO submission_rate_limits (user_id, last_submission_at)
-			VALUES ($1, floor(extract(epoch from clock_timestamp()))::bigint)
-			ON CONFLICT (user_id) DO UPDATE
-			SET last_submission_at = floor(extract(epoch from clock_timestamp()))::bigint
-			WHERE floor(extract(epoch from clock_timestamp()))::bigint - submission_rate_limits.last_submission_at >= $2
-		`
-		res, err := tx.ExecContext(ctx, rateLimitQ, sub.UserID, cooldownSeconds)
-		if err != nil {
-			return "", fmt.Errorf("check submission rate limit: %w", err)
-		}
-		affected, err := res.RowsAffected()
-		if err != nil {
-			return "", fmt.Errorf("rate limit rows affected: %w", err)
-		}
-		if affected == 0 {
-			return "", common.ErrRateLimitExceeded
+		if err := checkSubmissionRateLimit(ctx, tx, sub.UserID, cooldownSeconds); err != nil {
+			return "", err
 		}
 	}
 
@@ -560,6 +620,12 @@ func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID s
 		return nil
 	}
 
+	return checkSubmissionRateLimit(ctx, s.db, userID, cooldownSeconds)
+}
+
+func checkSubmissionRateLimit(ctx context.Context, exec interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, userID string, cooldownSeconds int64) error {
 	// Conflict updates must sample the clock after acquiring the row lock.
 	const q = `
 		INSERT INTO submission_rate_limits (user_id, last_submission_at)
@@ -569,7 +635,7 @@ func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID s
 		WHERE floor(extract(epoch from clock_timestamp()))::bigint - submission_rate_limits.last_submission_at >= $2
 	`
 
-	res, err := s.db.ExecContext(ctx, q, userID, cooldownSeconds)
+	res, err := exec.ExecContext(ctx, q, userID, cooldownSeconds)
 	if err != nil {
 		return fmt.Errorf("check submission rate limit: %w", err)
 	}

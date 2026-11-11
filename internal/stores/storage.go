@@ -21,9 +21,9 @@ type Storage struct {
 		RegisterUser(context.Context, string, string) error
 		UnregisterUser(context.Context, string, string) error
 		GetContestRegistrations(context.Context, string) ([]dto.ContestRegistration, error)
-		RecordTabSwitch(ctx context.Context, contestID string, userID string, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error)
+		RecordTabSwitch(ctx context.Context, contestID string, userID string, observationID string, generation int, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error)
 		GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error)
-		ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) error
+		ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) (int, error)
 	}
 	Users interface {
 		CreateUser(context.Context, *auth.UserRecord, *dto.CreateUserRequest) error
@@ -37,6 +37,7 @@ type Storage struct {
 		ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error)
 		GetUserProblemProgress(context.Context, string, string) (map[string]string, error)
 		CreateSubmission(context.Context, *models.Submission) (string, error)
+		CreateCodeSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error)
 		CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error)
 		JudgeMCQ(context.Context, string) error
 		MarkFailed(context.Context, string) error

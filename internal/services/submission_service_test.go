@@ -21,11 +21,12 @@ import (
 
 type submissionTestStore struct {
 	*stores.SubmissionStore
-	markFailed          func(context.Context, string) error
-	judgeMCQ            func(context.Context, string) error
-	createSubmission    func(context.Context, *models.Submission) (string, error)
-	createMCQSubmission func(context.Context, *models.Submission, int64) (string, error)
-	checkRateLimit      func(context.Context, string, int64) error
+	markFailed           func(context.Context, string) error
+	judgeMCQ             func(context.Context, string) error
+	createSubmission     func(context.Context, *models.Submission) (string, error)
+	createCodeSubmission func(context.Context, *models.Submission, int64) (string, error)
+	createMCQSubmission  func(context.Context, *models.Submission, int64) (string, error)
+	checkRateLimit       func(context.Context, string, int64) error
 }
 
 func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldown int64) error {
@@ -36,6 +37,21 @@ func (s submissionTestStore) CheckSubmissionRateLimit(ctx context.Context, userI
 }
 
 func (s submissionTestStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
+	if s.createSubmission != nil {
+		return s.createSubmission(ctx, sub)
+	}
+	return "submission", nil
+}
+
+func (s submissionTestStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, cooldown int64) (string, error) {
+	if s.createCodeSubmission != nil {
+		return s.createCodeSubmission(ctx, sub, cooldown)
+	}
+	if s.checkRateLimit != nil {
+		if err := s.checkRateLimit(ctx, sub.UserID, cooldown); err != nil {
+			return "", err
+		}
+	}
 	if s.createSubmission != nil {
 		return s.createSubmission(ctx, sub)
 	}
