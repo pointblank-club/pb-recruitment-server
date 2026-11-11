@@ -33,7 +33,7 @@ func (l *postgresRequestLimiter) Allow(ctx context.Context, key string, limit, s
 	if l.db == nil {
 		return 0, errors.New("request limiter database unavailable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	// Keep one row per budget; sample the database clock after the conflicting row is locked.
 	const query = `INSERT INTO request_rate_limits (key, hits, resets_at)
