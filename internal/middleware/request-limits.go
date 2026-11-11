@@ -95,17 +95,25 @@ func LimitRequests(limiter RequestLimiter, budget string, limit, seconds int) ec
 	}
 }
 
-// AddRequestLimits also covers rejected authentication attempts before Firebase is called.
-func AddRequestLimits(e *echo.Echo, limiter RequestLimiter) {
-	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-		limited := LimitRequests(limiter, "ingress", 60000, 60)(next)
+// AddRequestLimits rejects ingress bursts without making authentication depend on PostgreSQL.
+func AddRequestLimits(e *echo.Echo) {
+	e.Use(newIngressRateLimitWithLimiter(newUserRateLimiter(60000, 1000, nil)))
+}
+
+func newIngressRateLimitWithLimiter(limiter *userRateLimiter) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			if c.Path() == "/health" || c.Request().Method == http.MethodOptions || c.Path() == "/internal/judge0/callback/:execution_id" {
 				return next(c)
 			}
-			return limited(c)
+			// shortcut: ingress buckets are process-local; enforce a fleet-wide ingress ceiling at the proxy when scaling.
+			if !limiter.allow(c.RealIP()) {
+				c.Response().Header().Set(echo.HeaderRetryAfter, "1")
+				return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "too many requests; wait before retrying"})
+			}
+			return next(c)
 		}
-	})
+	}
 }
 
 func ConfigureRequestBounds(e *echo.Echo) {
