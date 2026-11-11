@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/labstack/gommon/log"
 )
@@ -386,19 +385,6 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 	return registrations, nil
 }
 
-func truncateUTF8(s string, maxBytes int) string {
-	if maxBytes <= 0 {
-		return ""
-	}
-	if len(s) <= maxBytes {
-		return s
-	}
-	for maxBytes > 0 && !utf8.ValidString(s[:maxBytes]) {
-		maxBytes--
-	}
-	return s[:maxBytes]
-}
-
 func boundedTabSwitchHistoryExpr(entryParamIdx, maxEntriesParamIdx int) string {
 	return fmt.Sprintf(`(
 		WITH combined AS (
@@ -431,11 +417,12 @@ func (s *ContestStore) RecordTabSwitch(
 	observationID string,
 	generation int,
 	count int,
-	ip string,
-	userAgent string,
 ) (*dto.TabSwitchResponse, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("contest store: db is not initialized")
+	}
+	if count != 1 {
+		return nil, common.ErrInvalidTabSwitchRequest
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -526,16 +513,12 @@ func (s *ContestStore) RecordTabSwitch(
 	}
 	newTerminated := newCount >= dto.TabSwitchTerminationThreshold
 
-	safeIP := truncateUTF8(ip, dto.TabSwitchMaxIPBytes)
-	safeUA := truncateUTF8(userAgent, dto.TabSwitchMaxUserAgentBytes)
 	entryBytes, err := json.Marshal([]map[string]any{{
 		"timestamp":      now,
 		"count":          newCount,
 		"delta":          count,
 		"observation_id": observationID,
 		"generation":     currentGen,
-		"ip":             safeIP,
-		"user_agent":     safeUA,
 	}})
 	if err != nil {
 		return nil, fmt.Errorf("marshal tab switch history: %w", err)

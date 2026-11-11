@@ -23,7 +23,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -107,7 +106,7 @@ func TestTabSwitchRetryDeduplicationAndDistinctDevicesPostgres(t *testing.T) {
 	// Five identical retries with same observation_id (sequential + concurrent) count only once.
 	obs1 := uuid.NewString()
 	for i := 0; i < 3; i++ {
-		res, err := cs.RecordTabSwitch(ctx, contest, user, obs1, 0, 1, "192.0.2.10", "DeviceA")
+		res, err := cs.RecordTabSwitch(ctx, contest, user, obs1, 0, 1)
 		if err != nil {
 			t.Fatalf("sequential retry %d: %v", i, err)
 		}
@@ -121,7 +120,7 @@ func TestTabSwitchRetryDeduplicationAndDistinctDevicesPostgres(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := cs.RecordTabSwitch(ctx, contest, user, obs1, 0, 1, "192.0.2.10", "DeviceA")
+			res, err := cs.RecordTabSwitch(ctx, contest, user, obs1, 0, 1)
 			if err != nil {
 				t.Errorf("concurrent retry error: %v", err)
 				return
@@ -135,7 +134,7 @@ func TestTabSwitchRetryDeduplicationAndDistinctDevicesPostgres(t *testing.T) {
 
 	// Separate devices with distinct observation IDs increment accurately to termination.
 	for i := 2; i <= 5; i++ {
-		res, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1, "198.51.100.2", "DeviceB")
+		res, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1)
 		if err != nil {
 			t.Fatalf("device B step %d: %v", i, err)
 		}
@@ -162,7 +161,7 @@ func TestTabSwitchConcurrentIncrementAndStickyTerminationPostgres(t *testing.T) 
 
 	// Reach count=3 sequentially.
 	for i := 0; i < 3; i++ {
-		if _, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1, "192.0.2.1", "UA"); err != nil {
+		if _, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -175,7 +174,7 @@ func TestTabSwitchConcurrentIncrementAndStickyTerminationPostgres(t *testing.T) 
 		go func() {
 			defer wg.Done()
 			<-start
-			if _, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1, "192.0.2.1", "UA"); err != nil {
+			if _, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1); err != nil {
 				t.Errorf("concurrent increment failed: %v", err)
 			}
 		}()
@@ -193,7 +192,7 @@ func TestTabSwitchConcurrentIncrementAndStickyTerminationPostgres(t *testing.T) 
 
 	// Extra reports after termination must leave count=5, terminated=true, history length=5.
 	for i := 0; i < 3; i++ {
-		res, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 2, "192.0.2.1", "UA")
+		res, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,17 +209,22 @@ func TestTabSwitchConcurrentIncrementAndStickyTerminationPostgres(t *testing.T) 
 		t.Fatalf("post-termination appended history: len=%d, want 5", histLen)
 	}
 
-	// Also verify large-then-small deltas never undo termination or exceed 5.
+	// Single observation with count=5 must be rejected instead of immediately terminating.
 	user2, contest2, _, _ := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
-	if _, err := cs.RecordTabSwitch(ctx, contest2, user2, uuid.NewString(), 0, 5, "192.0.2.1", "UA"); err != nil {
-		t.Fatal(err)
+	if _, err := cs.RecordTabSwitch(ctx, contest2, user2, uuid.NewString(), 0, 5); !errors.Is(err, common.ErrInvalidTabSwitchRequest) {
+		t.Fatalf("expected ErrInvalidTabSwitchRequest for count=5, got %v", err)
 	}
-	resSmall, err := cs.RecordTabSwitch(ctx, contest2, user2, uuid.NewString(), 0, 1, "192.0.2.1", "UA")
+	for i := 0; i < 5; i++ {
+		if _, err := cs.RecordTabSwitch(ctx, contest2, user2, uuid.NewString(), 0, 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resAfter, err := cs.RecordTabSwitch(ctx, contest2, user2, uuid.NewString(), 0, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resSmall.TabSwitchCount != 5 || !resSmall.IsTerminated {
-		t.Fatalf("small report cleared termination: %+v", resSmall)
+	if resAfter.TabSwitchCount != 5 || !resAfter.IsTerminated {
+		t.Fatalf("post-termination report altered termination: %+v", resAfter)
 	}
 }
 
@@ -231,7 +235,7 @@ func TestTabSwitchAdminResetGenerationAndDelayedReportsPostgres(t *testing.T) {
 	cs := stores.NewContestStore(db)
 
 	for i := 0; i < 5; i++ {
-		if _, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1, "192.0.2.1", "UA"); err != nil {
+		if _, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -254,7 +258,7 @@ func TestTabSwitchAdminResetGenerationAndDelayedReportsPostgres(t *testing.T) {
 	}
 
 	// Delayed gen-0 report must fail with TabSwitchStaleGenerationError (gen=1) and NOT mutate reset state.
-	_, err = cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 5, "192.0.2.1", "UA")
+	_, err = cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1)
 	var staleErr *common.TabSwitchStaleGenerationError
 	if !errors.As(err, &staleErr) {
 		t.Fatalf("expected TabSwitchStaleGenerationError, got %v", err)
@@ -279,7 +283,7 @@ func TestTabSwitchAdminResetGenerationAndDelayedReportsPostgres(t *testing.T) {
 
 	delayedDone := make(chan error, 1)
 	go func() {
-		_, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 1, 5, "192.0.2.1", "UA")
+		_, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 1, 1)
 		delayedDone <- err
 	}()
 
@@ -294,7 +298,7 @@ func TestTabSwitchAdminResetGenerationAndDelayedReportsPostgres(t *testing.T) {
 	}
 
 	// Report in current generation 2 works normally.
-	okRes, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 2, 1, "192.0.2.1", "UA")
+	okRes, err := cs.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,8 +470,10 @@ func TestUnregisterPostStartBypassRejectedPostgres(t *testing.T) {
 	cs := services.NewContestService(storage, nil)
 
 	// Terminate user first.
-	if _, err := storage.Contests.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 5, "192.0.2.1", "UA"); err != nil {
-		t.Fatal(err)
+	for i := 0; i < 5; i++ {
+		if _, err := storage.Contests.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Attempting unregister via service or store directly after start_time fails with ErrCannotUnregisterAfterStart.
@@ -543,6 +549,8 @@ func TestTabSwitchBoundsTruncationAndHistoryCapPostgres(t *testing.T) {
 		{"empty json", `{}`, http.StatusBadRequest},
 		{"zero count", `{"observation_id":"` + uuid.NewString() + `","generation":0,"count":0}`, http.StatusBadRequest},
 		{"negative count", `{"observation_id":"` + uuid.NewString() + `","generation":0,"count":-5}`, http.StatusBadRequest},
+		{"count two", `{"observation_id":"` + uuid.NewString() + `","generation":0,"count":2}`, http.StatusBadRequest},
+		{"count five", `{"observation_id":"` + uuid.NewString() + `","generation":0,"count":5}`, http.StatusBadRequest},
 		{"int32 max", `{"observation_id":"` + uuid.NewString() + `","generation":0,"count":2147483647}`, http.StatusBadRequest},
 		{"int32 overflow", `{"observation_id":"` + uuid.NewString() + `","generation":0,"count":2147483648}`, http.StatusBadRequest},
 		{"invalid uuid", `{"observation_id":"abc","generation":0,"count":1}`, http.StatusBadRequest},
@@ -557,7 +565,7 @@ func TestTabSwitchBoundsTruncationAndHistoryCapPostgres(t *testing.T) {
 		}
 	}
 
-	// Verify GET /session-status returns clean JSON without is_submitted.
+	// Verify GET /session-status returns clean JSON without is_submitted and remains unlocked after rejected payloads.
 	statusReq := httptest.NewRequest(http.MethodGet, "/contests/"+contest+"/session-status", nil)
 	statusRec := httptest.NewRecorder()
 	e.ServeHTTP(statusRec, statusReq)
@@ -567,11 +575,16 @@ func TestTabSwitchBoundsTruncationAndHistoryCapPostgres(t *testing.T) {
 	if strings.Contains(statusRec.Body.String(), "is_submitted") {
 		t.Fatalf("unexpected dead is_submitted field in response: %s", statusRec.Body.String())
 	}
+	var preStatus dto.CandidateSessionStatusResponse
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &preStatus); err != nil {
+		t.Fatal(err)
+	}
+	if preStatus.TabSwitchCount != 0 || preStatus.IsTabSwitchTerminated {
+		t.Fatalf("rejected payloads mutated registration state: %+v", preStatus)
+	}
 
-	// Verify long multi-byte UA & IP are valid UTF-8 truncated to byte bounds.
-	longUA := strings.Repeat("🔥", 100) // 400 UTF-8 bytes
-	longIP := strings.Repeat("1.2.3.4,", 15)
-	if _, err := storage.Contests.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1, longIP, longUA); err != nil {
+	// Verify tab_switch_history omits raw IP & user_agent metadata.
+	if _, err := storage.Contests.RecordTabSwitch(ctx, contest, user, uuid.NewString(), 0, 1); err != nil {
 		t.Fatal(err)
 	}
 	var rawHist []byte
@@ -582,19 +595,20 @@ func TestTabSwitchBoundsTruncationAndHistoryCapPostgres(t *testing.T) {
 	if err := json.Unmarshal(rawHist, &histEntries); err != nil {
 		t.Fatal(err)
 	}
-	gotUA, _ := histEntries[0]["user_agent"].(string)
-	gotIP, _ := histEntries[0]["ip"].(string)
-	if len(gotUA) > dto.TabSwitchMaxUserAgentBytes || !utf8.ValidString(gotUA) {
-		t.Fatalf("invalid bounded user_agent: len=%d validUTF8=%v", len(gotUA), utf8.ValidString(gotUA))
+	if len(histEntries) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(histEntries))
 	}
-	if len(gotIP) > dto.TabSwitchMaxIPBytes || !utf8.ValidString(gotIP) {
-		t.Fatalf("invalid bounded ip: len=%d validUTF8=%v", len(gotIP), utf8.ValidString(gotIP))
+	if _, hasIP := histEntries[0]["ip"]; hasIP {
+		t.Fatalf("expected ip to be omitted from tab_switch_history: %+v", histEntries[0])
+	}
+	if _, hasUA := histEntries[0]["user_agent"]; hasUA {
+		t.Fatalf("expected user_agent to be omitted from tab_switch_history: %+v", histEntries[0])
 	}
 
 	// Verify tab_switch_history never grows past 100 entries across repeated switches & resets.
 	gen := 0
 	for i := 0; i < 60; i++ {
-		if _, err := storage.Contests.RecordTabSwitch(ctx, contest, user, uuid.NewString(), gen, 1, "192.0.2.1", "UA"); err != nil {
+		if _, err := storage.Contests.RecordTabSwitch(ctx, contest, user, uuid.NewString(), gen, 1); err != nil {
 			t.Fatal(err)
 		}
 		var err error

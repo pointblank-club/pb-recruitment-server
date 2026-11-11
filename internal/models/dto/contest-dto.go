@@ -32,8 +32,6 @@ const (
 const (
 	TabSwitchTerminationThreshold = 5
 	TabSwitchMaxHistoryEntries    = 100
-	TabSwitchMaxIPBytes           = 64
-	TabSwitchMaxUserAgentBytes    = 256
 )
 
 type ContestRegistration struct {
@@ -56,7 +54,7 @@ type ContestRegistration struct {
 type TabSwitchRequest struct {
 	ObservationID string `json:"observation_id" validate:"required,uuid"`
 	Generation    *int   `json:"generation" validate:"required,min=0,max=2147483647"`
-	Count         *int   `json:"count" validate:"required,min=1,max=5"`
+	Count         *int   `json:"count" validate:"required,min=1,max=1"`
 }
 
 // TabSwitchResponse represents the result of ingesting a tab switch event.

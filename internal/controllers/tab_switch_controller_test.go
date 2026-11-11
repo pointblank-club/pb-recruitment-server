@@ -28,7 +28,7 @@ type tabSwitchMockStore struct {
 	unregisterCalled bool
 }
 
-func (s *tabSwitchMockStore) RecordTabSwitch(_ context.Context, _ string, _ string, observationID string, generation int, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error) {
+func (s *tabSwitchMockStore) RecordTabSwitch(_ context.Context, _ string, _ string, observationID string, generation int, count int) (*dto.TabSwitchResponse, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -80,8 +80,6 @@ func (s *tabSwitchMockStore) RecordTabSwitch(_ context.Context, _ string, _ stri
 		"delta":          count,
 		"observation_id": observationID,
 		"generation":     s.generation,
-		"ip":             ip,
-		"user_agent":     userAgent,
 	})
 	return &dto.TabSwitchResponse{
 		TabSwitchCount: s.currentCount,
@@ -238,6 +236,8 @@ func TestRecordTabSwitchValidationAndConflicts(t *testing.T) {
 		{"empty body", `{}`, http.StatusBadRequest},
 		{"zero count", `{"observation_id":"` + testUUID(1) + `","generation":1,"count":0}`, http.StatusBadRequest},
 		{"negative count", `{"observation_id":"` + testUUID(1) + `","generation":1,"count":-1}`, http.StatusBadRequest},
+		{"count = 2", `{"observation_id":"` + testUUID(1) + `","generation":1,"count":2}`, http.StatusBadRequest},
+		{"count = 5", `{"observation_id":"` + testUUID(1) + `","generation":1,"count":5}`, http.StatusBadRequest},
 		{"count > 5", `{"observation_id":"` + testUUID(1) + `","generation":1,"count":6}`, http.StatusBadRequest},
 		{"int32 overflow", `{"observation_id":"` + testUUID(1) + `","generation":1,"count":2147483648}`, http.StatusBadRequest},
 		{"stale generation", `{"observation_id":"` + testUUID(1) + `","generation":0,"count":1}`, http.StatusConflict},

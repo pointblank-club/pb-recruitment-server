@@ -70,10 +70,6 @@ type controllerSubmissionStore struct {
 	created, judged bool
 }
 
-func (s *controllerSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
-	s.created = true
-	return "submission", nil
-}
 func (s *controllerSubmissionStore) CreateCodeSubmission(context.Context, *models.Submission, int64) (string, error) {
 	if s.contests != nil && s.contests.isTerminated {
 		return "", common.ErrTabSwitchTerminated
@@ -138,9 +134,6 @@ type rateLimitedSubmissionStore struct {
 
 func (s *rateLimitedSubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldownSeconds int64) error {
 	return s.rateLimitErr
-}
-func (s *rateLimitedSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
-	return "submission", nil
 }
 func (s *rateLimitedSubmissionStore) CreateCodeSubmission(context.Context, *models.Submission, int64) (string, error) {
 	if s.rateLimitErr != nil {
@@ -220,10 +213,6 @@ type duplicateSubmissionStore struct {
 	*stores.SubmissionStore
 }
 
-func (s *duplicateSubmissionStore) CreateSubmission(context.Context, *models.Submission) (string, error) {
-	// Simulate DB unique constraint violation (concurrent insert race).
-	return "", common.ErrSubmissionAlreadyExists
-}
 func (s *duplicateSubmissionStore) CreateCodeSubmission(context.Context, *models.Submission, int64) (string, error) {
 	return "", common.ErrSubmissionAlreadyExists
 }

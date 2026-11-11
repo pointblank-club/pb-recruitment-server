@@ -799,11 +799,7 @@ func (cc *ContestController) RecordTabSwitch(ctx echo.Context) error {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": common.ErrInvalidTabSwitchRequest.Error()})
 	}
 
-	// Stored purely as bounded audit metadata; never trusted for auth or enforcement decisions.
-	ip := ctx.RealIP()
-	userAgent := ctx.Request().UserAgent()
-
-	res, err := cc.contestService.RecordTabSwitch(ctx.Request().Context(), contestID, userID, req.ObservationID, *req.Generation, *req.Count, ip, userAgent)
+	res, err := cc.contestService.RecordTabSwitch(ctx.Request().Context(), contestID, userID, req.ObservationID, *req.Generation, *req.Count)
 	if err != nil {
 		var staleErr *common.TabSwitchStaleGenerationError
 		if errors.As(err, &staleErr) {

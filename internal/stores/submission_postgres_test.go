@@ -111,16 +111,19 @@ func TestJudgeMCQPostgres(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'MCQ test','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, user); err != nil {
+		t.Fatal(err)
+	}
 	problemStore := stores.NewProblemStore(db)
 	if err := problemStore.CreateProblem(ctx, &models.Problem{ID: problem, ContestID: contest, Name: "Question", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
 		t.Fatal(err)
 	}
 	submissions := stores.NewSubmissionStore(db)
-	id, err := submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
+	id, err := submissions.CreateMCQSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, dupErr := submissions.CreateSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}})
+	_, dupErr := submissions.CreateMCQSubmission(ctx, &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.MCQ, Option: []int{1}}, 0)
 	if !errors.Is(dupErr, common.ErrSubmissionAlreadyExists) {
 		t.Fatalf("expected ErrSubmissionAlreadyExists, got %v", dupErr)
 	}

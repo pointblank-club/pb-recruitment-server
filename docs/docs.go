@@ -4085,7 +4085,7 @@ const docTemplate = `{
             "properties": {
                 "count": {
                     "type": "integer",
-                    "maximum": 5,
+                    "maximum": 1,
                     "minimum": 1
                 },
                 "generation": {

@@ -112,13 +112,6 @@ func (ss *SubmissionService) rateLimitCooldown() int64 {
 	return cooldown
 }
 
-func (ss *SubmissionService) CheckRateLimit(ctx context.Context, userID string) error {
-	if ss == nil || ss.stores == nil || ss.stores.Submissions == nil {
-		return nil
-	}
-	return ss.stores.Submissions.CheckSubmissionRateLimit(ctx, userID, ss.rateLimitCooldown())
-}
-
 func (ss *SubmissionService) JudgeMCQ(ctx context.Context, submissionID string) error {
 	if err := ss.stores.Submissions.JudgeMCQ(ctx, submissionID); err != nil {
 		return ss.markSubmissionFailed(ctx, submissionID, err)

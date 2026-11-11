@@ -308,13 +308,6 @@ func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRowe
 	return submissionID, nil
 }
 
-func (s *SubmissionStore) CreateSubmission(ctx context.Context, sub *models.Submission) (string, error) {
-	if s == nil || s.db == nil {
-		return "", fmt.Errorf("submission store: db is not initialized")
-	}
-	return s.insertSubmission(ctx, s.db, sub)
-}
-
 func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, userID string) error {
 	const lockQ = `
 		SELECT

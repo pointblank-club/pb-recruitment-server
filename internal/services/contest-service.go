@@ -467,7 +467,7 @@ func (cs *ContestService) GetContestRegistrations(ctx context.Context, contestID
 	return cs.stores.Contests.GetContestRegistrations(ctx, contestID)
 }
 
-func (cs *ContestService) RecordTabSwitch(ctx context.Context, contestID string, userID string, observationID string, generation int, count int, ip string, userAgent string) (*dto.TabSwitchResponse, error) {
+func (cs *ContestService) RecordTabSwitch(ctx context.Context, contestID string, userID string, observationID string, generation int, count int) (*dto.TabSwitchResponse, error) {
 	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
 		return nil, fmt.Errorf("contest service: contest store not initialized")
 	}
@@ -479,11 +479,11 @@ func (cs *ContestService) RecordTabSwitch(ctx context.Context, contestID string,
 	if generation < 0 || generation > math.MaxInt32 {
 		return nil, common.ErrInvalidTabSwitchRequest
 	}
-	if count < 1 || count > dto.TabSwitchTerminationThreshold {
+	if count != 1 {
 		return nil, common.ErrInvalidTabSwitchRequest
 	}
 
-	return cs.stores.Contests.RecordTabSwitch(ctx, contestID, userID, parsedUUID.String(), generation, count, ip, userAgent)
+	return cs.stores.Contests.RecordTabSwitch(ctx, contestID, userID, parsedUUID.String(), generation, count)
 }
 
 func (cs *ContestService) GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error) {
