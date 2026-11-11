@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -44,8 +45,16 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 	if sc.judge0Client == nil || !sc.judge0Client.CallbacksEnabled() || !sc.judge0Client.VerifyCallback(id, c.QueryParam("sig"), attempt) {
 		return c.NoContent(http.StatusUnauthorized)
 	}
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		var bodyErr *echo.HTTPError
+		if errors.As(err, &bodyErr) && bodyErr.Code == http.StatusRequestEntityTooLarge {
+			return err
+		}
+		return c.NoContent(http.StatusBadRequest)
+	}
 	var payload judge0.SubmissionStatusResponse
-	if err := json.NewDecoder(c.Request().Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return c.NoContent(http.StatusBadRequest)
 	}
 	if payload.Token == "" || payload.Status.ID < 1 || payload.Status.ID > 14 {
@@ -182,6 +191,7 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        request body dto.SubmitSubmissionRequest true "Submission details"
+// @Param        Idempotency-Key header string false "UUID reused only for retries of the same code submission"
 // @Success      201 {object} dto.SubmitSubmissionResponse
 // @Failure      400 {object} middleware.ValidationErrors "Bad request: JSON object with either an errors array (field validation) or an error string (malformed input or handler validation)"
 // @Failure      401 {object} map[string]string "Unauthorized"
@@ -201,6 +211,22 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "Internal error: SubmitSubmissionRequest DTO not found in context",
 		})
+	}
+
+	req.RequestID = ctx.Request().Header.Get("Idempotency-Key")
+	if req.RequestID != "" {
+		if _, err := uuid.Parse(req.RequestID); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "Idempotency-Key must be a UUID"})
+		}
+	}
+	if id, err := sc.submissionService.ReplaySubmission(reqCtx, userID, req); err != nil {
+		if errors.Is(err, common.ErrIdempotencyConflict) {
+			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		}
+		ctx.Response().Header().Set(echo.HeaderRetryAfter, "5")
+		return ctx.NoContent(http.StatusServiceUnavailable)
+	} else if id != "" {
+		return ctx.JSON(http.StatusCreated, dto.SubmitSubmissionResponse{SubmissionID: id})
 	}
 
 	contest_response, err := sc.contestService.GetContest(reqCtx, req.ContestID, userID)
@@ -232,13 +258,19 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		if errors.Is(err, common.ContestNotRunningError) || errors.Is(err, common.ErrTabSwitchTerminated) {
 			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 		}
-		if errors.Is(err, common.KeyAlreadyExistsError) || errors.Is(err, common.ErrSubmissionAlreadyExists) {
+		if errors.Is(err, common.KeyAlreadyExistsError) || errors.Is(err, common.ErrSubmissionAlreadyExists) || errors.Is(err, common.ErrIdempotencyConflict) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 		}
 		if errors.Is(err, common.ErrUnsupportedLanguage) || errors.Is(err, common.ErrNoTestcases) || errors.Is(err, common.ErrInvalidCode) {
 			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 		}
 		if errors.Is(err, common.ErrRateLimitExceeded) {
+			retryAfter := int64(5)
+			var cooldown *common.SubmissionCooldownError
+			if errors.As(err, &cooldown) {
+				retryAfter = cooldown.RetryAfter
+			}
+			ctx.Response().Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
 			return ctx.JSON(http.StatusTooManyRequests, map[string]string{
 				"error": err.Error(),
 			})
@@ -252,7 +284,7 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 				hub.CaptureException(err)
 			})
 		}
-		return ctx.NoContent(http.StatusInternalServerError)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "Submission could not be confirmed. Check your submission history before trying again."})
 	}
 
 	if submissionType == models.MCQ {

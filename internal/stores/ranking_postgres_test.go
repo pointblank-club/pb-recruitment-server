@@ -61,7 +61,7 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 	}
 
 	// Code submission for user1 (accepted)
-	codeSub1, err := subStore.CreateCodeSubmission(ctx, &models.Submission{UserID: user1, ContestID: contest, ProblemID: codeProblem, Type: models.Code}, 0)
+	codeSub1, _ := executionSubmission(t, db, user1, contest, codeProblem, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,6 @@ func TestConsolidatedLeaderboardRankZeroOrderingPostgres(t *testing.T) {
 		t.Errorf("entry 3: expected userUnranked at the bottom with rank 4, got user %s rank %d", lb.Entries[3].UserID, lb.Entries[3].Rank)
 	}
 }
-
 
 func TestUpdateLeaderboardUserParticipantValidationPostgres(t *testing.T) {
 	db := postgresTestDB(t)

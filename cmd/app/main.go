@@ -6,6 +6,7 @@ import (
 	"app/internal/controllers"
 	"app/internal/db"
 	"app/internal/judge0"
+	"app/internal/middleware"
 	"app/internal/routes"
 	"app/internal/s3"
 	"app/internal/services"
@@ -66,6 +67,7 @@ func main() {
 			db.NewDBConn,
 			s3.NewS3Client,
 			judge0.NewClient,
+			middleware.NewRequestLimiter,
 		),
 		fx.Invoke(routes.AddUserRoutes),
 		fx.Invoke(routes.AddContestRoutes),
@@ -73,6 +75,7 @@ func main() {
 		fx.Invoke(services.NewJudge0Recovery),
 		fx.Invoke(services.NewDolosWorker),
 		fx.Invoke(routes.AddAdminRoutes),
+		fx.Invoke(middleware.AddRequestLimits),
 		fx.Invoke(internal.StartEchoServer),
 	)
 	if code := run(app); code != 0 {

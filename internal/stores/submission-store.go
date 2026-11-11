@@ -346,39 +346,6 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 	return nil
 }
 
-func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error) {
-	if s == nil || s.db == nil {
-		return "", fmt.Errorf("submission store: db is not initialized")
-	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", fmt.Errorf("begin code submission tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID); err != nil {
-		return "", err
-	}
-
-	if cooldownSeconds > 0 {
-		if err := checkSubmissionRateLimit(ctx, tx, sub.UserID, cooldownSeconds); err != nil {
-			return "", err
-		}
-	}
-
-	submissionID, err := s.insertSubmission(ctx, tx, sub)
-	if err != nil {
-		return "", err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("commit code submission: %w", err)
-	}
-
-	return submissionID, nil
-}
-
 func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.Submission, cooldownSeconds int64) (string, error) {
 	if s == nil || s.db == nil {
 		return "", fmt.Errorf("submission store: db is not initialized")
@@ -606,7 +573,7 @@ func (s *SubmissionStore) PendingCodeWithoutExecutions(ctx context.Context, cuto
 
 func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID string, cooldownSeconds int64) error {
 	if s == nil || s.db == nil {
-		return nil
+		return fmt.Errorf("submission database unavailable")
 	}
 
 	if cooldownSeconds <= 0 {
@@ -618,6 +585,7 @@ func (s *SubmissionStore) CheckSubmissionRateLimit(ctx context.Context, userID s
 
 func checkSubmissionRateLimit(ctx context.Context, exec interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, userID string, cooldownSeconds int64) error {
 	// Conflict updates must sample the clock after acquiring the row lock.
 	const q = `
@@ -639,7 +607,11 @@ func checkSubmissionRateLimit(ctx context.Context, exec interface {
 	}
 
 	if affected == 0 {
-		return common.ErrRateLimitExceeded
+		var remaining int64
+		if err := exec.QueryRowContext(ctx, `SELECT GREATEST(1,$2-(floor(extract(epoch from clock_timestamp()))::bigint-last_submission_at)) FROM submission_rate_limits WHERE user_id=$1`, userID, cooldownSeconds).Scan(&remaining); err != nil {
+			return fmt.Errorf("read remaining submission cooldown: %w", err)
+		}
+		return &common.SubmissionCooldownError{RetryAfter: remaining}
 	}
 
 	return nil

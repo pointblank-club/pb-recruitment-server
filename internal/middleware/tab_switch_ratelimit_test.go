@@ -31,6 +31,9 @@ func TestTabSwitchRateLimiter(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected handler error: %v", err)
 		}
+		if rec.Code == http.StatusTooManyRequests && rec.Header().Get(echo.HeaderRetryAfter) != "1" {
+			t.Fatal("missing retry delay", rec.Header())
+		}
 		return rec.Code
 	}
 
