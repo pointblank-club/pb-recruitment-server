@@ -79,7 +79,7 @@ type dolosSource struct {
 var errDolosArchiveTooLarge = errors.New("Dolos archive exceeds 10 MB limit")
 
 func NewDolosService(db *sql.DB, objectStore *s3.S3) *DolosService {
-	base := strings.TrimRight(os.Getenv("DOLOS_API_URL"), "/")
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("DOLOS_API_URL")), "/")
 	return &DolosService{
 		db:         db,
 		s3:         objectStore,
@@ -258,6 +258,9 @@ func (d *DolosService) contestEvidenceCurrent(ctx context.Context, contestID str
 }
 
 func (d *DolosService) GetPairsWithMeta(ctx context.Context, contestID string, page int) ([]dto.PlagiarismPair, int, bool, error) {
+	if d.baseURL == "" {
+		return nil, 0, false, common.ErrDolosUnavailable
+	}
 	if page < 0 {
 		page = 0
 	}
@@ -542,6 +545,9 @@ func (c *dolosCSVReader) getCol(names ...string) (int, bool) {
 }
 
 func (d *DolosService) openReportPairsCSV(ctx context.Context, reportID string) (*dolosCSVReader, error) {
+	if d.baseURL == "" {
+		return nil, common.ErrDolosUnavailable
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.baseURL+"/reports/"+url.PathEscape(reportID)+"/data/pairs.csv", nil)
 	if err != nil {
 		return nil, err

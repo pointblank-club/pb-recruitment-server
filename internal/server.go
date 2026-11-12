@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	_ "app/docs"
@@ -20,6 +21,7 @@ import (
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
+	"golang.org/x/time/rate"
 )
 
 func NewEchoServer(
@@ -29,6 +31,19 @@ func NewEchoServer(
 	// Create these before requests: SDK v0.44 reads shared client metadata without locking.
 	meter := sentry.NewMeter(context.Background())
 	logger := sentry.NewLogger(context.Background())
+	// Route templates bound this map; repeated overloads remain counted by metrics.
+	var reportMu sync.Mutex
+	overloadReports := make(map[string]*rate.Limiter)
+	allowOverloadReport := func(route string) bool {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+		limiter := overloadReports[route]
+		if limiter == nil {
+			limiter = rate.NewLimiter(rate.Every(time.Minute), 1)
+			overloadReports[route] = limiter
+		}
+		return limiter.Allow()
+	}
 	e := echo.New()
 	middleware.ConfigureRequestBounds(e)
 	e.Use(mdw.Recover())
@@ -83,12 +98,21 @@ func NewEchoServer(
 			}
 
 			err := next(c)
+			status = c.Response().Status
+			if err != nil && !c.Response().Committed {
+				status = http.StatusInternalServerError
+				var he *echo.HTTPError
+				if errors.As(err, &he) {
+					status = he.Code
+				}
+			}
+			reportStatus := status != http.StatusServiceUnavailable || allowOverloadReport(c.Path())
 
 			if hub != nil && hub.LastEventID() == previousEventID {
 				if err != nil {
 					var he *echo.HTTPError
 					if errors.As(err, &he) {
-						if he.Code >= 500 {
+						if he.Code >= 500 && reportStatus {
 							hub.WithScope(func(scope *sentry.Scope) {
 								scope.SetTag("error_type", "http_error")
 								scope.SetTag("status_code", fmt.Sprintf("%d", he.Code))
@@ -101,10 +125,11 @@ func NewEchoServer(
 							hub.CaptureException(err)
 						})
 					}
-				} else if c.Response().Status >= 500 {
+				} else if c.Response().Status >= 500 && reportStatus {
 					hub.WithScope(func(scope *sentry.Scope) {
 						scope.SetLevel(sentry.LevelError)
 						scope.SetTag("error_type", "server_error_status")
+						scope.SetFingerprint([]string{"http-status", c.Request().Method, c.Path(), fmt.Sprint(status)})
 						scope.SetTag("status_code", fmt.Sprintf("%d", c.Response().Status))
 						hub.CaptureMessage(fmt.Sprintf("HTTP %d on %s %s", c.Response().Status, c.Request().Method, c.Path()))
 					})
@@ -113,15 +138,12 @@ func NewEchoServer(
 
 			// Only sampled requests and server failures need a remote request log.
 			span := sentryecho.GetSpanFromContext(c)
-			status = c.Response().Status
-			if err != nil && !c.Response().Committed {
-				status = http.StatusInternalServerError
-				var he *echo.HTTPError
-				if errors.As(err, &he) {
-					status = he.Code
-				}
+
+			reportLog := span != nil && (span.Sampled == sentry.SampledTrue || status >= 500)
+			if status == http.StatusServiceUnavailable {
+				reportLog = reportStatus
 			}
-			if span != nil && c.Path() != "" && c.Path() != "/health" && c.Request().Method != echo.OPTIONS && (span.Sampled == sentry.SampledTrue || status >= 500) {
+			if span != nil && c.Path() != "" && c.Path() != "/health" && c.Request().Method != echo.OPTIONS && reportLog {
 				entry := logger.Info().WithCtx(span.Context())
 				if status >= 500 {
 					entry = logger.Error().WithCtx(span.Context())

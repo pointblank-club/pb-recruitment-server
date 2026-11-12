@@ -365,3 +365,61 @@ func TestSentryConcurrentRequests(t *testing.T) {
 		t.Fatalf("missing telemetry: traces=%d logs=%d metrics=%d", traces, logs, metrics)
 	}
 }
+
+func TestOverloadReportsAreBoundedWithoutLosingMetrics(t *testing.T) {
+	previous := sentry.CurrentHub().Client()
+	tr := &capturedSentryEvents{}
+	var logs, metrics int
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "http://public@127.0.0.1:1/1", Transport: tr, EnableTracing: true, TracesSampleRate: 1, EnableLogs: true,
+		BeforeSendLog:    func(entry *sentry.Log) *sentry.Log { logs++; return entry },
+		BeforeSendMetric: func(entry *sentry.Metric) *sentry.Metric { metrics++; return entry },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { client.Close(); sentry.CurrentHub().BindClient(previous) }()
+	sentry.CurrentHub().BindClient(client)
+	e := NewEchoServer(nil, nil)
+	for _, route := range []string{"/synthetic/a", "/synthetic/b"} {
+		e.GET(route, func(c echo.Context) error { return c.NoContent(503) })
+	}
+	for _, route := range []string{"/synthetic/a", "/synthetic/a", "/synthetic/a", "/synthetic/b"} {
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, httptest.NewRequest("GET", route, nil))
+		if w.Code != 503 {
+			t.Fatal(w.Code)
+		}
+	}
+	if logs != 2 || metrics != 4 {
+		t.Fatalf("logs=%d metrics=%d", logs, metrics)
+	}
+	var events []*sentry.Event
+	for _, event := range tr.events {
+		if event.Type != "transaction" {
+			events = append(events, event)
+		}
+	}
+	if len(events) != 2 {
+		t.Fatalf("events=%d", len(events))
+	}
+	if len(events[0].Fingerprint) != 4 || events[0].Fingerprint[2] == events[1].Fingerprint[2] {
+		t.Fatal("routes do not have distinct fingerprints")
+	}
+	e.GET("/synthetic/actual", func(c echo.Context) error {
+		sentryecho.GetHubFromContext(c).CaptureException(errors.New("synthetic underlying failure"))
+		return c.NoContent(503)
+	})
+	for range 2 {
+		e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/synthetic/actual", nil))
+	}
+	errorsCaptured := 0
+	for _, event := range tr.events {
+		if len(event.Exception) > 0 {
+			errorsCaptured++
+		}
+	}
+	if errorsCaptured != 2 {
+		t.Fatalf("underlying exceptions suppressed: %d", errorsCaptured)
+	}
+}

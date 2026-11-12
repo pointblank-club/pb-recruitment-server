@@ -1,6 +1,7 @@
 package services
 
 import (
+	"app/internal/common"
 	"app/internal/s3"
 	"container/heap"
 	"context"
@@ -384,5 +385,16 @@ func TestMakeArchiveChecksFinalizedSize(t *testing.T) {
 	}
 	if reads.Load() != int32(len(sources)) {
 		t.Fatalf("archive rejected before finalization: reads=%d", reads.Load())
+	}
+}
+
+func TestDolosUnconfiguredPairs(t *testing.T) {
+	t.Setenv("DOLOS_API_URL", "")
+	service := NewDolosService(nil, nil)
+	if _, _, _, err := service.GetPairsWithMeta(context.Background(), "synthetic", 0); !errors.Is(err, common.ErrDolosUnavailable) {
+		t.Fatalf("missing unavailable error: %v", err)
+	}
+	if _, err := service.openReportPairsCSV(context.Background(), "synthetic"); !errors.Is(err, common.ErrDolosUnavailable) {
+		t.Fatalf("missing unavailable error: %v", err)
 	}
 }

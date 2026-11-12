@@ -17,7 +17,9 @@ and `STAGE` to the environment name.
 
 Traces sample 5% of routed requests, excluding health checks and OPTIONS.
 Structured request logs include route, method, status and duration for sampled
-requests and all non-panic 5xx responses. They share trace IDs. Existing console
+requests and non-panic 5xx responses. Repeated 503 status reports and logs
+are limited to one per route per minute per process; duration metrics still
+count every request. Captured underlying exceptions are retained. They share trace IDs. Existing console
 logs are not forwarded. Traces and logs exclude user identity and request data.
 
 The `http.server.duration` distribution records every completed API request in
@@ -35,6 +37,9 @@ Worker panics are reported, flushed for up to two seconds, and re-panicked so
 the process supervisor can restart the service. Ensure automatic restart is
 enabled in the deployment. Normal shutdown drains HTTP requests and stops
 workers before the final bounded flush; lifecycle errors also flush before exit.
+
+Dolos pair retrieval returns 503 when `DOLOS_API_URL` is unset. Set it to the
+intended provider API root and restart to enable automatic analysis.
 
 ## API Documentation (Swagger)
 
