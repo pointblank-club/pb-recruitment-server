@@ -257,7 +257,7 @@ type queryRower interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRower, sub *models.Submission) (string, error) {
+func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRower, sub *models.Submission, admissionSlot *int) (string, error) {
 	sub.ID = uuid.NewString()
 	sub.CreatedAt = time.Now().Unix()
 
@@ -272,8 +272,8 @@ func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRowe
 
 	const q = `
 		INSERT INTO 
-		submissions (id, user_id, contest_id, problem_id, type, language, choices, status, created_at, runtime, memory)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		submissions (id, user_id, contest_id, problem_id, type, language, choices, status, created_at, runtime, memory, admission_slot)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id
 	`
 
@@ -290,6 +290,7 @@ func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRowe
 		sub.CreatedAt,
 		sub.Runtime,
 		sub.Memory,
+		admissionSlot,
 	).Scan(&submissionID)
 
 	if err != nil {
@@ -386,7 +387,7 @@ func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.S
 		}
 	}
 
-	submissionID, err := s.insertSubmission(ctx, tx, sub)
+	submissionID, err := s.insertSubmission(ctx, tx, sub, nil)
 	if err != nil {
 		return "", err
 	}

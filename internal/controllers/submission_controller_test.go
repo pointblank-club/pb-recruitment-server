@@ -9,9 +9,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -360,5 +364,49 @@ func TestCodeSubmissionRetryReturnsOriginalWithoutContestLookup(t *testing.T) {
 		if tc.want == 201 && !strings.Contains(w.Body.String(), "original") {
 			t.Fatal(w.Body.String())
 		}
+	}
+}
+
+func TestSubmitSolutionTransientFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		registration bool
+		failure      error
+	}{
+		{"registration timeout", true, fmt.Errorf("database query: %w", context.DeadlineExceeded)},
+		{"admission timeout", false, context.DeadlineExceeded},
+		{"connection exhaustion", false, &pgconn.PgError{Code: "53300"}},
+		{"database restart", true, &pgconn.PgError{Code: "57P01"}},
+		{"connection refused", true, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}},
+		{"connection reset", false, &net.OpError{Op: "read", Net: "tcp", Err: syscall.ECONNRESET}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now().UnixMilli()
+			contest := submissionContestStore{contest: models.Contest{StartTime: now - 60000, EndTime: now + 60000}, registered: true}
+			submissions := &rateLimitedSubmissionStore{}
+			if tc.registration {
+				contest.err = tc.failure
+			} else {
+				submissions.rateLimitErr = tc.failure
+			}
+			storage := &stores.Storage{Contests: contest, Problems: submissionProblemStore{}, Submissions: submissions}
+			controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil), nil)
+			w := httptest.NewRecorder()
+			c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/submit", nil), w)
+			c.Set(common.AUTH_USER_ID, "user")
+			c.Set(common.VALIDATED_REQUEST_BODY, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: models.MCQ, Option: []int{1}})
+			if err := controller.SubmitSolution(c); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 503 || w.Header().Get("Retry-After") != "1" || !strings.Contains(w.Body.String(), `"error"`) {
+				t.Fatal(w.Code, w.Header(), w.Body.String())
+			}
+			if strings.Contains(w.Body.String(), tc.failure.Error()) {
+				t.Fatal("database details exposed")
+			}
+		})
+	}
+	if submissionTemporarilyUnavailable(&pgconn.PgError{Code: "42601"}) {
+		t.Fatal("SQL bugs must not be disguised as transient overload")
 	}
 }

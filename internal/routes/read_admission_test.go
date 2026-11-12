@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -73,7 +74,9 @@ func TestUnauthenticatedReadsDoNotUseDatabaseAdmission(t *testing.T) {
 	}
 	// The independent signup budget must still fail closed before any Firebase work.
 	w := httptest.NewRecorder()
-	e.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/auth/signup", nil))
+	request := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(signupAdmissionBody))
+	request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(w, request)
 	if w.Code != http.StatusServiceUnavailable || limiter.calls.Load() != 1 {
 		t.Fatal("signup bypassed shared admission", w.Code, limiter.calls.Load())
 	}

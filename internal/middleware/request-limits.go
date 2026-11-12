@@ -15,6 +15,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/gommon/log"
 )
 
 // RequestLimiter shares budgets across API processes and restarts.
@@ -83,6 +84,7 @@ func LimitRequests(limiter RequestLimiter, budget string, limit, seconds int) ec
 			}
 			retry, err := limiter.Allow(c.Request().Context(), budget+":"+key, limit, seconds)
 			if err != nil {
+				log.Errorf("request admission %s unavailable: %v", budget, err)
 				c.Response().Header().Set(echo.HeaderRetryAfter, "5")
 				return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "request admission unavailable"})
 			}
@@ -90,6 +92,80 @@ func LimitRequests(limiter RequestLimiter, budget string, limit, seconds int) ec
 				c.Response().Header().Set(echo.HeaderRetryAfter, strconv.Itoa(retry))
 				return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "too many requests; wait before retrying"})
 			}
+			return next(c)
+		}
+	}
+}
+
+// SubmissionBurstLimit rejects repeated clicks before they contend on shared SQL budgets.
+func SubmissionBurstLimit() echo.MiddlewareFunc {
+	return newSubmissionBurstLimitWithLimiter(newUserRateLimiter(4, 1, nil))
+}
+
+func newSubmissionBurstLimitWithLimiter(limiter *userRateLimiter) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			uid, _ := c.Get(common.AUTH_USER_ID).(string)
+			if uid == "" {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+			}
+			// shortcut: this fast guard is process-local; the SQL budget remains the shared authority.
+			if !limiter.allow(uid) {
+				c.Response().Header().Set(echo.HeaderRetryAfter, "1")
+				return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "too many submission requests; wait before retrying"})
+			}
+			return next(c)
+		}
+	}
+}
+
+// SignupCapacity allows a campus burst to wait without unbounded Firebase or SQL work.
+// shortcut: slots are process-local; share worker admission before adding API replicas.
+func SignupCapacity() echo.MiddlewareFunc {
+	return newSignupCapacity(8, 100, 20*time.Second, 20*time.Second)
+}
+
+func newSignupCapacity(activeLimit, totalLimit int, wait, work time.Duration) echo.MiddlewareFunc {
+	active, admitted := make(chan struct{}, activeLimit), make(chan struct{}, totalLimit)
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			ctx := c.Request().Context()
+			cancelled := func() error {
+				return c.JSON(http.StatusRequestTimeout, map[string]string{"error": "signup request cancelled"})
+			}
+			if ctx.Err() != nil {
+				return cancelled()
+			}
+			busy := func() error {
+				c.Response().Header().Set(echo.HeaderRetryAfter, "1")
+				return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "signup capacity busy; wait before retrying"})
+			}
+			select {
+			case admitted <- struct{}{}:
+				defer func() { <-admitted }()
+			default:
+				return busy()
+			}
+			deadline := time.Now().Add(wait)
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case active <- struct{}{}:
+				defer func() { <-active }()
+			case <-ctx.Done():
+				return cancelled()
+			case <-timer.C:
+				return busy()
+			}
+			if ctx.Err() != nil {
+				return cancelled()
+			}
+			if !time.Now().Before(deadline) {
+				return busy()
+			}
+			workCtx, cancelWork := context.WithTimeout(ctx, work)
+			defer cancelWork()
+			c.SetRequest(c.Request().WithContext(workCtx))
 			return next(c)
 		}
 	}
