@@ -858,7 +858,7 @@ func (d *DolosService) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := d.process(ctx); err != nil {
-				log.Errorf("Dolos worker: %v", err)
+				log.Errorf("Dolos worker: %v", common.RedactReportURLs(err.Error()))
 				hub := sentry.CurrentHub().Clone()
 				hub.WithScope(func(scope *sentry.Scope) {
 					scope.SetTag("worker", "dolos")
@@ -924,7 +924,7 @@ func (d *DolosService) process(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err := d.processContest(ctx, c.id, c.endTime); err != nil {
-			log.Errorf("Dolos contest %s: %v", c.id, err)
+			log.Errorf("Dolos contest %s: %v", c.id, common.RedactReportURLs(err.Error()))
 		}
 	}
 

@@ -51,6 +51,8 @@ func NewEchoServer(
 		Repanic: true,
 	}))
 
+	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
+
 	// Enrich Sentry scope with route tags and capture unhandled 5xx errors
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -58,9 +60,12 @@ func NewEchoServer(
 			status := http.StatusOK
 			defer func() {
 				recovered := recover()
-				if recovered != nil {
+				if recovered != nil && !c.Response().Committed {
 					status = http.StatusInternalServerError
 					c.Response().Status = status
+				}
+				if c.Response().Committed {
+					status = c.Response().Status
 				}
 				if span := sentryecho.GetSpanFromContext(c); span != nil && c.Path() != "/health" && c.Request().Method != echo.OPTIONS {
 					route := c.Path()
@@ -101,21 +106,27 @@ func NewEchoServer(
 			status = c.Response().Status
 			if err != nil && !c.Response().Committed {
 				status = http.StatusInternalServerError
-				var he *echo.HTTPError
-				if errors.As(err, &he) {
+				// Match Echo's default handler: wrapped HTTP errors become 500.
+				if he, ok := err.(*echo.HTTPError); ok {
 					status = he.Code
+					if inner, ok := he.Internal.(*echo.HTTPError); ok {
+						status = inner.Code
+					}
 				}
 			}
-			reportStatus := status != http.StatusServiceUnavailable || allowOverloadReport(c.Path())
+			reportStatus := status != http.StatusServiceUnavailable || allowOverloadReport(c.Request().Method+" "+c.Path())
 
 			if hub != nil && hub.LastEventID() == previousEventID {
 				if err != nil {
 					var he *echo.HTTPError
 					if errors.As(err, &he) {
-						if he.Code >= 500 && reportStatus {
+						if he.Internal != nil && status >= 500 {
+							hub.CaptureException(he.Internal)
+						} else if status >= 500 && reportStatus {
 							hub.WithScope(func(scope *sentry.Scope) {
+								scope.SetFingerprint([]string{"http-status", c.Request().Method, c.Path(), fmt.Sprint(status)})
 								scope.SetTag("error_type", "http_error")
-								scope.SetTag("status_code", fmt.Sprintf("%d", he.Code))
+								scope.SetTag("status_code", fmt.Sprintf("%d", status))
 								hub.CaptureException(err)
 							})
 						}
@@ -155,7 +166,6 @@ func NewEchoServer(
 		}
 	})
 
-	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: []string{
 			"https://recruitment.pointblank.club",

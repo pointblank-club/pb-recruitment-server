@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +67,11 @@ func TestSentryHTTPReportsOnceWithoutRequestSecrets(t *testing.T) {
 		{"validation", 400, 0, func(c echo.Context) error { return echo.NewHTTPError(400) }},
 		{"generic 5xx", 503, 1, func(c echo.Context) error { return c.NoContent(503) }},
 		{"returned 5xx", 500, 1, func(c echo.Context) error { return echo.NewHTTPError(500) }},
+		{"returned underlying 503", 503, 1, func(c echo.Context) error {
+			return echo.NewHTTPError(503).SetInternal(errors.New("synthetic store failure"))
+		}},
+		{"wrapped HTTP error", 500, 1, func(c echo.Context) error { return fmt.Errorf("wrapped: %w", echo.NewHTTPError(503)) }},
+		{"committed panic", 202, 1, func(c echo.Context) error { c.NoContent(202); panic("synthetic panic") }},
 		{"unexpected error", 500, 1, func(c echo.Context) error { return errors.New("synthetic failure") }},
 		{"captured 5xx", 500, 1, func(c echo.Context) error {
 			sentryecho.GetHubFromContext(c).CaptureException(errors.New("synthetic store failure"))
@@ -280,6 +287,8 @@ func TestSentryMetricsCoverUnsampledRequests(t *testing.T) {
 		{"5xx", "POST", "/synthetic/private-id", "/synthetic/:id", 503, func(c echo.Context) error { return c.NoContent(503) }, true},
 		{"returned error", "POST", "/synthetic/private-id", "/synthetic/:id", 500, func(c echo.Context) error { return errors.New("synthetic failure") }, true},
 		{"panic", "POST", "/synthetic/private-id", "/synthetic/:id", 500, func(c echo.Context) error { panic("synthetic failure") }, true},
+		{"committed panic", "POST", "/synthetic/private-id", "/synthetic/:id", 202, func(c echo.Context) error { c.NoContent(202); panic("synthetic committed panic") }, true},
+		{"wrapped HTTP error", "POST", "/synthetic/private-id", "/synthetic/:id", 500, func(c echo.Context) error { return fmt.Errorf("wrapped: %w", echo.NewHTTPError(503)) }, true},
 		{"unmatched", "GET", "/private-path?token=secret", "unmatched", 404, nil, true},
 		{"health", "GET", "/health", "/health", 200, nil, false},
 		{"preflight", "OPTIONS", "/synthetic/private-id", "/synthetic/:id", 204, func(c echo.Context) error { return c.NoContent(204) }, false},
@@ -421,5 +430,64 @@ func TestOverloadReportsAreBoundedWithoutLosingMetrics(t *testing.T) {
 	}
 	if errorsCaptured != 2 {
 		t.Fatalf("underlying exceptions suppressed: %d", errorsCaptured)
+	}
+}
+
+func TestConcurrentOverloadsKeepReturnedCausesAndMethodBudgets(t *testing.T) {
+	previous := sentry.CurrentHub().Client()
+	tr := &capturedSentryEvents{}
+	var metrics, logs atomic.Int64
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "http://public@127.0.0.1:1/1", Transport: tr, EnableLogs: true,
+		BeforeSendMetric: func(m *sentry.Metric) *sentry.Metric { metrics.Add(1); return m },
+		BeforeSendLog:    func(l *sentry.Log) *sentry.Log { logs.Add(1); return l },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { client.Close(); sentry.CurrentHub().BindClient(previous) }()
+	sentry.CurrentHub().BindClient(client)
+	e := NewEchoServer(nil, nil)
+	e.Logger.SetOutput(io.Discard)
+	e.GET("/overload/:id", func(c echo.Context) error { return c.NoContent(503) })
+	e.POST("/overload/:id", func(c echo.Context) error { return echo.NewHTTPError(503) })
+	e.GET("/cause", func(c echo.Context) error {
+		return echo.NewHTTPError(503).SetInternal(errors.New("synthetic underlying failure"))
+	})
+	var wg sync.WaitGroup
+	for i := 0; i < 600; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			e.ServeHTTP(w, httptest.NewRequest("GET", "/overload/item", nil))
+			if w.Code != 503 {
+				t.Errorf("status=%d", w.Code)
+			}
+		}()
+	}
+	wg.Wait()
+	e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/overload/item", nil))
+	for range 2 {
+		e.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/cause", nil))
+	}
+	if metrics.Load() != 603 || logs.Load() != 3 {
+		t.Fatalf("metrics=%d logs=%d", metrics.Load(), logs.Load())
+	}
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	var generic, causes int
+	for _, event := range tr.events {
+		if event.Type != "" {
+			continue
+		}
+		if len(event.Exception) > 0 && strings.Contains(fmt.Sprint(event.Exception), "synthetic underlying failure") {
+			causes++
+		} else {
+			generic++
+		}
+	}
+	if generic != 2 || causes != 2 {
+		t.Fatalf("generic=%d causes=%d", generic, causes)
 	}
 }

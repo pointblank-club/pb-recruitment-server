@@ -1,6 +1,8 @@
 package boot
 
 import (
+	"app/internal/common"
+	"github.com/getsentry/sentry-go/attribute"
 	"log"
 	"os"
 	"strings"
@@ -41,7 +43,18 @@ func InitSentry() error {
 		TracesSampler:    sampleSentryTrace,
 		EnableLogs:       true,
 		BeforeSendLog: func(entry *sentry.Log) *sentry.Log {
-			for key := range entry.Attributes {
+			entry.Body = common.RedactReportURLs(entry.Body)
+			for key, value := range entry.Attributes {
+				if value.Type() == attribute.STRING {
+					entry.Attributes[key] = attribute.StringValue(common.RedactReportURLs(value.AsString()))
+				}
+				if value.Type() == attribute.STRINGSLICE {
+					values := value.AsStringSlice()
+					for i := range values {
+						values[i] = common.RedactReportURLs(values[i])
+					}
+					entry.Attributes[key] = attribute.StringSliceValue(values)
+				}
 				if strings.HasPrefix(key, "user.") {
 					delete(entry.Attributes, key)
 				}
@@ -69,6 +82,28 @@ func InitSentry() error {
 }
 
 func scrubSentryRequest(event *sentry.Event, _ *sentry.EventHint) *sentry.Event {
+	event.Message = common.RedactReportURLs(event.Message)
+	for i := range event.Exception {
+		event.Exception[i].Value = common.RedactReportURLs(event.Exception[i].Value)
+	}
+	event.Breadcrumbs = append([]*sentry.Breadcrumb(nil), event.Breadcrumbs...)
+	for i, breadcrumb := range event.Breadcrumbs {
+		if breadcrumb == nil {
+			continue
+		}
+		// Scope breadcrumbs may be shared by concurrent events.
+		copy := *breadcrumb
+		copy.Message = common.RedactReportURLs(copy.Message)
+		copy.Data, _ = scrubReportData(copy.Data, 0).(map[string]interface{})
+		event.Breadcrumbs[i] = &copy
+	}
+	event.Extra, _ = scrubReportData(event.Extra, 0).(map[string]interface{})
+	for key, value := range event.Contexts {
+		event.Contexts[key] = sentry.Context(scrubReportData(map[string]interface{}(value), 0).(map[string]interface{}))
+	}
+	for key, value := range event.Tags {
+		event.Tags[key] = common.RedactReportURLs(value)
+	}
 	if event.Type == "transaction" {
 		event.Request = nil
 		event.User = sentry.User{}
@@ -76,7 +111,7 @@ func scrubSentryRequest(event *sentry.Event, _ *sentry.EventHint) *sentry.Event 
 		return event
 	}
 	if event.Request != nil {
-		event.Request = &sentry.Request{URL: event.Request.URL, Method: event.Request.Method}
+		event.Request = &sentry.Request{URL: common.RedactReportURLs(event.Request.URL), Method: event.Request.Method}
 	}
 	return event
 }
@@ -94,4 +129,44 @@ func sampleSentryTrace(ctx sentry.SamplingContext) float64 {
 		return 0
 	}
 	return 0.05
+}
+
+func scrubReportData(value interface{}, depth int) interface{} {
+	// Bound arbitrary scope data, including cyclic maps.
+	if depth >= 16 {
+		return "[redacted]"
+	}
+	switch value := value.(type) {
+	case string:
+		return common.RedactReportURLs(value)
+	case map[string]interface{}:
+		if value == nil {
+			return value
+		}
+		out := make(map[string]interface{}, len(value))
+		for key, item := range value {
+			out[key] = scrubReportData(item, depth+1)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(value))
+		for key, item := range value {
+			out[key] = common.RedactReportURLs(item)
+		}
+		return out
+	case []string:
+		out := make([]string, len(value))
+		for i, item := range value {
+			out[i] = common.RedactReportURLs(item)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(value))
+		for i, item := range value {
+			out[i] = scrubReportData(item, depth+1)
+		}
+		return out
+	default:
+		return value
+	}
 }

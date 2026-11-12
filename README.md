@@ -18,9 +18,10 @@ and `STAGE` to the environment name.
 Traces sample 5% of routed requests, excluding health checks and OPTIONS.
 Structured request logs include route, method, status and duration for sampled
 requests and non-panic 5xx responses. Repeated 503 status reports and logs
-are limited to one per route per minute per process; duration metrics still
-count every request. Captured underlying exceptions are retained. They share trace IDs. Existing console
-logs are not forwarded. Traces and logs exclude user identity and request data.
+are limited to one per method/route per minute per process; duration metrics still
+count every request. Captured and returned underlying exceptions are retained.
+Provider report paths are redacted from Sentry payloads and Dolos console errors.
+Request logs share trace IDs. Existing console logs are not forwarded. Traces and logs exclude user identity and request data.
 
 The `http.server.duration` distribution records every completed API request in
 milliseconds (independent of trace sampling), with route template, HTTP method,

@@ -398,3 +398,21 @@ func TestDolosUnconfiguredPairs(t *testing.T) {
 		t.Fatalf("missing unavailable error: %v", err)
 	}
 }
+
+func TestDolosMalformedRedirectCanBeLoggedWithoutEvidenceURL(t *testing.T) {
+	const reportID = "synthetic-private-report"
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "http://synthetic.test/reports/"+reportID+"/%zz")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer provider.Close()
+	svc := &DolosService{baseURL: provider.URL, client: provider.Client()}
+	_, err := svc.openReportPairsCSV(context.Background(), reportID)
+	if err == nil {
+		t.Fatal("malformed redirect accepted")
+	}
+	safe := common.RedactReportURLs(err.Error())
+	if strings.Contains(safe, reportID) || !strings.Contains(safe, "failed to parse Location header") {
+		t.Fatal("lost privacy or diagnostics", safe)
+	}
+}

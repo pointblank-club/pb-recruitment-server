@@ -1,8 +1,15 @@
 package boot
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/getsentry/sentry-go"
+	"github.com/getsentry/sentry-go/attribute"
+	"net/url"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -79,5 +86,54 @@ func TestTraceSamplingAndPrivacy(t *testing.T) {
 	event := scrubSentryRequest(&sentry.Event{Type: "transaction", Request: &sentry.Request{Data: "secret"}, User: sentry.User{ID: "participant"}, Tags: map[string]string{"id": "participant"}}, nil)
 	if event.Request != nil || !event.User.IsEmpty() || len(event.Tags) != 0 {
 		t.Fatalf("private trace data: %+v", event)
+	}
+}
+
+func TestSentryRedactsReportPathsWithoutDroppingCauses(t *testing.T) {
+	capability := "https://provider.test/reports/" + "synthetic-private-id/data/pairs.csv"
+	cause := errors.Join(fmt.Errorf("retrieval: %w", &url.Error{Op: "Get", URL: capability, Err: context.DeadlineExceeded}), errors.New("independent failure"))
+	breadcrumb := &sentry.Breadcrumb{Message: capability, Data: map[string]interface{}{"nested": []interface{}{capability}}}
+	event := &sentry.Event{Message: capability, Breadcrumbs: []*sentry.Breadcrumb{breadcrumb}, Extra: map[string]interface{}{"url": capability}, Contexts: map[string]sentry.Context{"provider": {"url": capability}}, Request: &sentry.Request{URL: capability}, Tags: map[string]string{"url": capability}}
+	event.SetException(cause, 20)
+	event = scrubSentryRequest(event, nil)
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "synthetic-private-id") {
+		t.Fatal("provider evidence leaked", string(encoded))
+	}
+	if !strings.Contains(string(encoded), "independent failure") || !strings.Contains(string(encoded), "context deadline exceeded") {
+		t.Fatal("lost error causes", string(encoded))
+	}
+	if breadcrumb.Message != capability || breadcrumb.Data["nested"].([]interface{})[0] != capability {
+		t.Fatal("shared breadcrumb was mutated")
+	}
+	cyclic := map[string]interface{}{}
+	cyclic["self"] = cyclic
+	if _, err := json.Marshal(scrubReportData(cyclic, 0)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSentryLogRedactsReportPaths(t *testing.T) {
+	previous := sentry.CurrentHub().Client()
+	defer sentry.CurrentHub().BindClient(previous)
+	t.Setenv("SENTRY_BACKEND_DSN", "http://public@127.0.0.1:1/1")
+	if err := InitSentry(); err != nil {
+		t.Fatal(err)
+	}
+	defer sentry.CurrentHub().Client().Close()
+	capability := "https://provider.test/reports/" + "synthetic-private-id/data/pairs.csv"
+	entry := &sentry.Log{Body: capability, Attributes: map[string]attribute.Value{
+		"url": attribute.StringValue(capability), "urls": attribute.StringSliceValue([]string{capability}), "user.id": attribute.StringValue("private-user"),
+	}}
+	entry = sentry.CurrentHub().Client().Options().BeforeSendLog(entry)
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "synthetic-private-id") || strings.Contains(string(encoded), "private-user") {
+		t.Fatal("log leaked evidence or identity", string(encoded))
 	}
 }

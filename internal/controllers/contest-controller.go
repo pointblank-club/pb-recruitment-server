@@ -8,7 +8,6 @@ import (
 	"app/internal/services"
 	"errors"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -49,7 +48,7 @@ func (cc *ContestController) GetDolosReport(ctx echo.Context) error {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": "contest not found"})
 		}
-		log.Errorf("get Dolos report for contest %s: %v", ctx.Param("id"), err)
+		log.Errorf("get Dolos report for contest %s: %v", ctx.Param("id"), common.RedactReportURLs(err.Error()))
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get plagiarism report"})
 	}
 	return ctx.JSON(http.StatusOK, report)
@@ -99,14 +98,9 @@ func (cc *ContestController) GetDolosPairs(ctx echo.Context) error {
 			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": "plagiarism analysis is not configured"})
 		}
 		if hub := sentryecho.GetHubFromContext(ctx); hub != nil {
-			cause := err
-			var providerError *url.Error
-			for errors.As(cause, &providerError) {
-				cause = providerError.Err
-			}
-			hub.CaptureException(cause)
+			hub.CaptureException(err)
 		}
-		log.Errorf("get Dolos pairs for contest %s: %v", ctx.Param("id"), err)
+		log.Errorf("get Dolos pairs for contest %s: %v", ctx.Param("id"), common.RedactReportURLs(err.Error()))
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve plagiarism pairs"})
 	}
 	ctx.Response().Header().Set("X-Total-Count", strconv.Itoa(totalCount))
@@ -153,7 +147,7 @@ func (cc *ContestController) ReviewDolosPair(ctx echo.Context) error {
 		if errors.Is(err, common.ErrDolosUnavailable) {
 			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": "plagiarism analysis is not configured"})
 		}
-		log.Errorf("review Dolos pair for contest %s: %v", ctx.Param("id"), err)
+		log.Errorf("review Dolos pair for contest %s: %v", ctx.Param("id"), common.RedactReportURLs(err.Error()))
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update plagiarism review"})
 	}
 	return ctx.NoContent(http.StatusNoContent)

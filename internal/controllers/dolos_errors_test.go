@@ -1,14 +1,17 @@
 package controllers
 
 import (
+	"app/internal/boot"
 	"app/internal/common"
 	"app/internal/models/dto"
 	"app/internal/services"
+	"bytes"
 	"context"
 	"database/sql"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -17,6 +20,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/gommon/log"
 )
 
 type dolosFailingDB struct{ err error }
@@ -50,16 +54,34 @@ func TestDolosPairsUnavailableAndUnexpectedError(t *testing.T) {
 	}{
 		{"disabled", "", 503, 0, errors.New("synthetic database failure"), ""},
 		{"database failure", "http://127.0.0.1:1", 500, 1, errors.New("synthetic database failure"), "synthetic database failure"},
+		{"joined provider error", "http://127.0.0.1:1", 500, 1, errors.Join(&url.Error{Op: "Get", URL: "https://provider.test/reports/private-report-id/data/pairs.csv", Err: context.DeadlineExceeded}, errors.New("independent failure")), "independent failure"},
+		{"wrapped provider error", "http://127.0.0.1:1", 500, 1, fmt.Errorf("retrieval context: %w", &url.Error{Op: "Get", URL: "https://provider.test/reports/private-report-id/data/pairs.csv", Err: context.DeadlineExceeded}), "context deadline exceeded"},
 		{"provider error", "http://127.0.0.1:1", 500, 1, &url.Error{Op: "Get", URL: "https://provider.test/reports/private-report-id/data/pairs.csv", Err: context.DeadlineExceeded}, "context deadline exceeded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("DOLOS_API_URL", tc.base)
 			db := sql.OpenDB(dolosFailingDB{err: tc.cause})
 			defer db.Close()
+			var console bytes.Buffer
+			previousOutput := log.Output()
+			log.SetOutput(&console)
+			defer log.SetOutput(previousOutput)
+			previous := sentry.CurrentHub().Client()
+			defer sentry.CurrentHub().BindClient(previous)
+			t.Setenv("SENTRY_BACKEND_DSN", "http://public@127.0.0.1:1/1")
+			if err := boot.InitSentry(); err != nil {
+				t.Fatal(err)
+			}
+			options := sentry.CurrentHub().Client().Options()
+			defer sentry.CurrentHub().Client().Close()
 			var events []*sentry.Event
-			client, err := sentry.NewClient(sentry.ClientOptions{Dsn: "http://public@127.0.0.1:1/1", DisableMetrics: true,
-				BeforeSend: func(e *sentry.Event, _ *sentry.EventHint) *sentry.Event { events = append(events, e); return nil },
-			})
+			options.DisableMetrics = true
+			scrub := options.BeforeSend
+			options.BeforeSend = func(e *sentry.Event, hint *sentry.EventHint) *sentry.Event {
+				events = append(events, scrub(e, hint))
+				return nil
+			}
+			client, err := sentry.NewClient(options)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,11 +97,11 @@ func TestDolosPairsUnavailableAndUnexpectedError(t *testing.T) {
 			if w.Code != tc.status || len(events) != tc.reports {
 				t.Fatalf("status=%d reports=%d", w.Code, len(events))
 			}
-			if len(events) > 0 && (len(events[0].Exception) == 0 || events[0].Exception[0].Value != tc.value) {
+			if len(events) > 0 && !strings.Contains(fmt.Sprint(events[0].Exception), tc.value) {
 				t.Fatal("underlying cause missing", events)
 			}
 			encoded, _ := json.Marshal(events)
-			if strings.Contains(string(encoded), "private-report-id") {
+			if strings.Contains(string(encoded)+console.String(), "private-report-id") {
 				t.Fatal("report access URL leaked to Sentry")
 			}
 		})
