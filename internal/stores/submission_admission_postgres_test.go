@@ -388,8 +388,16 @@ func TestCodeAdmissionMigrationBackfillsPendingPostgres(t *testing.T) {
 	if err := stores.NewSubmissionStore(db).MarkFailed(context.Background(), first); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DROP INDEX idx_pending_code_slot;ALTER TABLE submissions DROP COLUMN admission_slot`); err != nil {
+	down, err := os.ReadFile("../migrations/000041_code_admission_slots.down.sql")
+	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(down)); err != nil {
+		t.Fatal(err)
+	}
+	var restored bool
+	if err := db.QueryRow(`SELECT to_regclass('idx_pending_code_admission') IS NOT NULL`).Scan(&restored); err != nil || !restored {
+		t.Fatal("rollback did not restore pending-user index", restored, err)
 	}
 	migration, err := os.ReadFile("../migrations/000041_code_admission_slots.up.sql")
 	if err != nil {
@@ -398,6 +406,9 @@ func TestCodeAdmissionMigrationBackfillsPendingPostgres(t *testing.T) {
 	if _, err = db.Exec(string(migration)); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.QueryRow(`SELECT to_regclass('idx_pending_code_admission') IS NOT NULL`).Scan(&restored); err != nil || restored {
+		t.Fatal("upgrade retained obsolete pending-user index", restored, err)
+	}
 	var total, assigned, distinct int
 	if err = db.QueryRow(`SELECT count(*),count(admission_slot),count(DISTINCT admission_slot) FROM submissions WHERE type='code' AND status='pending'`).Scan(&total, &assigned, &distinct); err != nil || total != 1 || assigned != 1 || distinct != 1 {
 		t.Fatal(total, assigned, distinct, err)
@@ -405,5 +416,71 @@ func TestCodeAdmissionMigrationBackfillsPendingPostgres(t *testing.T) {
 	var terminalSlot *int
 	if err = db.QueryRow(`SELECT admission_slot FROM submissions WHERE id=$1`, first).Scan(&terminalSlot); err != nil || terminalSlot != nil {
 		t.Fatal(terminalSlot, err)
+	}
+}
+
+func TestCodeAdmissionReleasedSlotIndependentOfBlockedCooldownPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	owner, contest, _, problem := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
+	store := stores.NewSubmissionStore(db)
+	sub := func(user string) *models.Submission {
+		return &models.Submission{UserID: user, ContestID: contest, ProblemID: problem, Type: models.Code}
+	}
+	first, _, err := store.CreateCodeSubmission(context.Background(), sub(owner), "", "", 5, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := []string{uuid.NewString(), uuid.NewString()}
+	for _, user := range users {
+		if _, err := db.Exec(`INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Admission',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO submission_rate_limits(user_id,last_submission_at) VALUES($1,1)`, users[0]); err != nil {
+		t.Fatal(err)
+	}
+	held, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Rollback()
+	if _, err := held.Exec(`SELECT user_id FROM submission_rate_limits WHERE user_id=$1 FOR UPDATE`, users[0]); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := store.CreateCodeSubmission(context.Background(), sub(users[0]), "", "", 5, 2)
+		done <- err
+	}()
+	// Wait until the blocked admission owns slot two, without taking its lock ourselves.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var locked bool
+		if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted
+   AND classid=((hashtextextended('code:slot:2',0)>>32)&4294967295)::oid
+   AND objid=(hashtextextended('code:slot:2',0)&4294967295)::oid AND objsubid=1)`).Scan(&locked); err != nil {
+			t.Fatal(err)
+		}
+		if locked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("admission did not reserve slot two")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := store.MarkFailed(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	_, _, admissionErr := store.CreateCodeSubmission(context.Background(), sub(users[1]), "", "", 5, 2)
+	held.Rollback()
+	if err := <-done; err != nil {
+		t.Fatal("blocked admission failed", err)
+	}
+	if admissionErr != nil {
+		t.Fatal("unrelated cooldown blocked reuse of completed slot", admissionErr)
 	}
 }

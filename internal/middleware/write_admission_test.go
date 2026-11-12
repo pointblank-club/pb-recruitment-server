@@ -183,7 +183,7 @@ func TestSignupCapacityBoundsQueueAndReleasesCancellation(t *testing.T) {
 	e := echo.New()
 	release := make(chan struct{})
 	started := make(chan struct{}, 3)
-	e.POST("/signup", func(c echo.Context) error { started <- struct{}{}; <-release; return c.NoContent(204) }, newSignupCapacity(1, 2, time.Second))
+	e.POST("/signup", func(c echo.Context) error { started <- struct{}{}; <-release; return c.NoContent(204) }, newSignupCapacity(1, 2, time.Second, time.Second))
 	call := func(ctx context.Context) <-chan int {
 		result := make(chan int, 1)
 		go func() {
@@ -228,7 +228,7 @@ func TestSignupCapacityQueueTimeoutDoesNotCallHandler(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
 	var calls atomic.Int32
-	e.POST("/signup", func(c echo.Context) error { calls.Add(1); close(started); <-release; return c.NoContent(204) }, newSignupCapacity(1, 2, 20*time.Millisecond))
+	e.POST("/signup", func(c echo.Context) error { calls.Add(1); close(started); <-release; return c.NoContent(204) }, newSignupCapacity(1, 2, 20*time.Millisecond, time.Second))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -262,12 +262,38 @@ func TestSignupCapacityAlreadyCancelledWithFreeSlot(t *testing.T) {
 func TestSignupCapacityRejectsExpiredWait(t *testing.T) {
 	e := echo.New()
 	called := false
-	e.POST("/signup", func(c echo.Context) error { called = true; return c.NoContent(204) }, newSignupCapacity(1, 1, 0))
+	e.POST("/signup", func(c echo.Context) error { called = true; return c.NoContent(204) }, newSignupCapacity(1, 1, 0, time.Second))
 	for range 20 {
 		w := httptest.NewRecorder()
 		e.ServeHTTP(w, httptest.NewRequest("POST", "/signup", nil))
 		if w.Code != 429 || called {
 			t.Fatal("expired queue admitted work", w.Code, called)
+		}
+	}
+}
+
+func TestSignupCapacityActiveTimeoutReleasesWorker(t *testing.T) {
+	e := echo.New()
+	calls := 0
+	e.POST("/signup", func(c echo.Context) error {
+		calls++
+		if calls == 1 {
+			if _, ok := c.Request().Context().Deadline(); !ok {
+				t.Fatal("active signup has no deadline")
+			}
+			<-c.Request().Context().Done()
+			if c.Request().Context().Err() != context.DeadlineExceeded {
+				t.Fatal(c.Request().Context().Err())
+			}
+			return c.NoContent(503)
+		}
+		return c.NoContent(204)
+	}, newSignupCapacity(1, 1, time.Second, 20*time.Millisecond))
+	for _, want := range []int{503, 204} {
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, httptest.NewRequest("POST", "/signup", nil))
+		if w.Code != want {
+			t.Fatalf("HTTP %d, want %d", w.Code, want)
 		}
 	}
 }

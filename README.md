@@ -50,15 +50,18 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000040`: submission cooldowns
+- The current schema requires migrations through `000041`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
   progress index (`000034`), stable submission ordering (`000035`), unique MCQ
   submissions (`000036`), contest submission status/solves indexing (`000037`), and
   tab-switching enforcement & observation deduplication (`000038`), code request
-  replay (`000039`), and shared HTTP budgets (`000040`). Apply
-  through `000040` before running this backend revision. `make migrate-up`
+  replay (`000039`), shared HTTP budgets (`000040`), and pending admission slots (`000041`).
+  Stop old API writers and drain in-flight preparation, apply through `000041`, then
+  start the new API with the same `SUBMISSION_MAX_PENDING` on every replica. Do not mix
+  old and new writers. See [rollout and rollback requirements](SECURITY_LIMITS.md#code-submission-admission-and-retries).
+  `make migrate-up`
   applies only pending migrations; do not force the version or roll back a
   production database.
 
@@ -136,7 +139,7 @@ include MCQs. Per-problem leaderboard breakdowns remain admin-only.
 ## PostgreSQL tests
 
 Use a disposable PostgreSQL 12+ database. The tests create isolated schemas, apply
-all migrations through `000036`, and clean up afterward. They skip when
+all available migrations, and clean up afterward. They skip when
 `TEST_DATABASE_URL` is unset.
 
 ```bash

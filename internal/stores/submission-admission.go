@@ -91,10 +91,13 @@ func reserveCodeAdmissionSlot(ctx context.Context, tx *sql.Tx, maxPending int) (
 	next := 1
 	for next <= maxPending {
 		var slot int
-		err := tx.QueryRowContext(ctx, `SELECT candidate FROM generate_series($1::bigint,$2::bigint) AS candidate
+		// Filter before taking locks so occupied slots remain independent of this transaction.
+		err := tx.QueryRowContext(ctx, `WITH available AS MATERIALIZED (
+   SELECT candidate FROM generate_series($1::bigint,$2::bigint) AS candidate
    WHERE NOT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending' AND (admission_slot IS NULL OR admission_slot>$2))
    AND NOT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending' AND admission_slot=candidate)
-   AND pg_try_advisory_xact_lock(hashtextextended('code:slot:' || candidate::text,0))
+   ) SELECT candidate FROM available
+   WHERE pg_try_advisory_xact_lock(hashtextextended('code:slot:' || candidate::text,0))
    LIMIT 1`, next, maxPending).Scan(&slot)
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, common.ErrRateLimitExceeded

@@ -76,7 +76,10 @@ Migration 38 is reserved for tab switching. Migration 39 adds durable code reque
 IDs; migration 40 adds shared HTTP budgets; migration 41 adds pending admission
 slots. **Stop old API writers and finish in-flight preparation before applying
 migration 41, then start the new API. Do not mix old and new writers.** Migration
-41 backfills pending parents and adds a partial unique index on pending slots.
+41 backfills pending parents, adds a partial unique index on pending slots, and
+removes the obsolete pending-user index. For rollback, stop and drain new API
+writers, roll back migration 41, then start the old API. The down migration restores
+the pending-user index; do not run new API writers on schema 40.
 
 `SUBMISSION_MAX_PENDING` (default 600 across all contests) is enforced by independent
 slot reservations; unrelated users no longer queue behind one global admission
@@ -122,7 +125,10 @@ Signup's shared fleet policy now admits 100 attempts per 10 seconds rather than
 30 per second: a larger initial burst with a lower sustained rate. The shared
 1,200/hour/IP budget remains for campus NATs. Before binding JSON or reaching SQL
 and Firebase, each API process admits at most 100 active/queued requests, with
-8 active handlers. JSON is bound after obtaining a worker slot and before the
+8 active handlers. After obtaining a worker, SQL budgets and Firebase/SQL work
+receive a 20-second context deadline; Firebase cleanup retains its separate 10-second
+deadline. Body reads remain subject to the server's 30-second read deadline.
+JSON is bound after obtaining a worker slot and before the
 SQL budgets, so parsing is bounded and does not wait behind SQL before the HTTP
 body-read deadline. Queue waits are capped at 20 seconds; overflow/expiry returns
 429 and cancellation releases its reservation without calling Firebase.

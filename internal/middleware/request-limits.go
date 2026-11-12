@@ -121,9 +121,11 @@ func newSubmissionBurstLimitWithLimiter(limiter *userRateLimiter) echo.Middlewar
 
 // SignupCapacity allows a campus burst to wait without unbounded Firebase or SQL work.
 // shortcut: slots are process-local; share worker admission before adding API replicas.
-func SignupCapacity() echo.MiddlewareFunc { return newSignupCapacity(8, 100, 20*time.Second) }
+func SignupCapacity() echo.MiddlewareFunc {
+	return newSignupCapacity(8, 100, 20*time.Second, 20*time.Second)
+}
 
-func newSignupCapacity(activeLimit, totalLimit int, wait time.Duration) echo.MiddlewareFunc {
+func newSignupCapacity(activeLimit, totalLimit int, wait, work time.Duration) echo.MiddlewareFunc {
 	active, admitted := make(chan struct{}, activeLimit), make(chan struct{}, totalLimit)
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -161,6 +163,9 @@ func newSignupCapacity(activeLimit, totalLimit int, wait time.Duration) echo.Mid
 			if !time.Now().Before(deadline) {
 				return busy()
 			}
+			workCtx, cancelWork := context.WithTimeout(ctx, work)
+			defer cancelWork()
+			c.SetRequest(c.Request().WithContext(workCtx))
 			return next(c)
 		}
 	}

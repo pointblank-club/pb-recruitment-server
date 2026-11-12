@@ -9,3 +9,5 @@ UPDATE submissions SET admission_slot=pending.slot FROM pending WHERE submission
 
 CREATE UNIQUE INDEX idx_pending_code_slot ON submissions(admission_slot)
 WHERE type='code' AND status='pending';
+
+DROP INDEX IF EXISTS idx_pending_code_admission;
