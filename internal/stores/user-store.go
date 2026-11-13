@@ -103,11 +103,11 @@ func (us *UserStore) UpdateUserProfile(ctx context.Context, userID string, req *
 
 	const q = `
 	UPDATE users
-	SET name = $2, mobile_number = $3, department = $4
+	SET name = $2, mobile_number = $3
 	WHERE id = $1
 	`
 
-	res, err := us.db.ExecContext(ctx, q, userID, req.Name, req.MobileNumber, req.Department)
+	res, err := us.db.ExecContext(ctx, q, userID, req.Name, req.MobileNumber)
 	if err != nil {
 		log.Printf("user-store: update error %v", err)
 		return fmt.Errorf("update error: %w", err)

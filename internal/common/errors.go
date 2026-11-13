@@ -14,6 +14,7 @@ var (
 	ProfileUpdateFailedError       = errors.New("user profile update failed")
 	InvalidApplicationNumberError  = errors.New("first-year students must provide a valid Application Number (e.g., 26UGDS1234)")
 	InvalidUSNError                = errors.New("provide a valid USN (e.g., 1DS24IC015)")
+	InvalidUSNBranchError          = errors.New("USN does not match the selected department")
 	InvalidMobileNumberError       = errors.New("invalid mobile number format")
 	USNYearImmutableError          = errors.New("USN and Year cannot be changed")
 	ContestNotFoundError           = errors.New("contest not found")
