@@ -44,14 +44,14 @@ var branchCodeAliases = map[string]string{
 	"COMPUTER SCIENCE AND DESIGN":                   "CG",
 	"MEDICAL ELECTRONICS ENGINEERING":               "MD",
 	"ELECTRONICS AND TELECOMMUNICATION ENGINEERING": "ET",
-	"ELECTRONICS & COMMUNICATION ENGINEERING":       "EC",
+	"ELECTRONICS AND COMMUNICATION ENGINEERING":     "EC",
 	"ELECTRONICS AND INSTRUMENTATION ENGINEERING":   "EI",
 	"MECHANICAL ENGINEERING":                        "ME",
-	"ELECTRICAL & ELECTRONICS ENGINEERING":          "EE",
+	"ELECTRICAL AND ELECTRONICS ENGINEERING":        "EE",
 	"CHEMICAL ENGINEERING":                          "CH",
-	"COMPUTER SCIENCE & ENGINEERING (CYBER SECURITY)": "CY",
-	"COMPUTER SCIENCE & ENGINEERING (DATA SCIENCE)":   "CD",
-	"COMPUTER SCIENCE & ENGINEERING (IOT AND CYBER SECURITY INCLUDING BLOCKCHAIN)": "IC",
+	"COMPUTER SCIENCE AND ENGINEERING (CYBER SECURITY)": "CY",
+	"COMPUTER SCIENCE AND ENGINEERING (DATA SCIENCE)":   "CD",
+	"COMPUTER SCIENCE AND ENGINEERING (IOT AND CYBER SECURITY INCLUDING BLOCKCHAIN)": "IC",
 	"INFORMATION SCIENCE AND ENGINEERING":           "IS",
 	"COMPUTER SCIENCE AND ENGINEERING":              "CS",
 	"COMPUTER SCIENCE AND BUSINESS SYSTEMS":         "CB",
@@ -59,12 +59,11 @@ var branchCodeAliases = map[string]string{
 	"ROBOTICS AND ARTIFICIAL INTELLIGENCE":          "RI",
 }
 
-func resolveBranchCode(dept string) string {
-	clean := strings.ToUpper(strings.TrimSpace(dept))
-	if code, ok := branchCodeAliases[clean]; ok {
-		return code
-	}
-	return clean
+func resolveBranchCode(dept string) (string, bool) {
+	clean := strings.ToUpper(strings.ReplaceAll(dept, "&", " AND "))
+	clean = strings.Join(strings.Fields(clean), " ")
+	code, ok := branchCodeAliases[clean]
+	return code, ok
 }
 
 func validateUserInput(usn string, mobile string, currentYear int, department string) (error, string) {
@@ -84,7 +83,7 @@ func validateUserInput(usn string, mobile string, currentYear int, department st
 			return common.InvalidUSNError, "id"
 		}
 		if department != "" {
-			expectedCode, ok := branchCodeAliases[strings.ToUpper(strings.TrimSpace(department))]
+			expectedCode, ok := resolveBranchCode(department)
 			if !ok || usnUpper[5:7] != expectedCode {
 				return common.InvalidUSNBranchError, "id"
 			}
@@ -202,9 +201,9 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 	}
 
 	if reqBody.Department != "" {
-		codeCur := resolveBranchCode(user.Department)
-		codeNew := resolveBranchCode(reqBody.Department)
-		if codeCur == "" || codeNew != codeCur {
+		codeCur, okCur := resolveBranchCode(user.Department)
+		codeNew, okNew := resolveBranchCode(reqBody.Department)
+		if !okCur || !okNew || codeNew != codeCur {
 			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "department cannot be changed", "field": "department"})
 		}
 	}

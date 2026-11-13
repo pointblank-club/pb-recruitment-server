@@ -268,6 +268,33 @@ func TestValidateUserInput(t *testing.T) {
 			wantField:   "",
 		},
 		{
+			name:        "valid 2nd year USN with & variant in department name",
+			usn:         "1DS24CS015",
+			mobile:      "9876543210",
+			currentYear: 2,
+			department:  "Computer Science & Engineering",
+			wantErr:     nil,
+			wantField:   "",
+		},
+		{
+			name:        "valid 2nd year USN with repeated spaces and and in EC",
+			usn:         "1DS24EC010",
+			mobile:      "9876543210",
+			currentYear: 2,
+			department:  "Electronics   and   Communication Engineering",
+			wantErr:     nil,
+			wantField:   "",
+		},
+		{
+			name:        "valid 2nd year USN with & in EE",
+			usn:         "1DS24EE010",
+			mobile:      "9876543210",
+			currentYear: 2,
+			department:  "Electrical & Electronics Engineering",
+			wantErr:     nil,
+			wantField:   "",
+		},
+		{
 			name:        "valid 3rd year USN (2023 batch)",
 			usn:         "1ds23is042",
 			mobile:      "9876543210",
@@ -396,6 +423,22 @@ func TestUpdateUserProfileDepartmentImmutable(t *testing.T) {
 	}
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 when keeping department via alias, got %d", rec.Code)
+	}
+
+	// 2b. Keeping same department with & variant should also succeed
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-123")
+	c.Set(common.VALIDATED_REQUEST_BODY, &dto.UpdateUserProfileRequest{
+		Name:         "Updated Name",
+		MobileNumber: "9876543210",
+		Department:   "Computer Science & Engineering",
+	})
+	if err := controller.UpdateUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 when keeping department via & alias, got %d", rec.Code)
 	}
 
 	// 3. Legacy empty department attempting to set department should be rejected
