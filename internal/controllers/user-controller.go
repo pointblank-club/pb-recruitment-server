@@ -32,7 +32,34 @@ func NewUserController(userService *services.UserService) *UserController {
 	}
 }
 
-func validateUserInput(usn string, mobile string, currentYear int) (error, string) {
+var branchCodeAliases = map[string]string{
+	"AI": "AI", "AE": "AE", "AU": "AU", "BT": "BT", "CG": "CG",
+	"MD": "MD", "ET": "ET", "EC": "EC", "ME": "ME", "EE": "EE",
+	"CH": "CH", "CB": "CB", "IC": "IC", "CD": "CD", "CS": "CS",
+	"CV": "CV", "IS": "IS", "RI": "RI", "EI": "EI", "CY": "CY",
+	"ARTIFICIAL INTELLIGENCE AND MACHINE LEARNING": "AI",
+	"AERONAUTICAL ENGINEERING":                     "AE",
+	"AUTOMOBILE ENGINEERING":                        "AU",
+	"BIOTECHNOLOGY":                                 "BT",
+	"COMPUTER SCIENCE AND DESIGN":                   "CG",
+	"MEDICAL ELECTRONICS ENGINEERING":               "MD",
+	"ELECTRONICS AND TELECOMMUNICATION ENGINEERING": "ET",
+	"ELECTRONICS & COMMUNICATION ENGINEERING":       "EC",
+	"ELECTRONICS AND INSTRUMENTATION ENGINEERING":   "EI",
+	"MECHANICAL ENGINEERING":                        "ME",
+	"ELECTRICAL & ELECTRONICS ENGINEERING":          "EE",
+	"CHEMICAL ENGINEERING":                          "CH",
+	"COMPUTER SCIENCE & ENGINEERING (CYBER SECURITY)": "CY",
+	"COMPUTER SCIENCE & ENGINEERING (DATA SCIENCE)":   "CD",
+	"COMPUTER SCIENCE & ENGINEERING (IOT AND CYBER SECURITY INCLUDING BLOCKCHAIN)": "IC",
+	"INFORMATION SCIENCE AND ENGINEERING":           "IS",
+	"COMPUTER SCIENCE AND ENGINEERING":              "CS",
+	"COMPUTER SCIENCE AND BUSINESS SYSTEMS":         "CB",
+	"CIVIL ENGINEERING":                             "CV",
+	"ROBOTICS AND ARTIFICIAL INTELLIGENCE":          "RI",
+}
+
+func validateUserInput(usn string, mobile string, currentYear int, department string) (error, string) {
 	usnPattern := `^1DS2[1-6](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
 	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 26UGDS1234
 	phonePattern := `^[0-9]{10}$`                                                                    // Example: 9234567890
@@ -47,6 +74,12 @@ func validateUserInput(usn string, mobile string, currentYear int) (error, strin
 	} else {
 		if matched, _ := regexp.MatchString(usnPattern, usnUpper); !matched {
 			return common.InvalidUSNError, "id"
+		}
+		if department != "" {
+			expectedCode, ok := branchCodeAliases[strings.ToUpper(strings.TrimSpace(department))]
+			if !ok || usnUpper[5:7] != expectedCode {
+				return common.InvalidUSNBranchError, "id"
+			}
 		}
 	}
 
@@ -74,7 +107,7 @@ func (uc *UserController) CreateUser(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.CreateUserRequest)
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
-	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear); err != nil {
+	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear, reqBody.Department); err != nil {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
 	}
 
@@ -112,9 +145,9 @@ func (uc *UserController) GetUserProfile(ctx echo.Context) error {
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
 	user, err := uc.userService.GetUserProfile(ctx.Request().Context(), userID)
-	if err != nil {
-		if errors.Is(err, common.UserNotFoundError) {
-			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	if err != nil || user == nil {
+		if errors.Is(err, common.UserNotFoundError) || user == nil {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.UserNotFoundError.Error()})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.FetchUserFailedError.Error()})
 	}
@@ -150,6 +183,28 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": common.InvalidMobileNumberError.Error()})
 	}
 
+	user, err := uc.userService.GetUserProfile(ctx.Request().Context(), userID)
+	if err != nil || user == nil {
+		if errors.Is(err, common.UserNotFoundError) || user == nil {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.UserNotFoundError.Error()})
+		}
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.FetchUserFailedError.Error()})
+	}
+
+	if user.Department != "" && reqBody.Department != "" {
+		codeNew := branchCodeAliases[strings.ToUpper(strings.TrimSpace(reqBody.Department))]
+		codeCur := branchCodeAliases[strings.ToUpper(strings.TrimSpace(user.Department))]
+		if codeNew == "" {
+			codeNew = strings.ToUpper(strings.TrimSpace(reqBody.Department))
+		}
+		if codeCur == "" {
+			codeCur = strings.ToUpper(strings.TrimSpace(user.Department))
+		}
+		if codeNew != codeCur {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "department cannot be changed", "field": "department"})
+		}
+	}
+
 	if err := uc.userService.UpdateUserProfile(ctx.Request().Context(), userID, reqBody); err != nil {
 		if errors.Is(err, common.UserNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
@@ -175,7 +230,7 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 func (uc *UserController) Signup(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.SignupRequest)
 
-	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear); err != nil {
+	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear, reqBody.Department); err != nil {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
 	}
 

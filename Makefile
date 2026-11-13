@@ -26,7 +26,7 @@ migration:
 
 .PHONY: migrate-up
 migrate-up:
-	@migrate -path=$(MIGRATIONS_PATH) -database=$(DB_ADDR) up
+	@migrate -path=$(MIGRATIONS_PATH) -database="$(DB_ADDR)" up
 
 .PHONY: migrate-down
 migrate-down:
@@ -34,7 +34,7 @@ migrate-down:
 		echo "Error: migrate-down is allowed only in development (STAGE=dev)."; \
 		exit 1; \
 	fi
-	@migrate -path=$(MIGRATIONS_PATH) -database=$(DB_ADDR) down $(filter-out $@, $(MAKECMDGOALS))
+	@migrate -path=$(MIGRATIONS_PATH) -database="$(DB_ADDR)" down $(filter-out $@, $(MAKECMDGOALS))
 
 .PHONY: migrate-force
 migrate-force:
@@ -42,4 +42,4 @@ migrate-force:
 		echo "Error: migrate-force is allowed only in development (STAGE=dev)."; \
 		exit 1; \
 	fi
-	@migrate -path=$(MIGRATIONS_PATH) -database=$(DB_ADDR) force $(filter-out $@, $(MAKECMDGOALS))
+	@migrate -path=$(MIGRATIONS_PATH) -database="$(DB_ADDR)" force $(filter-out $@, $(MAKECMDGOALS))
