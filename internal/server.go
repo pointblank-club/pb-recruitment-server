@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	_ "app/docs"
@@ -20,6 +21,7 @@ import (
 	"github.com/labstack/echo/v4"
 	mdw "github.com/labstack/echo/v4/middleware"
 	"go.uber.org/fx"
+	"golang.org/x/time/rate"
 )
 
 func NewEchoServer(
@@ -29,12 +31,27 @@ func NewEchoServer(
 	// Create these before requests: SDK v0.44 reads shared client metadata without locking.
 	meter := sentry.NewMeter(context.Background())
 	logger := sentry.NewLogger(context.Background())
+	// Route templates bound this map; repeated overloads remain counted by metrics.
+	var reportMu sync.Mutex
+	overloadReports := make(map[string]*rate.Limiter)
+	allowOverloadReport := func(route string) bool {
+		reportMu.Lock()
+		defer reportMu.Unlock()
+		limiter := overloadReports[route]
+		if limiter == nil {
+			limiter = rate.NewLimiter(rate.Every(time.Minute), 1)
+			overloadReports[route] = limiter
+		}
+		return limiter.Allow()
+	}
 	e := echo.New()
 	middleware.ConfigureRequestBounds(e)
 	e.Use(mdw.Recover())
 	e.Use(sentryecho.New(sentryecho.Options{
 		Repanic: true,
 	}))
+
+	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
 
 	// Enrich Sentry scope with route tags and capture unhandled 5xx errors
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -43,9 +60,12 @@ func NewEchoServer(
 			status := http.StatusOK
 			defer func() {
 				recovered := recover()
-				if recovered != nil {
+				if recovered != nil && !c.Response().Committed {
 					status = http.StatusInternalServerError
 					c.Response().Status = status
+				}
+				if c.Response().Committed {
+					status = c.Response().Status
 				}
 				if span := sentryecho.GetSpanFromContext(c); span != nil && c.Path() != "/health" && c.Request().Method != echo.OPTIONS {
 					route := c.Path()
@@ -83,15 +103,30 @@ func NewEchoServer(
 			}
 
 			err := next(c)
+			status = c.Response().Status
+			if err != nil && !c.Response().Committed {
+				status = http.StatusInternalServerError
+				// Match Echo's default handler: wrapped HTTP errors become 500.
+				if he, ok := err.(*echo.HTTPError); ok {
+					status = he.Code
+					if inner, ok := he.Internal.(*echo.HTTPError); ok {
+						status = inner.Code
+					}
+				}
+			}
+			reportStatus := status != http.StatusServiceUnavailable || allowOverloadReport(c.Request().Method+" "+c.Path())
 
 			if hub != nil && hub.LastEventID() == previousEventID {
 				if err != nil {
 					var he *echo.HTTPError
 					if errors.As(err, &he) {
-						if he.Code >= 500 {
+						if he.Internal != nil && status >= 500 {
+							hub.CaptureException(he.Internal)
+						} else if status >= 500 && reportStatus {
 							hub.WithScope(func(scope *sentry.Scope) {
+								scope.SetFingerprint([]string{"http-status", c.Request().Method, c.Path(), fmt.Sprint(status)})
 								scope.SetTag("error_type", "http_error")
-								scope.SetTag("status_code", fmt.Sprintf("%d", he.Code))
+								scope.SetTag("status_code", fmt.Sprintf("%d", status))
 								hub.CaptureException(err)
 							})
 						}
@@ -101,10 +136,11 @@ func NewEchoServer(
 							hub.CaptureException(err)
 						})
 					}
-				} else if c.Response().Status >= 500 {
+				} else if c.Response().Status >= 500 && reportStatus {
 					hub.WithScope(func(scope *sentry.Scope) {
 						scope.SetLevel(sentry.LevelError)
 						scope.SetTag("error_type", "server_error_status")
+						scope.SetFingerprint([]string{"http-status", c.Request().Method, c.Path(), fmt.Sprint(status)})
 						scope.SetTag("status_code", fmt.Sprintf("%d", c.Response().Status))
 						hub.CaptureMessage(fmt.Sprintf("HTTP %d on %s %s", c.Response().Status, c.Request().Method, c.Path()))
 					})
@@ -113,15 +149,12 @@ func NewEchoServer(
 
 			// Only sampled requests and server failures need a remote request log.
 			span := sentryecho.GetSpanFromContext(c)
-			status = c.Response().Status
-			if err != nil && !c.Response().Committed {
-				status = http.StatusInternalServerError
-				var he *echo.HTTPError
-				if errors.As(err, &he) {
-					status = he.Code
-				}
+
+			reportLog := span != nil && (span.Sampled == sentry.SampledTrue || status >= 500)
+			if status == http.StatusServiceUnavailable {
+				reportLog = reportStatus
 			}
-			if span != nil && c.Path() != "" && c.Path() != "/health" && c.Request().Method != echo.OPTIONS && (span.Sampled == sentry.SampledTrue || status >= 500) {
+			if span != nil && c.Path() != "" && c.Path() != "/health" && c.Request().Method != echo.OPTIONS && reportLog {
 				entry := logger.Info().WithCtx(span.Context())
 				if status >= 500 {
 					entry = logger.Error().WithCtx(span.Context())
@@ -133,7 +166,6 @@ func NewEchoServer(
 		}
 	})
 
-	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: []string{
 			"https://recruitment.blankpoint.club",

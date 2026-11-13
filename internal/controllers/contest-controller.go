@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	sentryecho "github.com/getsentry/sentry-go/echo"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
 	gonanoid "github.com/matoous/go-nanoid/v2"
@@ -47,7 +48,7 @@ func (cc *ContestController) GetDolosReport(ctx echo.Context) error {
 		if errors.Is(err, common.ContestNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": "contest not found"})
 		}
-		log.Errorf("get Dolos report for contest %s: %v", ctx.Param("id"), err)
+		log.Errorf("get Dolos report for contest %s: %v", ctx.Param("id"), common.RedactReportURLs(err.Error()))
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get plagiarism report"})
 	}
 	return ctx.JSON(http.StatusOK, report)
@@ -71,6 +72,7 @@ func (cc *ContestController) GetDolosReport(ctx echo.Context) error {
 // @Failure      404 {object} map[string]string "Contest not found or no report available"
 // @Failure      409 {object} map[string]string "Plagiarism report is not ready"
 // @Failure      500 {object} map[string]string "Internal server error"
+// @Failure      503 {object} map[string]string "Plagiarism analysis is not configured"
 // @Router       /admin/contest/{id}/plagiarism/pairs [get]
 func (cc *ContestController) GetDolosPairs(ctx echo.Context) error {
 	page := 0
@@ -92,7 +94,13 @@ func (cc *ContestController) GetDolosPairs(ctx echo.Context) error {
 		if errors.Is(err, common.ErrReportNotReady) {
 			return ctx.JSON(http.StatusConflict, map[string]string{"error": "plagiarism report is not finished yet"})
 		}
-		log.Errorf("get Dolos pairs for contest %s: %v", ctx.Param("id"), err)
+		if errors.Is(err, common.ErrDolosUnavailable) {
+			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": "plagiarism analysis is not configured"})
+		}
+		if hub := sentryecho.GetHubFromContext(ctx); hub != nil {
+			hub.CaptureException(err)
+		}
+		log.Errorf("get Dolos pairs for contest %s: %v", ctx.Param("id"), common.RedactReportURLs(err.Error()))
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve plagiarism pairs"})
 	}
 	ctx.Response().Header().Set("X-Total-Count", strconv.Itoa(totalCount))
@@ -119,6 +127,7 @@ func (cc *ContestController) GetDolosPairs(ctx echo.Context) error {
 // @Failure      404 {object} map[string]string "Contest or pair evidence not found"
 // @Failure      409 {object} map[string]string "Plagiarism report is not ready"
 // @Failure      500 {object} map[string]string "Internal server error"
+// @Failure      503 {object} map[string]string "Plagiarism analysis is not configured"
 // @Router       /admin/contest/{id}/plagiarism/pairs/{pairKey} [patch]
 func (cc *ContestController) ReviewDolosPair(ctx echo.Context) error {
 	req := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.PlagiarismPairReviewRequest)
@@ -135,7 +144,10 @@ func (cc *ContestController) ReviewDolosPair(ctx echo.Context) error {
 		if errors.Is(err, common.ErrInvalidPairKey) {
 			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid pair key"})
 		}
-		log.Errorf("review Dolos pair for contest %s: %v", ctx.Param("id"), err)
+		if errors.Is(err, common.ErrDolosUnavailable) {
+			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": "plagiarism analysis is not configured"})
+		}
+		log.Errorf("review Dolos pair for contest %s: %v", ctx.Param("id"), common.RedactReportURLs(err.Error()))
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update plagiarism review"})
 	}
 	return ctx.NoContent(http.StatusNoContent)

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"app/internal/common"
 	"app/internal/s3"
 	"container/heap"
 	"context"
@@ -384,5 +385,34 @@ func TestMakeArchiveChecksFinalizedSize(t *testing.T) {
 	}
 	if reads.Load() != int32(len(sources)) {
 		t.Fatalf("archive rejected before finalization: reads=%d", reads.Load())
+	}
+}
+
+func TestDolosUnconfiguredPairs(t *testing.T) {
+	t.Setenv("DOLOS_API_URL", "")
+	service := NewDolosService(nil, nil)
+	if _, _, _, err := service.GetPairsWithMeta(context.Background(), "synthetic", 0); !errors.Is(err, common.ErrDolosUnavailable) {
+		t.Fatalf("missing unavailable error: %v", err)
+	}
+	if _, err := service.openReportPairsCSV(context.Background(), "synthetic"); !errors.Is(err, common.ErrDolosUnavailable) {
+		t.Fatalf("missing unavailable error: %v", err)
+	}
+}
+
+func TestDolosMalformedRedirectCanBeLoggedWithoutEvidenceURL(t *testing.T) {
+	const reportID = "synthetic-private-report"
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "http://synthetic.test/reports/"+reportID+"/%zz")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer provider.Close()
+	svc := &DolosService{baseURL: provider.URL, client: provider.Client()}
+	_, err := svc.openReportPairsCSV(context.Background(), reportID)
+	if err == nil {
+		t.Fatal("malformed redirect accepted")
+	}
+	safe := common.RedactReportURLs(err.Error())
+	if strings.Contains(safe, reportID) || !strings.Contains(safe, "failed to parse Location header") {
+		t.Fatal("lost privacy or diagnostics", safe)
 	}
 }

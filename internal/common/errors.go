@@ -38,6 +38,7 @@ var (
 	ErrPendingSubmissionsExist     = errors.New("pending submissions exist for contest")
 	ErrContestNotStarted           = errors.New("contest has not started yet")
 	ErrReportNotFound              = errors.New("plagiarism report not found")
+	ErrDolosUnavailable            = errors.New("plagiarism analysis is not configured")
 	ErrReportNotReady              = errors.New("plagiarism report is not finished yet")
 	ErrPairNotFound                = errors.New("plagiarism pair not found in report")
 	ErrInvalidPairKey              = errors.New("invalid pair key")
