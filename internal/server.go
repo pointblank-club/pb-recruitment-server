@@ -136,6 +136,7 @@ func NewEchoServer(
 	e.Use(mdw.LoggerWithConfig(mdw.LoggerConfig{Format: `{"time":"${time_rfc3339}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}","method":"${method}","uri":"${path}","user_agent":"${user_agent}","status":${status},"error":"${error}","latency":${latency},"latency_human":"${latency_human}","bytes_in":${bytes_in},"bytes_out":${bytes_out}}` + "\n"}))
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: []string{
+			"https://recruitment.blankpoint.club",
 			"https://recruitment.pointblank.club",
 			"https://recruitment1.pointblank.club",
 			"http://recruitment.pointblank.club",
