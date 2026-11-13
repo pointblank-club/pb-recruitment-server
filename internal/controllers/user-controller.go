@@ -59,6 +59,14 @@ var branchCodeAliases = map[string]string{
 	"ROBOTICS AND ARTIFICIAL INTELLIGENCE":          "RI",
 }
 
+func resolveBranchCode(dept string) string {
+	clean := strings.ToUpper(strings.TrimSpace(dept))
+	if code, ok := branchCodeAliases[clean]; ok {
+		return code
+	}
+	return clean
+}
+
 func validateUserInput(usn string, mobile string, currentYear int, department string) (error, string) {
 	usnPattern := `^1DS2[1-6](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
 	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 26UGDS1234
@@ -145,13 +153,12 @@ func (uc *UserController) GetUserProfile(ctx echo.Context) error {
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
 	user, err := uc.userService.GetUserProfile(ctx.Request().Context(), userID)
-	if err != nil || user == nil {
-		if errors.Is(err, common.UserNotFoundError) || user == nil {
+	if err != nil {
+		if errors.Is(err, common.UserNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.UserNotFoundError.Error()})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.FetchUserFailedError.Error()})
 	}
-
 	if user == nil {
 		return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.UserNotFoundError.Error()})
 	}
@@ -184,23 +191,20 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 	}
 
 	user, err := uc.userService.GetUserProfile(ctx.Request().Context(), userID)
-	if err != nil || user == nil {
-		if errors.Is(err, common.UserNotFoundError) || user == nil {
+	if err != nil {
+		if errors.Is(err, common.UserNotFoundError) {
 			return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.UserNotFoundError.Error()})
 		}
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": common.FetchUserFailedError.Error()})
 	}
+	if user == nil {
+		return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.UserNotFoundError.Error()})
+	}
 
-	if user.Department != "" && reqBody.Department != "" {
-		codeNew := branchCodeAliases[strings.ToUpper(strings.TrimSpace(reqBody.Department))]
-		codeCur := branchCodeAliases[strings.ToUpper(strings.TrimSpace(user.Department))]
-		if codeNew == "" {
-			codeNew = strings.ToUpper(strings.TrimSpace(reqBody.Department))
-		}
-		if codeCur == "" {
-			codeCur = strings.ToUpper(strings.TrimSpace(user.Department))
-		}
-		if codeNew != codeCur {
+	if reqBody.Department != "" {
+		codeCur := resolveBranchCode(user.Department)
+		codeNew := resolveBranchCode(reqBody.Department)
+		if codeCur == "" || codeNew != codeCur {
 			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "department cannot be changed", "field": "department"})
 		}
 	}

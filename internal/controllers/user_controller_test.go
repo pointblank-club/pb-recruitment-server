@@ -382,7 +382,85 @@ func TestUpdateUserProfileDepartmentImmutable(t *testing.T) {
 		t.Fatalf("expected 400 when changing department, got %d", rec.Code)
 	}
 
-	// 2. Keeping same department (or matching alias) should succeed
+	// 2. Keeping same department (with matching full alias) should succeed
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-123")
+	c.Set(common.VALIDATED_REQUEST_BODY, &dto.UpdateUserProfileRequest{
+		Name:         "Updated Name",
+		MobileNumber: "9876543210",
+		Department:   "Computer Science and Engineering",
+	})
+	if err := controller.UpdateUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 when keeping department via alias, got %d", rec.Code)
+	}
+
+	// 3. Legacy empty department attempting to set department should be rejected
+	controllerEmptyDept := &UserController{
+		userService: &mockUserService{
+			profileUser: &models.User{
+				ID:         "uid-legacy",
+				Department: "",
+			},
+		},
+	}
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-legacy")
+	c.Set(common.VALIDATED_REQUEST_BODY, &dto.UpdateUserProfileRequest{
+		Name:         "Updated Name",
+		MobileNumber: "9876543210",
+		Department:   "ME",
+	})
+	if err := controllerEmptyDept.UpdateUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when legacy user sets department, got %d", rec.Code)
+	}
+}
+
+func TestUserProfileErrorClassification(t *testing.T) {
+	e := echo.New()
+
+	// 1. GetUserProfile DB error returns 500, not 404
+	controllerDBErr := &UserController{
+		userService: &mockUserService{
+			profileErr: errors.New("pq: connection refused"),
+		},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/users/profile", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-123")
+	if err := controllerDBErr.GetUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for DB failure in GetUserProfile, got %d", rec.Code)
+	}
+
+	// 2. GetUserProfile UserNotFoundError returns 404
+	controllerNotFound := &UserController{
+		userService: &mockUserService{
+			profileErr: common.UserNotFoundError,
+		},
+	}
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-123")
+	if err := controllerNotFound.GetUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for UserNotFoundError in GetUserProfile, got %d", rec.Code)
+	}
+
+	// 3. UpdateUserProfile DB error on fetch returns 500, not 404
+	req = httptest.NewRequest(http.MethodPost, "/users/profile", nil)
 	rec = httptest.NewRecorder()
 	c = e.NewContext(req, rec)
 	c.Set(common.AUTH_USER_ID, "uid-123")
@@ -391,11 +469,11 @@ func TestUpdateUserProfileDepartmentImmutable(t *testing.T) {
 		MobileNumber: "9876543210",
 		Department:   "CS",
 	})
-	if err := controller.UpdateUserProfile(c); err != nil {
+	if err := controllerDBErr.UpdateUserProfile(c); err != nil {
 		t.Fatalf("unexpected handler error: %v", err)
 	}
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 when keeping department, got %d", rec.Code)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for DB failure in UpdateUserProfile, got %d", rec.Code)
 	}
 }
 
