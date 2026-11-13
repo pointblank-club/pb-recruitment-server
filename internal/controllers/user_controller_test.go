@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"app/internal/common"
+	"app/internal/middleware"
 	"app/internal/models"
 	"app/internal/models/dto"
 	"context"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -463,6 +465,75 @@ func TestUpdateUserProfileDepartmentImmutable(t *testing.T) {
 	}
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when legacy user sets department, got %d", rec.Code)
+	}
+
+	// 4. Retaining unchanged legacy department (e.g. CSE -> CSE) should succeed
+	controllerLegacyDept := &UserController{
+		userService: &mockUserService{
+			profileUser: &models.User{
+				ID:         "uid-legacy-custom",
+				Department: "CSE",
+			},
+		},
+	}
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-legacy-custom")
+	c.Set(common.VALIDATED_REQUEST_BODY, &dto.UpdateUserProfileRequest{
+		Name:         "Updated Name",
+		MobileNumber: "9876543210",
+		Department:   "CSE",
+	})
+	if err := controllerLegacyDept.UpdateUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 when retaining unchanged legacy department, got %d", rec.Code)
+	}
+
+	// 5. Changing legacy department (e.g. CSE -> ME) should be rejected
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-legacy-custom")
+	c.Set(common.VALIDATED_REQUEST_BODY, &dto.UpdateUserProfileRequest{
+		Name:         "Updated Name",
+		MobileNumber: "9876543210",
+		Department:   "ME",
+	})
+	if err := controllerLegacyDept.UpdateUserProfile(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when changing legacy department, got %d", rec.Code)
+	}
+}
+
+func TestUpdateUserProfileWithMiddleware(t *testing.T) {
+	e := echo.New()
+	controller := &UserController{
+		userService: &mockUserService{
+			profileUser: &models.User{
+				ID:         "uid-legacy",
+				Department: "CSE",
+			},
+		},
+	}
+
+	handler := middleware.ValidateRequest(new(dto.UpdateUserProfileRequest))(controller.UpdateUserProfile)
+
+	// JSON request keeping unchanged legacy department passes validation and returns 204
+	jsonBody := `{"name":"Updated Name","mobile_number":"9876543210","department":"CSE"}`
+	req := httptest.NewRequest(http.MethodPost, "/users/profile", strings.NewReader(jsonBody))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(common.AUTH_USER_ID, "uid-legacy")
+
+	if err := handler(c); err != nil {
+		t.Fatalf("unexpected handler error: %v", err)
+	}
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for unchanged legacy department via JSON middleware, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

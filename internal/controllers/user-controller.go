@@ -201,10 +201,14 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 	}
 
 	if reqBody.Department != "" {
-		codeCur, okCur := resolveBranchCode(user.Department)
-		codeNew, okNew := resolveBranchCode(reqBody.Department)
-		if !okCur || !okNew || codeNew != codeCur {
-			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "department cannot be changed", "field": "department"})
+		curDept := strings.TrimSpace(user.Department)
+		newDept := strings.TrimSpace(reqBody.Department)
+		if curDept == "" || !strings.EqualFold(curDept, newDept) {
+			codeCur, okCur := resolveBranchCode(curDept)
+			codeNew, okNew := resolveBranchCode(newDept)
+			if !okCur || !okNew || codeNew != codeCur {
+				return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "department cannot be changed", "field": "department"})
+			}
 		}
 	}
 
