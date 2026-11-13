@@ -1,16 +1,15 @@
-name: Build, Push, and Deploy to ECS
+name: Test, build and deploy the API
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 env:
-  AWS_REGION: "ap-south-1"
-  ECR_REPOSITORY: "pb-recruitment-dev-backend-core-repo"
-  ECS_SERVICE: "pb-recruitment-dev-backend-core-svc"
-  ECS_CLUSTER: "pb-recruitment-dev-ecs-cluster"
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: pb-recruitment-api
+  ECS_CLUSTER: pb-recruitment
+  ECS_SERVICE: pb-recruitment-api
 
 jobs:
   deploy:
@@ -18,37 +17,59 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Configure AWS credentials (OIDC, no stored keys)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::168023420081:role/GitHubActionsRole
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
+      # The ECS task definition pins the moving tag `main`; the commit tag is
+      # kept so a rollback is one retag away. Forcing a new deployment pulls
+      # `main` again. A deploy whose tasks never become healthy is rolled back
+      # by ECS itself (deployment circuit breaker).
+      - name: Build and push the image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
         run: |
-          # Building Docker image
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          
-          # Pushing Docker image to ECR
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build --label org.opencontainers.image.revision=${{ github.sha }} \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:main" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:main"
 
-      - name: Force new ECS deployment
+      - name: Deploy
         run: |
-          echo "Forcing new deployment of ${{ env.ECS_SERVICE }} in cluster ${{ env.ECS_CLUSTER }}"
-          aws ecs update-service --cluster ${{ env.ECS_CLUSTER }} --service ${{ env.ECS_SERVICE }} --force-new-deployment
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment --query 'service.deployments[0].id' --output text
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"
+          aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].deployments[0].[rolloutState,rolloutStateReason]' --output text
