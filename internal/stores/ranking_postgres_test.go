@@ -572,7 +572,7 @@ func TestCodeLeaderboardFinishTimeTieBreakPostgres(t *testing.T) {
 	rankingStore := stores.NewRankingStore(db)
 
 	assertCodeOrder := func(stage string) {
-		lb, err := rankingStore.GetCodeLeaderboard(ctx, contest, 0)
+		lb, err := rankingStore.GetLiveLeaderboard(ctx, contest, 0, 0)
 		if err != nil {
 			t.Fatalf("%s: GetCodeLeaderboard failed: %v", stage, err)
 		}

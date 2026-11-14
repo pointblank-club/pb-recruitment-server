@@ -146,9 +146,24 @@ before the website editor, which now consumes inputs and answers from one respon
 MCQ submission status, details, and history return `attempted` until the contest
 ends, then the stored verdict (`accepted` or `wrong_answer`). The problem overview
 shows `attempted`/`unsolved` while open and `solved`/`failed` after closing.
-The public live leaderboard uses only code submissions for scores, ranks, solved
-counts, and solve times. Admins see full results; after closing, public totals
-include MCQs. Per-problem leaderboard breakdowns remain admin-only.
+The public live leaderboard includes coding results immediately. MCQ scores,
+solved counts, ranks, and solve times update together at five-minute intervals
+from contest start (5, 10, 15 minutes, etc.), including submissions made and
+verdicts finalized before the latest interval boundary. Delayed grading and regrading publish at the next
+boundary; previously published MCQ verdicts remain in effect until then. Admins
+see all results immediately, and the public leaderboard shows all results as soon
+as the contest ends. Incorrect or pending
+answers do not count as solves. Per-problem breakdowns remain admin-only.
+MCQ verdict history is stored in PostgreSQL so publication is consistent across
+replicas and restarts. The first public request for a cutoff atomically freezes
+its MCQ problem totals in PostgreSQL; subsequent pages and replicas reuse them,
+even after cache expiry. A grading transaction that commits after this snapshot
+waits for the next batch. Code results continue to update independently.
+Snapshots are retained for viewed batches until the contest is deleted.
+Existing verdicts first publish at the next boundary after
+the history migration. Submission times retain their existing one-second precision.
+Batch aggregate changes can still reveal MCQ correctness, even while individual
+submission verdicts are masked.
 
 ## PostgreSQL tests
 

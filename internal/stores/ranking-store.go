@@ -23,6 +23,7 @@ import (
 type leaderboardCacheEntry struct {
 	data      *dto.GetLeaderboardResponse
 	expiresAt time.Time
+	mcqCutoff int64
 }
 
 type RankingStore struct {
@@ -149,29 +150,30 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 const leaderboardPageSize = 20
 
 func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, false, s.cacheTTL, "")
+	return s.getLeaderboard(ctx, contestID, page, nil)
 }
 
-func (s *RankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, true, s.cacheTTL, "code")
+// GetLiveLeaderboard takes an exclusive MCQ publication cutoff in Unix milliseconds.
+func (s *RankingStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
+	return s.getLeaderboard(ctx, contestID, page, &mcqCutoff)
 }
 
-func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool, ttl time.Duration, suffix string) (*dto.GetLeaderboardResponse, error) {
+func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff *int64) (*dto.GetLeaderboardResponse, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
 
 	page = max(0, page)
 	cacheKey := fmt.Sprintf("%s:%d", contestID, page)
-	if suffix != "" {
-		cacheKey += ":" + suffix
+	if mcqCutoff != nil {
+		cacheKey += ":live"
 	}
 
-	if ttl > 0 {
+	if s.cacheTTL > 0 {
 		s.cacheMu.RLock()
 		entry, ok := s.cache[cacheKey]
 		s.cacheMu.RUnlock()
-		if ok && time.Now().Before(entry.expiresAt) {
+		if ok && time.Now().Before(entry.expiresAt) && (mcqCutoff == nil || entry.mcqCutoff == *mcqCutoff) {
 			return cloneLeaderboardResponse(entry.data), nil
 		}
 	}
@@ -188,6 +190,12 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 	if !exists {
 		return nil, common.ContestNotFoundError
+	}
+
+	if mcqCutoff != nil {
+		if err := s.freezeMCQBatch(ctx, contestID, *mcqCutoff); err != nil {
+			return nil, err
+		}
 	}
 
 	offset := page * leaderboardPageSize
@@ -213,9 +221,11 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	var isConsolidated bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
-		log.Printf("ranking-store: check consolidated query failed: %v", err)
-		return nil, fmt.Errorf("check consolidated rankings: %w", err)
+	if mcqCutoff == nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
+			log.Printf("ranking-store: check consolidated query failed: %v", err)
+			return nil, fmt.Errorf("check consolidated rankings: %w", err)
+		}
 	}
 
 	entriesQ := `
@@ -254,35 +264,41 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		LIMIT $2 OFFSET $3
 	`
 	}
-	if codeOnly {
-		// Recompute before pagination so neither stored MCQ points nor final ranks leak.
+
+	args := []any{contestID, leaderboardPageSize, offset}
+	if mcqCutoff != nil {
+		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
-		WITH first_code_solves AS (
+		WITH first_solves AS (
 			SELECT user_id, problem_id, MIN(created_at) AS solved_at
-			FROM submissions
+			FROM submissions sub
 			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
 			GROUP BY user_id, problem_id
 		),
-		code_aggregates AS (
-			SELECT fcs.user_id,
-			       SUM(p.score) AS score,
-			       MAX(fcs.solved_at) AS last_solve_time
-			FROM first_code_solves fcs
-			JOIN problems p ON p.id = fcs.problem_id AND p.contest_id = $1
-			GROUP BY fcs.user_id
+		user_scores AS (
+			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time
+            FROM (
+                SELECT fs.user_id, p.score, fs.solved_at
+                FROM first_solves fs JOIN problems p ON p.id = fs.problem_id AND p.contest_id = $1
+                UNION ALL
+                SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
+                WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
+            ) solves
+            GROUP BY user_id
 		)
-		SELECT RANK() OVER (ORDER BY COALESCE(ca.score, 0) DESC, ca.last_solve_time ASC NULLS LAST) AS rank,
-		       r.user_id, u.name, u.usn, COALESCE(ca.score, 0)
+		SELECT RANK() OVER (ORDER BY COALESCE(us.score, 0) DESC, us.last_solve_time ASC NULLS LAST) AS rank,
+		       r.user_id, u.name, u.usn, COALESCE(us.score, 0)
 		FROM rankings r
 		JOIN users u ON u.id = r.user_id
-		LEFT JOIN code_aggregates ca ON ca.user_id = r.user_id
+		LEFT JOIN user_scores us ON us.user_id = r.user_id
 		WHERE r.contest_id = $1 AND r.hidden = false AND r.disqualified = false
-		ORDER BY rank ASC, ca.last_solve_time ASC NULLS LAST, u.name ASC, r.user_id ASC
+		ORDER BY rank ASC, us.last_solve_time ASC NULLS LAST, u.name ASC, r.user_id ASC
 		LIMIT $2 OFFSET $3
 		`
+		args = append(args, *mcqCutoff)
 	}
 
-	rows, err := s.db.QueryContext(ctx, entriesQ, contestID, leaderboardPageSize, offset)
+	rows, err := s.db.QueryContext(ctx, entriesQ, args...)
 	if err != nil {
 		log.Printf("ranking-store: leaderboard query failed: %v", err)
 		return nil, fmt.Errorf("query leaderboard: %w", err)
@@ -306,7 +322,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 
-	problemScores, err := s.getProblemScores(ctx, contestID, userIDs, codeOnly)
+	problemScores, err := s.getProblemScores(ctx, contestID, userIDs, mcqCutoff)
 	if err != nil {
 		log.Printf("ranking-store: problem scores query failed : %v", err)
 		return nil, err
@@ -328,12 +344,13 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		TotalCount: totalCount,
 	}
 
-	if ttl > 0 && page < max(totalPages, 1) {
-		s.cacheMu.Lock()
-		s.cache[cacheKey] = leaderboardCacheEntry{
-			data:      resp,
-			expiresAt: time.Now().Add(ttl),
+	if s.cacheTTL > 0 && page < max(totalPages, 1) {
+		entry := leaderboardCacheEntry{data: resp, expiresAt: time.Now().Add(s.cacheTTL)}
+		if mcqCutoff != nil {
+			entry.mcqCutoff = *mcqCutoff
 		}
+		s.cacheMu.Lock()
+		s.cache[cacheKey] = entry
 		s.cacheMu.Unlock()
 	}
 
@@ -360,7 +377,7 @@ func summarizeSolves(scores []dto.ProblemScore) (solved int, lastSolve int64) {
 }
 
 // Attempts counts all submissions for display; the final-ranking penalty excludes judge errors.
-func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string, codeOnly bool) (map[string][]dto.ProblemScore, error) {
+func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string, mcqCutoff *int64) (map[string][]dto.ProblemScore, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
@@ -373,8 +390,14 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		args = append(args, uid)
 	}
 	typeFilter := ""
-	if codeOnly {
+	batchQuery := ""
+	if mcqCutoff != nil {
+		args = append(args, *mcqCutoff)
 		typeFilter = "AND sub.type = 'code'"
+		batchQuery = fmt.Sprintf(`UNION ALL
+            SELECT user_id, problem_id, problem_name, max_score, attempts, score, solved_at
+            FROM leaderboard_mcq_scores
+            WHERE contest_id = $1 AND cutoff = $%d AND user_id IN (%s)`, len(args), strings.Join(placeholders, ", "))
 	}
 
 	query := fmt.Sprintf(`
@@ -392,8 +415,9 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		  AND sub.user_id IN (%s)
 		  %s
 		GROUP BY sub.user_id, sub.problem_id, p.name, p.score
-		ORDER BY sub.user_id, p.name
-	`, strings.Join(placeholders, ", "), typeFilter)
+		%s
+        ORDER BY 1, 3
+	`, strings.Join(placeholders, ", "), typeFilter, batchQuery)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -876,4 +900,34 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	}
 
 	return len(participants), nil
+}
+
+// The first reader freezes the batch atomically; all replicas reuse it after expiry.
+func (s *RankingStore) freezeMCQBatch(ctx context.Context, contestID string, cutoff int64) error {
+	_, err := s.db.ExecContext(ctx, `
+ WITH new_batch AS (
+     INSERT INTO leaderboard_mcq_batches(contest_id, cutoff) VALUES($1, $2)
+     ON CONFLICT DO NOTHING RETURNING contest_id
+ ), verdicts AS (
+     SELECT sub.*, (
+         SELECT h.status FROM mcq_verdict_history h
+         WHERE h.submission_id = sub.id AND h.finalized_at < $2
+         ORDER BY h.finalized_at DESC, h.id DESC LIMIT 1
+     ) AS published_status
+     FROM submissions sub
+     WHERE sub.contest_id = $1 AND sub.type = 'mcq' AND sub.created_at * 1000 < $2
+       AND EXISTS (SELECT 1 FROM new_batch)
+ )
+ INSERT INTO leaderboard_mcq_scores
+     (contest_id, cutoff, user_id, problem_id, problem_name, max_score, attempts, score, solved_at)
+ SELECT $1, $2, sub.user_id, sub.problem_id, p.name, p.score, COUNT(*),
+        MAX(CASE WHEN sub.published_status = 'accepted' THEN p.score ELSE 0 END),
+        MIN(CASE WHEN sub.published_status = 'accepted' THEN sub.created_at END)
+ FROM verdicts sub JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
+ GROUP BY sub.user_id, sub.problem_id, p.name, p.score
+ `, contestID, cutoff)
+	if err != nil {
+		return fmt.Errorf("freeze MCQ leaderboard batch: %w", err)
+	}
+	return nil
 }

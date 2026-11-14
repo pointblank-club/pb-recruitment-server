@@ -22,6 +22,10 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	ctx := context.Background()
 	user, contest, codeProblem, codeSubmission, executions := executionFixture(t, db, 1)
+	now := time.Now().Unix()
+	if _, err := db.Exec(`UPDATE contests SET start_time=$2 WHERE id=$1`, contest, (now-240)*1000); err != nil {
+		t.Fatal(err)
+	}
 	storage := stores.NewStorage(db)
 	for _, execution := range executions {
 		if err := storage.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: execution.ID, Status: "accepted"}); err != nil {
@@ -43,7 +47,8 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 	if err := storage.Executions.ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: otherExecutions[0].ID, Status: "accepted"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE submissions SET created_at=100 WHERE id=$1`, otherCode); err != nil {
+	// Recent coding solves remain visible before the next MCQ batch.
+	if _, err := db.Exec(`UPDATE submissions SET created_at=$2 WHERE id=$1`, otherCode, now-10); err != nil {
 		t.Fatal(err)
 	}
 	// Two accepted code attempts still count as one solved problem and one score.
@@ -67,9 +72,32 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Even a forced consolidation while open must not expose stored MCQ ranks.
-	if _, err := storage.Rankings.ConsolidateContest(ctx, contest, false, true); err != nil {
+	correctAt, mcqOnlyAt := now-180, now-30
+	if _, err := db.Exec(`UPDATE submissions SET created_at=$2 WHERE id=$1`, correct, correctAt); err != nil {
 		t.Fatal(err)
+	}
+	mcqOnly := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'MCQ only',$2,$1,1,'CS')`, mcqOnly, mcqOnly+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, contest, mcqOnly); err != nil {
+		t.Fatal(err)
+	}
+	mcqOnlySubmission, err := storage.Submissions.CreateMCQSubmission(ctx, &models.Submission{UserID: mcqOnly, ContestID: contest, ProblemID: mcqProblem, Type: models.MCQ, Option: []int{1}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Submissions.JudgeMCQ(ctx, mcqOnlySubmission); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE submissions SET created_at=$2 WHERE id=$1`, mcqOnlySubmission, mcqOnlyAt); err != nil {
+		t.Fatal(err)
+	}
+	// Model verdicts finalized at the historical submission times.
+	for id, finalized := range map[string]int64{correct: correctAt, mcqOnlySubmission: mcqOnlyAt} {
+		if _, err := db.Exec(`UPDATE mcq_verdict_history SET finalized_at=$2 WHERE submission_id=$1`, id, finalized*1000); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cs := services.NewContestService(storage, nil)
 	sc := controllers.NewSubmissionController(services.NewSubmissionService(storage, nil, nil), cs, nil)
@@ -97,9 +125,21 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 		}
 		return w.Body.Bytes()
 	}
-	for _, ended := range []bool{false, true} {
+	for _, stage := range []string{"live", "consolidated", "batched", "ended"} {
+		ended := stage == "ended"
+		if stage == "consolidated" {
+			if _, err := storage.Rankings.ConsolidateContest(ctx, contest, false, true); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if stage == "batched" {
+			// Advance the batch boundary without waiting or invalidating the warm live cache.
+			if _, err := db.Exec(`UPDATE contests SET start_time=$2 WHERE id=$1`, contest, (now-360)*1000); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if ended {
-			if _, err := db.Exec(`UPDATE contests SET end_time=$2 WHERE id=$1`, contest, time.Now().Add(-time.Minute).UnixMilli()); err != nil {
+			if _, err := db.Exec(`UPDATE contests SET end_time=$2 WHERE id=$1`, contest, time.Now().Add(-time.Second).UnixMilli()); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -153,29 +193,72 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 		if err := json.Unmarshal(request(sc.GetSubmissionStatus, user, codeSubmission, nil), &codeStatus); err != nil || codeStatus.Status != models.Accepted {
 			t.Fatalf("code verdict changed: %+v %v", codeStatus, err)
 		}
-		// Warm both cache variants in alternating order; admin data must not leak to guests.
+		// Share the cache across viewers without exposing admin-only breakdowns.
 		for _, viewer := range []string{"", user, other, ""} {
 			var entries []dto.LeaderboardEntry
-			if err := json.Unmarshal(request(cc.GetLeaderboard, viewer, contest, nil), &entries); err != nil || len(entries) != 2 {
+			if err := json.Unmarshal(request(cc.GetLeaderboard, viewer, contest, nil), &entries); err != nil || len(entries) != 3 {
 				t.Fatalf("leaderboard=%+v %v", entries, err)
 			}
+			wantOrder := []string{user, other, mcqOnly}
+			if viewer == user || ended {
+				wantOrder = []string{user, mcqOnly, other}
+			} else if stage == "batched" {
+				wantOrder = []string{user, other, mcqOnly}
+			}
+			if entries[0].UserID != wantOrder[0] || entries[1].UserID != wantOrder[1] || entries[2].UserID != wantOrder[2] {
+				t.Fatalf("stage=%s viewer=%q unexpected leaderboard order: %+v", stage, viewer, entries)
+			}
 			for _, entry := range entries {
-				wantScore, wantRank, wantSolved := 10, 2, 1
-				if !ended && viewer != user {
-					// Non-admins during live contest see code-only leaderboard (MCQs excluded).
-					wantScore, wantRank, wantSolved = 10, 1, 1
-				} else if entry.UserID == user {
-					wantScore, wantRank, wantSolved = 30, 1, 2
+				wantScore, wantRank, wantSolved, wantTime := 10, 3, 1, (now-10)*1000
+				wantBreakdowns := 2
+				switch entry.UserID {
+				case user:
+					wantScore, wantRank, wantSolved, wantTime = 30, 1, 2, correctAt*1000
+				case mcqOnly:
+					wantScore, wantRank, wantSolved, wantTime = 20, 2, 1, mcqOnlyAt*1000
+					wantBreakdowns = 1
 				}
-				if entry.TotalScore != wantScore || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved {
-					t.Fatalf("ended=%v viewer=%q entry=%+v, want score/rank/solves=%d/%d/%d", ended, viewer, entry, wantScore, wantRank, wantSolved)
+				if viewer != user && !ended {
+					switch entry.UserID {
+					case mcqOnly:
+						wantScore, wantRank, wantSolved, wantTime = 0, 3, 0, 0
+					case user:
+						if stage != "batched" {
+							wantScore, wantSolved, wantTime = 10, 1, 100_000
+						}
+					case other:
+						wantRank = 2
+					}
+				}
+				if entry.TotalScore != wantScore || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved || entry.LastSubmissionTime != wantTime {
+					t.Fatalf("stage=%s viewer=%q entry=%+v, want score/rank/solves/time=%d/%d/%d/%d", stage, viewer, entry, wantScore, wantRank, wantSolved, wantTime)
 				}
 				if viewer != user && len(entry.ProblemScores) != 0 {
 					t.Fatal("non-admin breakdown leaked")
 				}
-				if viewer == user && len(entry.ProblemScores) != 2 {
+				if viewer == user && len(entry.ProblemScores) != wantBreakdowns {
 					t.Fatal("admin breakdown missing")
 				}
+			}
+		}
+	}
+	// A new batch must bypass an unexpired cache entry without accumulating keys per batch.
+	for _, tc := range []struct {
+		cutoff                  int64
+		userScore, mcqOnlyScore int
+	}{
+		{correctAt, 10, 0},
+		{correctAt + 1, 30, 0},
+		{mcqOnlyAt + 1, 30, 20},
+		{correctAt, 10, 0},
+	} {
+		res, err := storage.Rankings.GetLiveLeaderboard(ctx, contest, 0, tc.cutoff*1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range res.Entries {
+			if entry.UserID == user && entry.TotalScore != tc.userScore || entry.UserID == mcqOnly && entry.TotalScore != tc.mcqOnlyScore {
+				t.Fatalf("cutoff=%d unexpected cached totals: %+v", tc.cutoff, res.Entries)
 			}
 		}
 	}

@@ -2223,7 +2223,7 @@ const docTemplate = `{
         },
         "/contests/{id}/leaderboard": {
             "get": {
-                "description": "Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.",
+                "description": "Get ranked participants with pagination. Public coding results update immediately; MCQ scores, solves, and ranks update in five-minute batches from contest start. All results are visible to admins and after contest end. Problem breakdowns are admin-only.",
                 "produces": [
                     "application/json"
                 ],
