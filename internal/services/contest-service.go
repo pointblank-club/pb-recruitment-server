@@ -325,6 +325,15 @@ func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID st
 		if contest.IsRegistered == nil || !*contest.IsRegistered {
 			return common.UserNotRegisteredError
 		}
+		if userID != "" {
+			ended, err := cs.stores.Contests.IsSessionEnded(ctx, contestID, userID)
+			if err != nil {
+				return err
+			}
+			if ended {
+				return common.ErrContestSessionEnded
+			}
+		}
 	}
 
 	return nil
@@ -467,6 +476,20 @@ func (cs *ContestService) GetContest(ctx context.Context, contestID string, user
 
 func (cs *ContestService) GetContestRegistrations(ctx context.Context, contestID string) ([]dto.ContestRegistration, error) {
 	return cs.stores.Contests.GetContestRegistrations(ctx, contestID)
+}
+
+func (cs *ContestService) EndContestSession(ctx context.Context, contestID string, userID string) error {
+	contest, err := cs.GetContest(ctx, contestID, userID)
+	if err != nil {
+		return err
+	}
+	if contest.GetRunningStatus() != models.ContestRunningOpen {
+		return common.ContestNotRunningError
+	}
+	if contest.IsRegistered == nil || !*contest.IsRegistered {
+		return common.UserNotRegisteredError
+	}
+	return cs.stores.Contests.EndContestSession(ctx, contestID, userID)
 }
 
 func (cs *ContestService) RecordTabSwitch(ctx context.Context, contestID string, userID string, observationID string, generation int, count int) (*dto.TabSwitchResponse, error) {

@@ -338,7 +338,8 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			COALESCE(r.disqualified, FALSE),
 			COALESCE(cr.tab_switch_count, 0),
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
-			COALESCE(cr.reset_generation, 0)
+			COALESCE(cr.reset_generation, 0),
+			cr.ended_at
 		FROM contest_registrations cr
 		INNER JOIN users u ON cr.user_id = u.id
 		LEFT JOIN rankings r ON r.contest_id = cr.contest_id AND r.user_id = cr.user_id
@@ -370,6 +371,7 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.TabSwitchCount,
 			&reg.IsTabSwitchTerminated,
 			&reg.ResetGeneration,
+			&reg.EndedAt,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
 			continue
@@ -558,7 +560,9 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 			(cr.user_id IS NOT NULL) AS is_registered,
 			COALESCE(cr.tab_switch_count, 0),
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
-			COALESCE(cr.reset_generation, 0)
+			COALESCE(cr.reset_generation, 0),
+			COALESCE(cr.ended_at IS NOT NULL, FALSE),
+			cr.ended_at
 		FROM contests c
 		LEFT JOIN contest_registrations cr
 			ON cr.contest_id = c.id AND cr.user_id = $2
@@ -572,6 +576,8 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 		&res.TabSwitchCount,
 		&res.IsTabSwitchTerminated,
 		&res.Generation,
+		&res.IsSessionEnded,
+		&res.EndedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -660,4 +666,61 @@ func (s *ContestStore) ResetContestantTabSwitches(ctx context.Context, contestID
 	}
 
 	return newGen, nil
+}
+
+func (s *ContestStore) EndContestSession(ctx context.Context, contestID string, userID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("contest store: db is not initialized")
+	}
+
+	const q = `
+		UPDATE contest_registrations
+		SET ended_at = $3
+		WHERE contest_id = $1 AND user_id = $2 AND ended_at IS NULL
+	`
+
+	res, err := s.db.ExecContext(ctx, q, contestID, userID, time.Now().UnixMilli())
+	if err != nil {
+		return fmt.Errorf("end contest session: %w", err)
+	}
+
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("end contest session rows affected: %w", err)
+	}
+
+	if affected == 0 {
+		var exists bool
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM contest_registrations WHERE contest_id = $1 AND user_id = $2)`, contestID, userID).Scan(&exists); err != nil {
+			return fmt.Errorf("check registration: %w", err)
+		}
+		if !exists {
+			return common.UserNotRegisteredError
+		}
+	}
+
+	return nil
+}
+
+func (s *ContestStore) IsSessionEnded(ctx context.Context, contestID string, userID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, nil
+	}
+
+	const q = `
+		SELECT ended_at IS NOT NULL
+		FROM contest_registrations
+		WHERE contest_id = $1 AND user_id = $2
+	`
+
+	var ended bool
+	err := s.db.QueryRowContext(ctx, q, contestID, userID).Scan(&ended)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check session ended: %w", err)
+	}
+
+	return ended, nil
 }

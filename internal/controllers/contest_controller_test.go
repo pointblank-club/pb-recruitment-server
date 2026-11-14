@@ -763,3 +763,102 @@ type mockAdminStore struct {
 func (m mockAdminStore) IsAdmin(ctx context.Context, userID string) (bool, error) {
 	return m.isAdmin, nil
 }
+
+func TestEndContestSessionController(t *testing.T) {
+	now := time.Now().UnixMilli()
+
+	t.Run("successfully ends session when contest is open and registered", func(t *testing.T) {
+		storage := &stores.Storage{
+			Contests: submissionContestStore{
+				contest:    models.Contest{ID: "c1", StartTime: now - 60_000, EndTime: now + 60_000},
+				registered: true,
+			},
+		}
+		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/end", nil)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.EndContestSession(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected HTTP 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("returns 403 when user is not registered", func(t *testing.T) {
+		storage := &stores.Storage{
+			Contests: submissionContestStore{
+				contest:    models.Contest{ID: "c1", StartTime: now - 60_000, EndTime: now + 60_000},
+				registered: false,
+			},
+		}
+		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/end", nil)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.EndContestSession(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected HTTP 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("returns 403 when contest is not running", func(t *testing.T) {
+		storage := &stores.Storage{
+			Contests: submissionContestStore{
+				contest:    models.Contest{ID: "c1", StartTime: now - 120_000, EndTime: now - 60_000},
+				registered: true,
+			},
+		}
+		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/end", nil)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.EndContestSession(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected HTTP 403, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("returns 404 when contest does not exist", func(t *testing.T) {
+		storage := &stores.Storage{
+			Contests: submissionContestStore{
+				err: common.ContestNotFoundError,
+			},
+		}
+		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/contests/nonexistent/end", nil)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("nonexistent")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.EndContestSession(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected HTTP 404, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+}

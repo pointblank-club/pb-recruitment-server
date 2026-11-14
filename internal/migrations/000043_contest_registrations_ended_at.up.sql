@@ -1,0 +1,3 @@
+ALTER TABLE contest_registrations
+  ADD COLUMN IF NOT EXISTS ended_at BIGINT DEFAULT NULL;
+

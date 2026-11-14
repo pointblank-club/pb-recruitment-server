@@ -661,7 +661,8 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 				"error": common.ContestNotFoundError.Error(),
 			})
 		} else if errors.Is(err, common.UserNotRegisteredError) ||
-			errors.Is(err, common.ContestNotRunningError) {
+			errors.Is(err, common.ContestNotRunningError) ||
+			errors.Is(err, common.ErrContestSessionEnded) {
 			return ctx.JSON(http.StatusForbidden, map[string]string{
 				"error": err.Error(),
 			})
@@ -711,7 +712,8 @@ func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
 				"error": common.ContestNotFoundError.Error(),
 			})
 		} else if errors.Is(err, common.UserNotRegisteredError) ||
-			errors.Is(err, common.ContestNotRunningError) {
+			errors.Is(err, common.ContestNotRunningError) ||
+			errors.Is(err, common.ErrContestSessionEnded) {
 			return ctx.JSON(http.StatusForbidden, map[string]string{
 				"error": err.Error(),
 			})
@@ -887,6 +889,39 @@ func (cc *ContestController) GetCandidateSessionStatus(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, status)
+}
+
+// EndContestSession godoc
+// @Summary      End contest session early
+// @Description  Marks candidate's contest session as ended, preventing further submissions or viewing while live.
+// @Tags         Contests
+// @Security     BearerAuth
+// @Param        id path string true "Contest ID"
+// @Success      200 {object} map[string]string
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Not registered or contest not running"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /contests/{id}/end [post]
+func (cc *ContestController) EndContestSession(ctx echo.Context) error {
+	contestID := ctx.Param("id")
+	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
+
+	err := cc.contestService.EndContestSession(ctx.Request().Context(), contestID, userID)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.UserNotRegisteredError) || errors.Is(err, common.ContestNotRunningError) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("end contest session failed: %v", err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to end contest session"})
+	}
+
+	return ctx.JSON(http.StatusOK, map[string]string{
+		"message": "contest session ended successfully",
+	})
 }
 
 // ResetContestantTabSwitches godoc

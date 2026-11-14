@@ -41,6 +41,14 @@ func (s submissionContestStore) IsRegistered(context.Context, string, string) (b
 	return s.registered, nil
 }
 
+func (s submissionContestStore) IsSessionEnded(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
+func (s submissionContestStore) EndContestSession(context.Context, string, string) error {
+	return nil
+}
+
 func (s submissionContestStore) GetCandidateSessionStatus(context.Context, string, string) (*dto.CandidateSessionStatusResponse, error) {
 	return &dto.CandidateSessionStatusResponse{
 		TabSwitchCount:        s.tabSwitchCount,
