@@ -655,8 +655,51 @@ func TestGetLeaderboardController(t *testing.T) {
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
 		}
-		if recorder.Header().Get("X-Total-Count") != "5" {
-			t.Fatalf("expected X-Total-Count 5, got %s", recorder.Header().Get("X-Total-Count"))
+		if recorder.Header().Get("X-Total-Count") != "5" || recorder.Header().Get("x-total-count") != "5" {
+			t.Fatalf("expected X-Total-Count 5, got %s / %s", recorder.Header().Get("X-Total-Count"), recorder.Header().Get("x-total-count"))
+		}
+		if recorder.Header().Get("X-Total-Pages") != "1" || recorder.Header().Get("x-total-pages") != "1" {
+			t.Fatalf("expected X-Total-Pages 1, got %s / %s", recorder.Header().Get("X-Total-Pages"), recorder.Header().Get("x-total-pages"))
+		}
+	})
+
+	t.Run("empty leaderboard sets total count 0 and total pages 1 with empty array", func(t *testing.T) {
+		rankStore := &mockRankingStore{
+			leaderboardFunc: func(_ context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+				return &dto.GetLeaderboardResponse{
+					Entries:    nil,
+					TotalCount: 0,
+					TotalPages: 0,
+					Page:       page,
+				}, nil
+			},
+		}
+		storage := &stores.Storage{
+			Contests: submissionContestStore{
+				contest: models.Contest{ID: "c1", StartTime: now - 60_000, EndTime: now + 60_000},
+			},
+			Rankings: rankStore,
+		}
+		controller := NewContestController(services.NewContestService(storage, nil), nil)
+		recorder := httptest.NewRecorder()
+		ctx := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/contests/c1/leaderboard", nil), recorder)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+
+		if err := controller.GetLeaderboard(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", recorder.Code)
+		}
+		if recorder.Header().Get("X-Total-Count") != "0" {
+			t.Fatalf("expected X-Total-Count 0, got %s", recorder.Header().Get("X-Total-Count"))
+		}
+		if recorder.Header().Get("X-Total-Pages") != "1" {
+			t.Fatalf("expected X-Total-Pages 1, got %s", recorder.Header().Get("X-Total-Pages"))
+		}
+		if strings.TrimSpace(recorder.Body.String()) != "[]" {
+			t.Fatalf("expected empty array [], got %s", recorder.Body.String())
 		}
 	})
 

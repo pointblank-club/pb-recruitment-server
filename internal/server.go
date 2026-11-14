@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -166,16 +167,28 @@ func NewEchoServer(
 		}
 	})
 
+	allowedOrigins := []string{
+		"https://recruitment.blankpoint.club",
+		"https://recruitment.pointblank.club",
+		"https://recruitment1.pointblank.club",
+		"http://recruitment.pointblank.club",
+		"https://pb-recruitment-website-green.vercel.app",
+		"http://localhost:5173",
+		"http://127.0.0.1:5173",
+		"http://localhost:3000",
+		"http://127.0.0.1:3000",
+	}
+	if extra := os.Getenv("CORS_ALLOWED_ORIGINS"); extra != "" {
+		for _, o := range strings.Split(extra, ",") {
+			trimmed := strings.TrimSpace(o)
+			if trimmed != "" {
+				allowedOrigins = append(allowedOrigins, trimmed)
+			}
+		}
+	}
+
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
-		AllowOrigins: []string{
-			"https://recruitment.blankpoint.club",
-			"https://recruitment.pointblank.club",
-			"https://recruitment1.pointblank.club",
-			"http://recruitment.pointblank.club",
-			"https://pb-recruitment-website-green.vercel.app",
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
-		},
+		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{
 			echo.GET,
 			echo.POST,
@@ -194,8 +207,11 @@ func NewEchoServer(
 		ExposeHeaders: []string{
 			echo.HeaderRetryAfter,
 			"X-Total-Count",
+			"x-total-count",
 			"X-Total-Pages",
+			"x-total-pages",
 			"X-Current-Page",
+			"x-current-page",
 			"X-Truncated",
 			"X-Max-Pairs-Per-Report",
 			"X-Min-Similarity",

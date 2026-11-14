@@ -229,6 +229,9 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	totalPages := (totalCount + leaderboardPageSize - 1) / leaderboardPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
 
 	var isConsolidated bool
 	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
