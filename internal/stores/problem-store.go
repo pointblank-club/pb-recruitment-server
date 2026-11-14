@@ -27,20 +27,9 @@ func (s *ProblemStore) CreateProblem(ctx context.Context, p *models.Problem) err
 		return fmt.Errorf("problem store: db is not initialized")
 	}
 
-	timeLimit := p.TimeLimit
-	if timeLimit <= 0 {
-		timeLimit = 1000
-	}
-	memoryLimit := p.MemoryLimit
-	if memoryLimit <= 0 {
-		memoryLimit = 256
-	}
-	p.TimeLimit = timeLimit
-	p.MemoryLimit = memoryLimit
-
 	const q = `
-		INSERT INTO problems (id, contest_id, name, score, type, answer, options, description, has_multiple_answers, testcases, time_limit, memory_limit)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO problems (id, contest_id, name, score, type, answer, options, description, has_multiple_answers, testcases)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     `
 	_, err := s.db.ExecContext(ctx, q,
 		p.ID,
@@ -53,8 +42,6 @@ func (s *ProblemStore) CreateProblem(ctx context.Context, p *models.Problem) err
 		p.Description,
 		p.HasMultipleAnswers,
 		p.Testcases,
-		timeLimit,
-		memoryLimit,
 	)
 
 	if err != nil {
@@ -70,17 +57,6 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 		return fmt.Errorf("problem store: db is not initialized")
 	}
 
-	timeLimit := p.TimeLimit
-	if timeLimit <= 0 {
-		timeLimit = 1000
-	}
-	memoryLimit := p.MemoryLimit
-	if memoryLimit <= 0 {
-		memoryLimit = 256
-	}
-	p.TimeLimit = timeLimit
-	p.MemoryLimit = memoryLimit
-
 	const q = `
         UPDATE problems
         SET name = $3,
@@ -90,9 +66,7 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 			options = $7,
 			has_multiple_answers = $8,
 			description = $9,
-			testcases = COALESCE(NULLIF($10, ''), testcases),
-			time_limit = $11,
-			memory_limit = $12
+			testcases = COALESCE(NULLIF($10, ''), testcases)
         WHERE id = $1 AND contest_id = $2
     `
 
@@ -107,8 +81,6 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 		p.HasMultipleAnswers,
 		p.Description,
 		p.Testcases,
-		timeLimit,
-		memoryLimit,
 	)
 
 	if err != nil {
@@ -138,7 +110,7 @@ func (s *ProblemStore) DeleteProblem(ctx context.Context, contestID string, prob
 
 func (s *ProblemStore) GetProblemList(ctx context.Context, contestID string) ([]dto.ProblemOverview, error) {
 	const q = `
-		SELECT id, name, score, type, COALESCE(time_limit, 1000), COALESCE(memory_limit, 256)
+		SELECT id, name, score, type
 		FROM problems
 		WHERE contest_id = $1
 	`
@@ -154,7 +126,7 @@ func (s *ProblemStore) GetProblemList(ctx context.Context, contestID string) ([]
 	for rows.Next() {
 		var p dto.ProblemOverview
 
-		if err := rows.Scan(&p.ID, &p.Name, &p.Score, &p.Type, &p.TimeLimit, &p.MemoryLimit); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Score, &p.Type); err != nil {
 			log.Printf("problem-store: row scan failed: %v", err)
 			return nil, fmt.Errorf("scan problem row: %w", err)
 		}
@@ -174,7 +146,7 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 	const q = `
 		SELECT id, contest_id, name, COALESCE(description,''), score, type,
 		       COALESCE(answer, '{}'::integer[]), COALESCE(options, '{}'::text[]),
-		       COALESCE(testcases,''), COALESCE(time_limit, 1000), COALESCE(memory_limit, 256)
+		       COALESCE(testcases,'')
 		FROM problems
 		WHERE id = $1 AND contest_id = $2
 	`
@@ -185,7 +157,7 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 
 	err := s.db.QueryRowContext(ctx, q, problemID, contestID).Scan(
 		&p.ProblemID, &p.ContestID, &p.Name, &p.Description, &p.Score, &p.Type,
-		&answers, &options, &p.TestcasesKey, &p.TimeLimit, &p.MemoryLimit,
+		&answers, &options, &p.TestcasesKey,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {

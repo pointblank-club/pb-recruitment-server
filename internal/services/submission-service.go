@@ -211,13 +211,12 @@ func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string
 		indexes[i] = i
 	}
 
-	cpuLimit, memLimit := judgeLimits(problem.TimeLimit, problem.MemoryLimit)
 	compilerOptions := judge0.CompilerOptions(languageID)
 	jobs := make([]judge0.SubmissionRequest, len(inputs))
 	for i := range inputs {
 		jobs[i] = judge0.SubmissionRequest{
 			SourceCode: source, LanguageID: languageID, Stdin: inputs[i], ExpectedOutput: &outputs[i],
-			CPUTimeLimit: cpuLimit, MemoryLimit: memLimit, CompilerOptions: compilerOptions, WallTimeLimit: 10, MaxFileSize: 1024,
+			CPUTimeLimit: submissionCPUTimeLimit, MemoryLimit: submissionMemoryLimit, CompilerOptions: compilerOptions, WallTimeLimit: 10, MaxFileSize: 1024,
 		}
 	}
 	executions, err := ss.stores.Executions.InsertBatch(ctx, submissionID, indexes, jobs)
@@ -377,18 +376,12 @@ func judgeRuntimeMillis(raw json.RawMessage) (int64, error) {
 	return int64(seconds*1000 + 0.5), nil
 }
 
-const maxJudgeRetries = 3
-
-func judgeLimits(milliseconds, mebibytes int) (float64, float64) {
-	cpu, memory := float64(milliseconds)/1000, float64(mebibytes)*1024
-	if cpu <= 0 {
-		cpu = 1
-	}
-	if memory <= 0 {
-		memory = 256 * 1024
-	}
-	return cpu, memory
-}
+const (
+	maxJudgeRetries = 3
+	// Judge0 uses seconds and KiB; resource bounds are fixed across problems.
+	submissionCPUTimeLimit = 1
+	submissionMemoryLimit  = 256 * 1024
+)
 
 func (ss *SubmissionService) RecoverJudge0(ctx context.Context) {
 	if ss.stores.Submissions != nil {
@@ -636,8 +629,7 @@ func (ss *SubmissionService) recoveryJob(ctx context.Context, e models.Execution
 		if err != nil {
 			return job, err
 		}
-		cpu, memory := judgeLimits(problem.TimeLimit, problem.MemoryLimit)
-		job = judge0.SubmissionRequest{SourceCode: source, LanguageID: language, Stdin: inputs[e.TestCaseIndex], ExpectedOutput: &outputs[e.TestCaseIndex], CPUTimeLimit: cpu, MemoryLimit: memory, CompilerOptions: judge0.CompilerOptions(language), WallTimeLimit: 10, MaxFileSize: 1024}
+		job = judge0.SubmissionRequest{SourceCode: source, LanguageID: language, Stdin: inputs[e.TestCaseIndex], ExpectedOutput: &outputs[e.TestCaseIndex], CPUTimeLimit: submissionCPUTimeLimit, MemoryLimit: submissionMemoryLimit, CompilerOptions: judge0.CompilerOptions(language), WallTimeLimit: 10, MaxFileSize: 1024}
 		if err := ss.stores.Executions.SaveRecoveryPayload(ctx, e, job); err != nil {
 			return job, err
 		}

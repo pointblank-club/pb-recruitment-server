@@ -3115,9 +3115,6 @@ const docTemplate = `{
                     "description": "UUID as string",
                     "type": "string"
                 },
-                "memory_limit": {
-                    "type": "integer"
-                },
                 "name": {
                     "type": "string"
                 },
@@ -3128,9 +3125,6 @@ const docTemplate = `{
                     }
                 },
                 "score": {
-                    "type": "integer"
-                },
-                "time_limit": {
                     "type": "integer"
                 },
                 "type": {
@@ -3484,12 +3478,6 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 262144
                 },
-                "memory_limit": {
-                    "description": "MB; Judge0 accepts 2048-512000 KB",
-                    "type": "integer",
-                    "maximum": 500,
-                    "minimum": 2
-                },
                 "name": {
                     "type": "string",
                     "maxLength": 200
@@ -3511,12 +3499,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/app_internal_models_dto.CreateTestCaseRequest"
                     }
-                },
-                "time_limit": {
-                    "description": "milliseconds; submissions run under Judge0's 10s default wall_time_limit",
-                    "type": "integer",
-                    "maximum": 10000,
-                    "minimum": 1
                 },
                 "type": {
                     "enum": [
@@ -3641,9 +3623,6 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
-                "memory_limit": {
-                    "type": "integer"
-                },
                 "name": {
                     "type": "string"
                 },
@@ -3664,9 +3643,6 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/app_internal_models_dto.TestCaseResponse"
                     }
-                },
-                "time_limit": {
-                    "type": "integer"
                 },
                 "type": {
                     "$ref": "#/definitions/app_internal_models.SubmissionType"
@@ -3867,9 +3843,6 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "memory_limit": {
-                    "type": "integer"
-                },
                 "name": {
                     "type": "string"
                 },
@@ -3877,9 +3850,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "score": {
-                    "type": "integer"
-                },
-                "time_limit": {
                     "type": "integer"
                 },
                 "type": {

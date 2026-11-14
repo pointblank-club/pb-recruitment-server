@@ -86,7 +86,7 @@ func (s problemTestStore) GetProblem(ctx context.Context, problemID, contestID s
 	if s.getProblem != nil {
 		return s.getProblem(ctx, problemID, contestID)
 	}
-	return &dto.GetProblemStatementResponse{Type: models.Code, TimeLimit: 1000, MemoryLimit: 256}, nil
+	return &dto.GetProblemStatementResponse{Type: models.Code}, nil
 }
 
 type executionTestStore struct {

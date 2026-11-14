@@ -11,6 +11,4 @@ type Problem struct {
 	Answer             []int          `json:"answer"`
 	Options            []string       `json:"options"`
 	Testcases          string         `json:"-"`
-	TimeLimit   int `json:"time_limit,omitempty"`
-	MemoryLimit int `json:"memory_limit,omitempty"`
 }
