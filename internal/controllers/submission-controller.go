@@ -292,7 +292,7 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		if errors.Is(err, common.UserNotRegisteredError) {
 			return ctx.NoContent(http.StatusForbidden)
 		}
-		if errors.Is(err, common.ContestNotRunningError) || errors.Is(err, common.ErrTabSwitchTerminated) {
+		if errors.Is(err, common.ContestNotRunningError) || errors.Is(err, common.ErrTabSwitchTerminated) || errors.Is(err, common.ErrContestSessionEnded) {
 			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
 		}
 		if errors.Is(err, common.KeyAlreadyExistsError) || errors.Is(err, common.ErrSubmissionAlreadyExists) || errors.Is(err, common.ErrIdempotencyConflict) {

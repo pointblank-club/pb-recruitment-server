@@ -24,6 +24,7 @@ type Storage struct {
 		RecordTabSwitch(ctx context.Context, contestID string, userID string, observationID string, generation int, count int) (*dto.TabSwitchResponse, error)
 		GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error)
 		ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) (int, error)
+		EndContestSession(ctx context.Context, contestID string, userID string) error
 	}
 	Users interface {
 		CreateUser(context.Context, *auth.UserRecord, *dto.CreateUserRequest) error

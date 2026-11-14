@@ -48,6 +48,7 @@ type ContestRegistration struct {
 	TabSwitchCount        int    `json:"tab_switch_count"`
 	IsTabSwitchTerminated bool   `json:"is_tab_switch_terminated"`
 	ResetGeneration       int    `json:"reset_generation"`
+	EndedAt               *int64 `json:"ended_at,omitempty"`
 }
 
 // TabSwitchRequest represents the payload for reporting a tab switch event.
@@ -74,9 +75,11 @@ type TabSwitchConflictResponse struct {
 
 // CandidateSessionStatusResponse represents the candidate's current contest session status.
 type CandidateSessionStatusResponse struct {
-	TabSwitchCount        int  `json:"tab_switch_count"`
-	IsTabSwitchTerminated bool `json:"is_tab_switch_terminated"`
-	Generation            int  `json:"generation"`
+	TabSwitchCount        int    `json:"tab_switch_count"`
+	IsTabSwitchTerminated bool   `json:"is_tab_switch_terminated"`
+	Generation            int    `json:"generation"`
+	IsSessionEnded        bool   `json:"is_session_ended"`
+	EndedAt               *int64 `json:"ended_at,omitempty"`
 }
 
 // ResetTabSwitchesResponse represents the response when an admin resets tab switches.

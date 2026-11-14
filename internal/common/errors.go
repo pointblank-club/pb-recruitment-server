@@ -45,6 +45,7 @@ var (
 	ErrTabSwitchTerminated         = errors.New("contest participation terminated due to tab switching")
 	ErrInvalidTabSwitchRequest     = errors.New("invalid tab switch payload")
 	ErrCannotUnregisterAfterStart  = errors.New("cannot unregister after contest has started")
+	ErrContestSessionEnded         = errors.New("contest session already ended")
 )
 
 // TabSwitchStaleGenerationError indicates that a tab-switch observation belongs

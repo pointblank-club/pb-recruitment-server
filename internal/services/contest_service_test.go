@@ -285,6 +285,7 @@ type visibilityContestTestStore struct {
 	*stores.ContestStore
 	start, end   int64
 	isRegistered bool
+	sessionEnded bool
 }
 
 func (s visibilityContestTestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
@@ -295,6 +296,16 @@ func (s visibilityContestTestStore) IsRegistered(context.Context, string, string
 	return s.isRegistered, nil
 }
 
+func (s visibilityContestTestStore) GetCandidateSessionStatus(context.Context, string, string) (*dto.CandidateSessionStatusResponse, error) {
+	return &dto.CandidateSessionStatusResponse{
+		IsSessionEnded: s.sessionEnded,
+	}, nil
+}
+
+func (s visibilityContestTestStore) EndContestSession(context.Context, string, string) error {
+	return nil
+}
+
 func TestGetProblemVisibility(t *testing.T) {
 	now := time.Now().UnixMilli()
 	tests := []struct {
@@ -302,6 +313,7 @@ func TestGetProblemVisibility(t *testing.T) {
 		userID       string
 		start, end   int64
 		isRegistered bool
+		sessionEnded bool
 		wantErr      error
 	}{
 		{
@@ -327,6 +339,15 @@ func TestGetProblemVisibility(t *testing.T) {
 			end:          now + 60_000,
 			isRegistered: true,
 			wantErr:      nil,
+		},
+		{
+			name:         "running contest blocks user who ended session",
+			userID:       "u1",
+			start:        now - 60_000,
+			end:          now + 60_000,
+			isRegistered: true,
+			sessionEnded: true,
+			wantErr:      common.ErrContestSessionEnded,
 		},
 		{
 			name:         "running contest blocks anonymous guest",
@@ -369,6 +390,7 @@ func TestGetProblemVisibility(t *testing.T) {
 					start:        tc.start,
 					end:          tc.end,
 					isRegistered: tc.isRegistered,
+					sessionEnded: tc.sessionEnded,
 				},
 			}
 			svc := NewContestService(storage, nil)

@@ -338,7 +338,8 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			COALESCE(r.disqualified, FALSE),
 			COALESCE(cr.tab_switch_count, 0),
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
-			COALESCE(cr.reset_generation, 0)
+			COALESCE(cr.reset_generation, 0),
+			cr.ended_at
 		FROM contest_registrations cr
 		INNER JOIN users u ON cr.user_id = u.id
 		LEFT JOIN rankings r ON r.contest_id = cr.contest_id AND r.user_id = cr.user_id
@@ -370,6 +371,7 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.TabSwitchCount,
 			&reg.IsTabSwitchTerminated,
 			&reg.ResetGeneration,
+			&reg.EndedAt,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
 			continue
@@ -558,7 +560,9 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 			(cr.user_id IS NOT NULL) AS is_registered,
 			COALESCE(cr.tab_switch_count, 0),
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
-			COALESCE(cr.reset_generation, 0)
+			COALESCE(cr.reset_generation, 0),
+			COALESCE(cr.ended_at IS NOT NULL, FALSE),
+			cr.ended_at
 		FROM contests c
 		LEFT JOIN contest_registrations cr
 			ON cr.contest_id = c.id AND cr.user_id = $2
@@ -572,6 +576,8 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 		&res.TabSwitchCount,
 		&res.IsTabSwitchTerminated,
 		&res.Generation,
+		&res.IsSessionEnded,
+		&res.EndedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -660,4 +666,76 @@ func (s *ContestStore) ResetContestantTabSwitches(ctx context.Context, contestID
 	}
 
 	return newGen, nil
+}
+
+func (s *ContestStore) EndContestSession(ctx context.Context, contestID string, userID string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("contest store: db is not initialized")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin end contest session tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Lock candidate registration row to serialize against concurrent submissions/resets
+	const lockRegQ = `
+		SELECT ended_at
+		FROM contest_registrations
+		WHERE contest_id = $1 AND user_id = $2
+		FOR UPDATE
+	`
+	var existingEndedAt sql.NullInt64
+	if err := tx.QueryRowContext(ctx, lockRegQ, contestID, userID).Scan(&existingEndedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			exists, existsErr := s.contestExists(ctx, tx, contestID)
+			if existsErr != nil {
+				return fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !exists {
+				return common.ContestNotFoundError
+			}
+			return common.UserNotRegisteredError
+		}
+		return fmt.Errorf("lock registration for end session: %w", err)
+	}
+
+	// 2. Sample ended_at timestamp AFTER acquiring the registration write lock
+	now := time.Now().UnixMilli()
+
+	// 3. Validate contest timing inside the store transaction
+	const contestTimingQ = `
+		SELECT start_time, end_time
+		FROM contests
+		WHERE id = $1
+	`
+	var startTime, endTime int64
+	if err := tx.QueryRowContext(ctx, contestTimingQ, contestID).Scan(&startTime, &endTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return common.ContestNotFoundError
+		}
+		return fmt.Errorf("check contest timing: %w", err)
+	}
+
+	if now < startTime || now > endTime {
+		return common.ContestNotRunningError
+	}
+
+	// 4. Idempotent: preserve original timestamp if already ended
+	if existingEndedAt.Valid {
+		return nil
+	}
+
+	// 5. Update ended_at
+	const updateQ = `
+		UPDATE contest_registrations
+		SET ended_at = $3
+		WHERE contest_id = $1 AND user_id = $2
+	`
+	if _, err := tx.ExecContext(ctx, updateQ, contestID, userID, now); err != nil {
+		return fmt.Errorf("update contest session ended_at: %w", err)
+	}
+
+	return tx.Commit()
 }

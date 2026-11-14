@@ -2151,6 +2151,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/contests/{id}/end": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Marks candidate's contest session as ended, preventing further submissions or viewing while live.",
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "End contest session early",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Not registered or contest not running",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/contests/{id}/leaderboard": {
             "get": {
                 "description": "Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.",
@@ -3377,8 +3447,14 @@ const docTemplate = `{
         "app_internal_models_dto.CandidateSessionStatusResponse": {
             "type": "object",
             "properties": {
+                "ended_at": {
+                    "type": "integer"
+                },
                 "generation": {
                     "type": "integer"
+                },
+                "is_session_ended": {
+                    "type": "boolean"
                 },
                 "is_tab_switch_terminated": {
                     "type": "boolean"
@@ -3425,6 +3501,9 @@ const docTemplate = `{
                 },
                 "email": {
                     "type": "string"
+                },
+                "ended_at": {
+                    "type": "integer"
                 },
                 "hidden": {
                     "type": "boolean"

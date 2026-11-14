@@ -659,3 +659,105 @@ func TestMigration038DownAndUpPostgres(t *testing.T) {
 		t.Fatal("tab_switch_observations missing after re-up migration")
 	}
 }
+
+func TestEndContestSessionPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+	storage := stores.NewStorage(db)
+
+	t.Run("successfully ends active session and sets ended_at", func(t *testing.T) {
+		user, contest, _, _ := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
+		before := time.Now().UnixMilli()
+		if err := storage.Contests.EndContestSession(ctx, contest, user); err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		after := time.Now().UnixMilli()
+
+		status, err := storage.Contests.GetCandidateSessionStatus(ctx, contest, user)
+		if err != nil {
+			t.Fatalf("expected nil error getting status, got %v", err)
+		}
+		if !status.IsSessionEnded {
+			t.Fatalf("expected IsSessionEnded to be true")
+		}
+		if status.EndedAt == nil || *status.EndedAt < before || *status.EndedAt > after {
+			t.Fatalf("expected EndedAt between %d and %d, got %v", before, after, status.EndedAt)
+		}
+
+		// Idempotent repetition preserves original timestamp
+		originalEndedAt := *status.EndedAt
+		time.Sleep(5 * time.Millisecond)
+		if err := storage.Contests.EndContestSession(ctx, contest, user); err != nil {
+			t.Fatalf("expected duplicate End to succeed, got %v", err)
+		}
+		statusRepeat, err := storage.Contests.GetCandidateSessionStatus(ctx, contest, user)
+		if err != nil {
+			t.Fatalf("expected nil error getting status, got %v", err)
+		}
+		if statusRepeat.EndedAt == nil || *statusRepeat.EndedAt != originalEndedAt {
+			t.Fatalf("expected original EndedAt %d preserved, got %v", originalEndedAt, statusRepeat.EndedAt)
+		}
+	})
+
+	t.Run("returns ContestNotRunningError when contest is expired", func(t *testing.T) {
+		user, contest, _, _ := seedTabSwitchFixture(t, db, -120_000, -60_000, -180_000, -120_000)
+		err := storage.Contests.EndContestSession(ctx, contest, user)
+		if !errors.Is(err, common.ContestNotRunningError) {
+			t.Fatalf("expected ContestNotRunningError, got %v", err)
+		}
+	})
+
+	t.Run("returns ContestNotRunningError when contest has not started yet", func(t *testing.T) {
+		user, contest, _, _ := seedTabSwitchFixture(t, db, 60_000, 3_600_000, -60_000, 30_000)
+		err := storage.Contests.EndContestSession(ctx, contest, user)
+		if !errors.Is(err, common.ContestNotRunningError) {
+			t.Fatalf("expected ContestNotRunningError, got %v", err)
+		}
+	})
+
+	t.Run("returns UserNotRegisteredError when user is not registered", func(t *testing.T) {
+		_, contest, _, _ := seedTabSwitchFixture(t, db, -60_000, 3_600_000, -120_000, 3_600_000)
+		err := storage.Contests.EndContestSession(ctx, contest, uuid.NewString())
+		if !errors.Is(err, common.UserNotRegisteredError) {
+			t.Fatalf("expected UserNotRegisteredError, got %v", err)
+		}
+	})
+
+	t.Run("returns ContestNotFoundError when contest does not exist", func(t *testing.T) {
+		err := storage.Contests.EndContestSession(ctx, uuid.NewString(), uuid.NewString())
+		if !errors.Is(err, common.ContestNotFoundError) {
+			t.Fatalf("expected ContestNotFoundError, got %v", err)
+		}
+	})
+
+	t.Run("serializes against registration lock and validates timing inside transaction", func(t *testing.T) {
+		// Contest is set to expire in 100ms
+		user, contest, _, _ := seedTabSwitchFixture(t, db, -60_000, 100, -120_000, -60_000)
+
+		// Hold registration row lock until contest expires
+		holdTx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer holdTx.Rollback()
+		if _, err := holdTx.Exec(`SELECT ended_at FROM contest_registrations WHERE contest_id = $1 AND user_id = $2 FOR UPDATE`, contest, user); err != nil {
+			t.Fatal(err)
+		}
+
+		endErrCh := make(chan error, 1)
+		go func() {
+			endErrCh <- storage.Contests.EndContestSession(ctx, contest, user)
+		}()
+
+		// Wait until contest expires, then commit transaction to release lock
+		time.Sleep(150 * time.Millisecond)
+		if err := holdTx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+
+		endErr := <-endErrCh
+		if !errors.Is(endErr, common.ContestNotRunningError) {
+			t.Fatalf("expected ContestNotRunningError after expiring while waiting for lock, got %v", endErr)
+		}
+	})
+}

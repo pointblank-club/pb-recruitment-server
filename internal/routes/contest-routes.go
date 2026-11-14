@@ -81,4 +81,11 @@ func AddContestRoutes(
 		middleware.RequireFirebaseAuth(authClient),
 		middleware.LimitReads(limiter),
 	)
+
+	// End candidate contest session early
+	e.POST("/contests/:id/end",
+		contestController.EndContestSession,
+		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "registration", 60, 60),
+	)
 }
