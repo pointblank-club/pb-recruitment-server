@@ -17,9 +17,9 @@ func AddUserRoutes(
 ) {
 	e.POST("/auth/signup",
 		userController.Signup,
-		middleware.SignupCapacity(),
 		middleware.ValidateRequest(new(dto.SignupRequest)),
 		middleware.LimitRequests(limiter, "signup-ip", 1200, 3600),
+		middleware.SignupCapacity(),
 		middleware.LimitRequests(limiter, "signup-fleet", 100, 10),
 	)
 

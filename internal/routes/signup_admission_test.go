@@ -3,6 +3,7 @@ package routes
 import (
 	"app/internal/controllers"
 	"context"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -74,3 +75,61 @@ func TestSignupRouteAllowsHundredCampusAdmissionsBeforeFleetLimit(t *testing.T) 
 		t.Fatal("shared fleet burst was not bounded", w.Code, w.Header())
 	}
 }
+
+type blockingReader struct {
+	started chan struct{}
+	unblock chan struct{}
+}
+
+func (b *blockingReader) Read(p []byte) (n int, err error) {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-b.unblock
+	return 0, io.EOF
+}
+
+func TestSignupSlowBodyDoesNotHoldCapacitySlots(t *testing.T) {
+	e := echo.New()
+	limiter := &signupBudgetRecorder{hits: map[string]int{}, limits: map[string][2]int{}}
+	AddUserRoutes(e, nil, controllers.NewUserController(nil), limiter)
+
+	// Simulate 100 slow clients currently stuck reading request bodies.
+	// If SignupCapacity were before ValidateRequest, all 100 capacity slots would be held,
+	// causing any subsequent request to be immediately rejected with 429.
+	unblock := make(chan struct{})
+	defer close(unblock)
+
+	var wg sync.WaitGroup
+	for range 100 {
+		wg.Add(1)
+		reader := &blockingReader{started: make(chan struct{}, 1), unblock: unblock}
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/auth/signup", reader)
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+		}()
+		<-reader.started
+	}
+
+	// While 100 clients are slowly reading bodies, an active legitimate request arrives.
+	// Because body validation runs before capacity allocation, capacity slots are free.
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(signupAdmissionBody))
+	r.RemoteAddr = "192.0.2.99:1234"
+	r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	e.ServeHTTP(w, r)
+
+	// The request should pass capacity and reach controller validation (returning 400 for synthetic USN),
+	// NOT 429 "signup capacity busy".
+	if w.Code == 429 && strings.Contains(w.Body.String(), "signup capacity busy") {
+		t.Fatalf("slow body reads exhausted signup capacity slots: %d %s", w.Code, w.Body.String())
+	}
+	if w.Code != 400 {
+		t.Fatalf("unexpected status code: %d, body: %s", w.Code, w.Body.String())
+	}
+}
+
