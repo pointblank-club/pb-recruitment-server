@@ -643,8 +643,8 @@ func TestSubmissionCooldownCannotBeDisabled(t *testing.T) {
 func TestRecoverySnapshotExecutionBounds(t *testing.T) {
 	service := NewSubmissionService(nil, nil, nil)
 	for _, original := range []judge0.SubmissionRequest{
-		{SourceCode: "print(1)", LanguageID: 71},
-		{SourceCode: "print(1)", LanguageID: 71, WallTimeLimit: 5, MaxFileSize: 64},
+		{SourceCode: "print(1)", LanguageID: 71, CPUTimeLimit: 9, MemoryLimit: 512000},
+		{SourceCode: "print(1)", LanguageID: 71, CPUTimeLimit: 9, MemoryLimit: 512000, WallTimeLimit: 5, MaxFileSize: 64},
 	} {
 		payload, err := json.Marshal(original)
 		if err != nil {
@@ -661,7 +661,8 @@ func TestRecoverySnapshotExecutionBounds(t *testing.T) {
 		if file == 0 {
 			file = 1024
 		}
-		if job.WallTimeLimit != wall || job.MaxFileSize != file || job.EnableNetwork || job.SourceCode != original.SourceCode {
+		if job.CPUTimeLimit != original.CPUTimeLimit || job.MemoryLimit != original.MemoryLimit ||
+			job.WallTimeLimit != wall || job.MaxFileSize != file || job.EnableNetwork || job.SourceCode != original.SourceCode {
 			t.Fatalf("recovered bounds: %+v", job)
 		}
 	}

@@ -622,8 +622,10 @@ func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 				w.WriteHeader(500)
 				return
 			}
-			source, err := base64.StdEncoding.DecodeString(payload.Submissions[0].SourceCode)
-			if err != nil || string(source) != "print(input())\n" || payload.Submissions[0].EnableNetwork {
+			job := payload.Submissions[0]
+			source, err := base64.StdEncoding.DecodeString(job.SourceCode)
+			if err != nil || string(source) != "print(input())\n" || job.EnableNetwork ||
+				job.CPUTimeLimit != 1 || job.WallTimeLimit != 10 || job.MemoryLimit != 262144 || job.MaxFileSize != 1024 {
 				t.Error("legacy job corrupted", payload, err)
 			}
 			n := dispatches.Add(1)
