@@ -155,7 +155,12 @@ see all results immediately, and the public leaderboard shows all results as soo
 as the contest ends. Incorrect or pending
 answers do not count as solves. Per-problem breakdowns remain admin-only.
 MCQ verdict history is stored in PostgreSQL so publication is consistent across
-replicas and restarts. Existing verdicts first publish at the next boundary after
+replicas and restarts. The first public request for a cutoff atomically freezes
+its MCQ problem totals in PostgreSQL; subsequent pages and replicas reuse them,
+even after cache expiry. A grading transaction that commits after this snapshot
+waits for the next batch. Code results continue to update independently.
+Snapshots are retained for viewed batches until the contest is deleted.
+Existing verdicts first publish at the next boundary after
 the history migration. Submission times retain their existing one-second precision.
 Batch aggregate changes can still reveal MCQ correctness, even while individual
 submission verdicts are masked.

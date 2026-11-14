@@ -192,6 +192,12 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		return nil, common.ContestNotFoundError
 	}
 
+	if mcqCutoff != nil {
+		if err := s.freezeMCQBatch(ctx, contestID, *mcqCutoff); err != nil {
+			return nil, err
+		}
+	}
+
 	offset := page * leaderboardPageSize
 
 	const countQ = `
@@ -266,15 +272,19 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		WITH first_solves AS (
 			SELECT user_id, problem_id, MIN(created_at) AS solved_at
 			FROM submissions sub
-			WHERE contest_id = $1 AND ` + leaderboardVerdictSQL("$4") + ` = 'accepted'
-			  AND (type <> 'mcq' OR created_at * 1000 < $4)
+			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
 			GROUP BY user_id, problem_id
 		),
 		user_scores AS (
-			SELECT fs.user_id, SUM(p.score) AS score, MAX(fs.solved_at) AS last_solve_time
-			FROM first_solves fs
-			JOIN problems p ON p.id = fs.problem_id AND p.contest_id = $1
-			GROUP BY fs.user_id
+			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time
+            FROM (
+                SELECT fs.user_id, p.score, fs.solved_at
+                FROM first_solves fs JOIN problems p ON p.id = fs.problem_id AND p.contest_id = $1
+                UNION ALL
+                SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
+                WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
+            ) solves
+            GROUP BY user_id
 		)
 		SELECT RANK() OVER (ORDER BY COALESCE(us.score, 0) DESC, us.last_solve_time ASC NULLS LAST) AS rank,
 		       r.user_id, u.name, u.usn, COALESCE(us.score, 0)
@@ -380,11 +390,14 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		args = append(args, uid)
 	}
 	typeFilter := ""
-	verdict := "sub.status"
+	batchQuery := ""
 	if mcqCutoff != nil {
 		args = append(args, *mcqCutoff)
-		typeFilter = fmt.Sprintf("AND (sub.type <> 'mcq' OR sub.created_at * 1000 < $%d)", len(args))
-		verdict = leaderboardVerdictSQL(fmt.Sprintf("$%d", len(args)))
+		typeFilter = "AND sub.type = 'code'"
+		batchQuery = fmt.Sprintf(`UNION ALL
+            SELECT user_id, problem_id, problem_name, max_score, attempts, score, solved_at
+            FROM leaderboard_mcq_scores
+            WHERE contest_id = $1 AND cutoff = $%d AND user_id IN (%s)`, len(args), strings.Join(placeholders, ", "))
 	}
 
 	query := fmt.Sprintf(`
@@ -394,16 +407,17 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 			p.name,
 			p.score AS max_score,
 			COUNT(sub.id) AS attempts,
-			MAX(CASE WHEN %s = 'accepted' THEN p.score ELSE 0 END) AS score,
-			MIN(CASE WHEN %s = 'accepted' THEN sub.created_at ELSE NULL END) AS solved_at
+			MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE 0 END) AS score,
+			MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at ELSE NULL END) AS solved_at
 		FROM submissions sub
 		INNER JOIN problems p ON sub.problem_id = p.id AND sub.contest_id = p.contest_id
 		WHERE sub.contest_id = $1
 		  AND sub.user_id IN (%s)
 		  %s
 		GROUP BY sub.user_id, sub.problem_id, p.name, p.score
-		ORDER BY sub.user_id, p.name
-	`, verdict, verdict, strings.Join(placeholders, ", "), typeFilter)
+		%s
+        ORDER BY 1, 3
+	`, strings.Join(placeholders, ", "), typeFilter, batchQuery)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -888,11 +902,32 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	return len(participants), nil
 }
 
-// MCQs use the verdict published before this boundary; code remains live.
-func leaderboardVerdictSQL(cutoff string) string {
-	return `CASE WHEN sub.type <> 'mcq' THEN sub.status ELSE (
- SELECT h.status FROM mcq_verdict_history h
- WHERE h.submission_id = sub.id AND h.finalized_at < ` + cutoff + `
- ORDER BY h.finalized_at DESC, h.id DESC LIMIT 1
- ) END`
+// The first reader freezes the batch atomically; all replicas reuse it after expiry.
+func (s *RankingStore) freezeMCQBatch(ctx context.Context, contestID string, cutoff int64) error {
+	_, err := s.db.ExecContext(ctx, `
+ WITH new_batch AS (
+     INSERT INTO leaderboard_mcq_batches(contest_id, cutoff) VALUES($1, $2)
+     ON CONFLICT DO NOTHING RETURNING contest_id
+ ), verdicts AS (
+     SELECT sub.*, (
+         SELECT h.status FROM mcq_verdict_history h
+         WHERE h.submission_id = sub.id AND h.finalized_at < $2
+         ORDER BY h.finalized_at DESC, h.id DESC LIMIT 1
+     ) AS published_status
+     FROM submissions sub
+     WHERE sub.contest_id = $1 AND sub.type = 'mcq' AND sub.created_at * 1000 < $2
+       AND EXISTS (SELECT 1 FROM new_batch)
+ )
+ INSERT INTO leaderboard_mcq_scores
+     (contest_id, cutoff, user_id, problem_id, problem_name, max_score, attempts, score, solved_at)
+ SELECT $1, $2, sub.user_id, sub.problem_id, p.name, p.score, COUNT(*),
+        MAX(CASE WHEN sub.published_status = 'accepted' THEN p.score ELSE 0 END),
+        MIN(CASE WHEN sub.published_status = 'accepted' THEN sub.created_at END)
+ FROM verdicts sub JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
+ GROUP BY sub.user_id, sub.problem_id, p.name, p.score
+ `, contestID, cutoff)
+	if err != nil {
+		return fmt.Errorf("freeze MCQ leaderboard batch: %w", err)
+	}
+	return nil
 }
