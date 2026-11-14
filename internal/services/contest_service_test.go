@@ -254,11 +254,11 @@ func TestGetLeaderboard(t *testing.T) {
 func TestMCQLeaderboardCutoff(t *testing.T) {
 	const start int64 = 1_700_000_001_123
 	for _, tc := range []struct{ elapsed, cutoff int64 }{
-		{0, start / 1000},
-		{299_999, start / 1000},
-		{300_000, (start + 300_000) / 1000},
-		{599_999, (start + 300_000) / 1000},
-		{600_000, (start + 600_000) / 1000},
+		{0, start},
+		{299_999, start},
+		{300_000, start + 300_000},
+		{599_999, start + 300_000},
+		{600_000, start + 600_000},
 	} {
 		if got := mcqLeaderboardCutoff(start, start+tc.elapsed); got != tc.cutoff {
 			t.Errorf("elapsed=%d cutoff=%d want=%d", tc.elapsed, got, tc.cutoff)
@@ -289,7 +289,7 @@ func TestLeaderboardMCQBatchPolicy(t *testing.T) {
 				Rankings: serviceRankingTestStore{
 					liveLeaderboardFunc: func(_ context.Context, contestID string, page int, cutoff int64) (*dto.GetLeaderboardResponse, error) {
 						liveCalled = true
-						if contestID != "c1" || page != 2 || cutoff != start/1000 {
+						if contestID != "c1" || page != 2 || cutoff != start {
 							t.Fatalf("unexpected live request: %s page=%d cutoff=%d", contestID, page, cutoff)
 						}
 						return &dto.GetLeaderboardResponse{}, nil

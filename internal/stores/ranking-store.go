@@ -153,6 +153,7 @@ func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, pag
 	return s.getLeaderboard(ctx, contestID, page, nil)
 }
 
+// GetLiveLeaderboard takes an exclusive MCQ publication cutoff in Unix milliseconds.
 func (s *RankingStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
 	return s.getLeaderboard(ctx, contestID, page, &mcqCutoff)
 }
@@ -214,9 +215,11 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	var isConsolidated bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
-		log.Printf("ranking-store: check consolidated query failed: %v", err)
-		return nil, fmt.Errorf("check consolidated rankings: %w", err)
+	if mcqCutoff == nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
+			log.Printf("ranking-store: check consolidated query failed: %v", err)
+			return nil, fmt.Errorf("check consolidated rankings: %w", err)
+		}
 	}
 
 	entriesQ := `
@@ -262,9 +265,9 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		entriesQ = `
 		WITH first_solves AS (
 			SELECT user_id, problem_id, MIN(created_at) AS solved_at
-			FROM submissions
-			WHERE contest_id = $1 AND status = 'accepted'
-			  AND (type <> 'mcq' OR created_at < $4)
+			FROM submissions sub
+			WHERE contest_id = $1 AND ` + leaderboardVerdictSQL("$4") + ` = 'accepted'
+			  AND (type <> 'mcq' OR created_at * 1000 < $4)
 			GROUP BY user_id, problem_id
 		),
 		user_scores AS (
@@ -377,9 +380,11 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		args = append(args, uid)
 	}
 	typeFilter := ""
+	verdict := "sub.status"
 	if mcqCutoff != nil {
 		args = append(args, *mcqCutoff)
-		typeFilter = fmt.Sprintf("AND (sub.type <> 'mcq' OR sub.created_at < $%d)", len(args))
+		typeFilter = fmt.Sprintf("AND (sub.type <> 'mcq' OR sub.created_at * 1000 < $%d)", len(args))
+		verdict = leaderboardVerdictSQL(fmt.Sprintf("$%d", len(args)))
 	}
 
 	query := fmt.Sprintf(`
@@ -389,8 +394,8 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 			p.name,
 			p.score AS max_score,
 			COUNT(sub.id) AS attempts,
-			MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE 0 END) AS score,
-			MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at ELSE NULL END) AS solved_at
+			MAX(CASE WHEN %s = 'accepted' THEN p.score ELSE 0 END) AS score,
+			MIN(CASE WHEN %s = 'accepted' THEN sub.created_at ELSE NULL END) AS solved_at
 		FROM submissions sub
 		INNER JOIN problems p ON sub.problem_id = p.id AND sub.contest_id = p.contest_id
 		WHERE sub.contest_id = $1
@@ -398,7 +403,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		  %s
 		GROUP BY sub.user_id, sub.problem_id, p.name, p.score
 		ORDER BY sub.user_id, p.name
-	`, strings.Join(placeholders, ", "), typeFilter)
+	`, verdict, verdict, strings.Join(placeholders, ", "), typeFilter)
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -881,4 +886,13 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	}
 
 	return len(participants), nil
+}
+
+// MCQs use the verdict published before this boundary; code remains live.
+func leaderboardVerdictSQL(cutoff string) string {
+	return `CASE WHEN sub.type <> 'mcq' THEN sub.status ELSE (
+ SELECT h.status FROM mcq_verdict_history h
+ WHERE h.submission_id = sub.id AND h.finalized_at < ` + cutoff + `
+ ORDER BY h.finalized_at DESC, h.id DESC LIMIT 1
+ ) END`
 }

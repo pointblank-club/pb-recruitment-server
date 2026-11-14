@@ -308,7 +308,7 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 
 func mcqLeaderboardCutoff(start, now int64) int64 {
 	const interval = int64(5 * time.Minute / time.Millisecond)
-	return (start + (now-start)/interval*interval) / 1000
+	return start + (now-start)/interval*interval
 }
 
 func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID string, userID string) error {

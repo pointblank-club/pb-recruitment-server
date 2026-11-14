@@ -148,10 +148,15 @@ ends, then the stored verdict (`accepted` or `wrong_answer`). The problem overvi
 shows `attempted`/`unsolved` while open and `solved`/`failed` after closing.
 The public live leaderboard includes coding results immediately. MCQ scores,
 solved counts, ranks, and solve times update together at five-minute intervals
-from contest start (5, 10, 15 minutes, etc.), including submissions made before
-the latest interval boundary. Admins see all results immediately, and the public
-leaderboard shows all results as soon as the contest ends. Incorrect or pending
+from contest start (5, 10, 15 minutes, etc.), including submissions made and
+verdicts finalized before the latest interval boundary. Delayed grading and regrading publish at the next
+boundary; previously published MCQ verdicts remain in effect until then. Admins
+see all results immediately, and the public leaderboard shows all results as soon
+as the contest ends. Incorrect or pending
 answers do not count as solves. Per-problem breakdowns remain admin-only.
+MCQ verdict history is stored in PostgreSQL so publication is consistent across
+replicas and restarts. Existing verdicts first publish at the next boundary after
+the history migration. Submission times retain their existing one-second precision.
 Batch aggregate changes can still reveal MCQ correctness, even while individual
 submission verdicts are masked.
 

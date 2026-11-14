@@ -93,6 +93,12 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 	if _, err := db.Exec(`UPDATE submissions SET created_at=$2 WHERE id=$1`, mcqOnlySubmission, mcqOnlyAt); err != nil {
 		t.Fatal(err)
 	}
+	// Model verdicts finalized at the historical submission times.
+	for id, finalized := range map[string]int64{correct: correctAt, mcqOnlySubmission: mcqOnlyAt} {
+		if _, err := db.Exec(`UPDATE mcq_verdict_history SET finalized_at=$2 WHERE submission_id=$1`, id, finalized*1000); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cs := services.NewContestService(storage, nil)
 	sc := controllers.NewSubmissionController(services.NewSubmissionService(storage, nil, nil), cs, nil)
 	cc := controllers.NewContestController(cs, nil)
@@ -246,7 +252,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 		{mcqOnlyAt + 1, 30, 20},
 		{correctAt, 10, 0},
 	} {
-		res, err := storage.Rankings.GetLiveLeaderboard(ctx, contest, 0, tc.cutoff)
+		res, err := storage.Rankings.GetLiveLeaderboard(ctx, contest, 0, tc.cutoff*1000)
 		if err != nil {
 			t.Fatal(err)
 		}
