@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -32,68 +33,12 @@ func NewUserController(userService *services.UserService) *UserController {
 	}
 }
 
-var branchCodeAliases = map[string]string{
-	"AI": "AI", "AE": "AE", "AU": "AU", "BT": "BT", "CG": "CG",
-	"MD": "MD", "ET": "ET", "EC": "EC", "ME": "ME", "EE": "EE",
-	"CH": "CH", "CB": "CB", "IC": "IC", "CD": "CD", "CS": "CS",
-	"CV": "CV", "IS": "IS", "RI": "RI", "EI": "EI", "CY": "CY",
-	"ARTIFICIAL INTELLIGENCE AND MACHINE LEARNING": "AI",
-	"AERONAUTICAL ENGINEERING":                     "AE",
-	"AUTOMOBILE ENGINEERING":                        "AU",
-	"BIOTECHNOLOGY":                                 "BT",
-	"COMPUTER SCIENCE AND DESIGN":                   "CG",
-	"MEDICAL ELECTRONICS ENGINEERING":               "MD",
-	"ELECTRONICS AND TELECOMMUNICATION ENGINEERING": "ET",
-	"ELECTRONICS AND COMMUNICATION ENGINEERING":     "EC",
-	"ELECTRONICS AND INSTRUMENTATION ENGINEERING":   "EI",
-	"MECHANICAL ENGINEERING":                        "ME",
-	"ELECTRICAL AND ELECTRONICS ENGINEERING":        "EE",
-	"CHEMICAL ENGINEERING":                          "CH",
-	"COMPUTER SCIENCE AND ENGINEERING (CYBER SECURITY)": "CY",
-	"COMPUTER SCIENCE AND ENGINEERING (DATA SCIENCE)":   "CD",
-	"COMPUTER SCIENCE AND ENGINEERING (IOT AND CYBER SECURITY INCLUDING BLOCKCHAIN)": "IC",
-	"INFORMATION SCIENCE AND ENGINEERING":           "IS",
-	"COMPUTER SCIENCE AND ENGINEERING":              "CS",
-	"COMPUTER SCIENCE AND BUSINESS SYSTEMS":         "CB",
-	"CIVIL ENGINEERING":                             "CV",
-	"ROBOTICS AND ARTIFICIAL INTELLIGENCE":          "RI",
-}
-
 func resolveBranchCode(dept string) (string, bool) {
-	clean := strings.ToUpper(strings.ReplaceAll(dept, "&", " AND "))
-	clean = strings.Join(strings.Fields(clean), " ")
-	code, ok := branchCodeAliases[clean]
-	return code, ok
+	return common.ResolveBranchCode(dept)
 }
 
 func validateUserInput(usn string, mobile string, currentYear int, department string) (error, string) {
-	usnPattern := `^1DS2[1-6](AI|AE|AU|BT|CG|MD|ET|EC|ME|EE|CH|CB|IC|CD|CS|CV|IS|RI|EI|CY)[0-9]{3}$` // Example: 1DS24IC015
-	appNumberPattern := `^26UGDS[0-9]{4}$`                                                           // Example: 26UGDS1234
-	phonePattern := `^[0-9]{10}$`                                                                    // Example: 9234567890
-
-	usnUpper := strings.ToUpper(strings.TrimSpace(usn))
-	mobileClean := strings.TrimSpace(mobile)
-
-	if currentYear == 1 {
-		if matched, _ := regexp.MatchString(appNumberPattern, usnUpper); !matched {
-			return common.InvalidApplicationNumberError, "id"
-		}
-	} else {
-		if matched, _ := regexp.MatchString(usnPattern, usnUpper); !matched {
-			return common.InvalidUSNError, "id"
-		}
-		if department != "" {
-			expectedCode, ok := resolveBranchCode(department)
-			if !ok || usnUpper[5:7] != expectedCode {
-				return common.InvalidUSNBranchError, "id"
-			}
-		}
-	}
-
-	if matched, _ := regexp.MatchString(phonePattern, mobileClean); !matched {
-		return common.InvalidMobileNumberError, "mobile"
-	}
-	return nil, ""
+	return common.ValidateUserInput(usn, mobile, currentYear, department)
 }
 
 // CreateUser godoc
@@ -243,6 +188,10 @@ func (uc *UserController) Signup(ctx echo.Context) error {
 
 	reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
 	reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
+
+	if uc.userService == nil || reflect.ValueOf(uc.userService).IsNil() {
+		return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": "user service unavailable"})
+	}
 
 	resp, err := uc.userService.Signup(ctx.Request().Context(), reqBody)
 	if err != nil {
