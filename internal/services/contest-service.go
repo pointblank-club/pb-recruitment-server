@@ -287,7 +287,14 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	if contest.GetRunningStatus() == models.ContestRunningUpcoming {
 		return nil, common.ErrContestNotStarted
 	}
-	res, err := cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	var res *dto.GetLeaderboardResponse
+	if !isAdmin && contest.GetRunningStatus() != models.ContestRunningClosed {
+		// Non-admins during active contest see code-only leaderboard to prevent MCQ oracle leakage.
+		res, err = cs.stores.Rankings.GetCodeLeaderboard(ctx, contestID, page)
+	} else {
+		// Admins or closed contests receive real-time / final full leaderboard.
+		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	}
 	if err != nil {
 		return nil, err
 	}

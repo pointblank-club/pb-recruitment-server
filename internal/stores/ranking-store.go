@@ -149,25 +149,25 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 const leaderboardPageSize = 20
 
 func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, false)
+	return s.getLeaderboard(ctx, contestID, page, false, s.cacheTTL, "")
 }
 
 func (s *RankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, true)
+	return s.getLeaderboard(ctx, contestID, page, true, s.cacheTTL, "code")
 }
 
-func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool) (*dto.GetLeaderboardResponse, error) {
+func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool, ttl time.Duration, suffix string) (*dto.GetLeaderboardResponse, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
 
 	page = max(0, page)
 	cacheKey := fmt.Sprintf("%s:%d", contestID, page)
-	if codeOnly {
-		cacheKey += ":code"
+	if suffix != "" {
+		cacheKey += ":" + suffix
 	}
 
-	if s.cacheTTL > 0 {
+	if ttl > 0 {
 		s.cacheMu.RLock()
 		entry, ok := s.cache[cacheKey]
 		s.cacheMu.RUnlock()
@@ -208,6 +208,9 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	totalPages := (totalCount + leaderboardPageSize - 1) / leaderboardPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
 
 	var isConsolidated bool
 	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
@@ -325,11 +328,11 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		TotalCount: totalCount,
 	}
 
-	if s.cacheTTL > 0 && page < max(totalPages, 1) {
+	if ttl > 0 && page < max(totalPages, 1) {
 		s.cacheMu.Lock()
 		s.cache[cacheKey] = leaderboardCacheEntry{
 			data:      resp,
-			expiresAt: time.Now().Add(s.cacheTTL),
+			expiresAt: time.Now().Add(ttl),
 		}
 		s.cacheMu.Unlock()
 	}

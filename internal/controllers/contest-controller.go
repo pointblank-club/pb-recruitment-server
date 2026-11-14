@@ -1123,11 +1123,26 @@ func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
 		})
 	}
 
-	ctx.Response().Header().Set("X-Total-Count", strconv.Itoa(leaderboard.TotalCount))
-	ctx.Response().Header().Set("X-Total-Pages", strconv.Itoa(leaderboard.TotalPages))
-	ctx.Response().Header().Set("X-Current-Page", strconv.Itoa(leaderboard.Page))
+	totalCount := leaderboard.TotalCount
+	totalPages := leaderboard.TotalPages
+	if totalPages < 1 {
+		totalPages = 1
+	}
 
-	return ctx.JSON(http.StatusOK, leaderboard.Entries)
+	totalCountStr := strconv.Itoa(totalCount)
+	totalPagesStr := strconv.Itoa(totalPages)
+	currentPageStr := strconv.Itoa(leaderboard.Page)
+
+	ctx.Response().Header().Set("X-Total-Count", totalCountStr)
+	ctx.Response().Header().Set("X-Total-Pages", totalPagesStr)
+	ctx.Response().Header().Set("X-Current-Page", currentPageStr)
+
+	entries := leaderboard.Entries
+	if entries == nil {
+		entries = []dto.LeaderboardEntry{}
+	}
+
+	return ctx.JSON(http.StatusOK, entries)
 }
 
 // HandleConsolidateContest godoc

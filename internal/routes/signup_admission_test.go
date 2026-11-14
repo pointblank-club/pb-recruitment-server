@@ -11,8 +11,11 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// The DTO is valid; the synthetic USN fails controller checks before Firebase.
+// Invalid USN fails ValidateUserInput before reaching shared budgets.
 const signupAdmissionBody = `{"name":"Test","email":"test@example.test","password":"synthetic-password","usn":"invalid","mobile_number":"1234567890","current_year":2,"department":"CS"}`
+
+// Valid USN passes ValidateUserInput and reaches admission budgets.
+const validSignupAdmissionBody = `{"name":"Test","email":"test@example.test","password":"synthetic-password","usn":"1DS24CS001","mobile_number":"1234567890","current_year":2,"department":"CS"}`
 
 type signupBudgetRecorder struct {
 	mu     sync.Mutex
@@ -35,7 +38,8 @@ func TestSignupRouteAllowsHundredCampusAdmissionsBeforeFleetLimit(t *testing.T) 
 	e := echo.New()
 	limiter := &signupBudgetRecorder{hits: map[string]int{}, limits: map[string][2]int{}}
 	AddUserRoutes(e, nil, controllers.NewUserController(nil), limiter)
-	// Invalid JSON/DTOs must not consume the shared SQL budgets.
+
+	// 1. Invalid JSON/DTOs must not consume shared SQL budgets.
 	invalid := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(`{}`))
 	invalid.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	invalidResponse := httptest.NewRecorder()
@@ -43,18 +47,29 @@ func TestSignupRouteAllowsHundredCampusAdmissionsBeforeFleetLimit(t *testing.T) 
 	if invalidResponse.Code != 400 || len(limiter.hits) != 0 {
 		t.Fatal("invalid signup reached SQL admission", invalidResponse.Code, limiter.hits)
 	}
+
+	// 2. Junk USNs must be rejected for free without consuming shared SQL budgets (F-04).
+	invalidUSN := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(signupAdmissionBody))
+	invalidUSN.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	invalidUSNResponse := httptest.NewRecorder()
+	e.ServeHTTP(invalidUSNResponse, invalidUSN)
+	if invalidUSNResponse.Code != 400 || len(limiter.hits) != 0 {
+		t.Fatal("invalid USN reached SQL admission", invalidUSNResponse.Code, limiter.hits)
+	}
+
+	// 3. Valid signups pass to admission budgets.
 	var wg sync.WaitGroup
 	for range 100 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			w := httptest.NewRecorder()
-			r := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(signupAdmissionBody))
+			r := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(validSignupAdmissionBody))
 			r.RemoteAddr = "192.0.2.1:1234"
 			r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 			e.ServeHTTP(w, r)
-			if w.Code != 400 {
-				t.Errorf("campus request rejected by admission: %d %s", w.Code, w.Body.String())
+			if w.Code != 503 && w.Code != 201 {
+				t.Errorf("unexpected status: %d %s", w.Code, w.Body.String())
 			}
 		}()
 	}
@@ -66,7 +81,7 @@ func TestSignupRouteAllowsHundredCampusAdmissionsBeforeFleetLimit(t *testing.T) 
 		t.Fatal("campus IP policy", limiter.hits, limiter.limits)
 	}
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(signupAdmissionBody))
+	r := httptest.NewRequest("POST", "/auth/signup", strings.NewReader(validSignupAdmissionBody))
 	r.RemoteAddr = "192.0.2.2:1234"
 	r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	e.ServeHTTP(w, r)
@@ -74,3 +89,4 @@ func TestSignupRouteAllowsHundredCampusAdmissionsBeforeFleetLimit(t *testing.T) 
 		t.Fatal("shared fleet burst was not bounded", w.Code, w.Header())
 	}
 }
+

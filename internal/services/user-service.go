@@ -6,6 +6,7 @@ import (
 	"app/internal/models/dto"
 	"app/internal/stores"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -41,6 +42,9 @@ func (us *UserService) UpdateUserProfile(ctx context.Context, userID string, req
 }
 
 func (us *UserService) Signup(ctx context.Context, req *dto.SignupRequest) (*dto.SignupResponse, error) {
+	if us == nil || us.authClient == nil {
+		return nil, errors.New("user service unavailable")
+	}
 	// Create Firebase user first
 	userRecord, err := us.authClient.CreateUser(ctx, (&auth.UserToCreate{}).
 		Email(req.Email).

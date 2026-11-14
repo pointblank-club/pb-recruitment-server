@@ -123,15 +123,16 @@ retries; a failed prepared submission replays as its original failed record.
 
 Signup's shared fleet policy now admits 100 attempts per 10 seconds rather than
 30 per second: a larger initial burst with a lower sustained rate. The shared
-1,200/hour/IP budget remains for campus NATs. Before binding JSON or reaching SQL
-and Firebase, each API process admits at most 100 active/queued requests, with
-8 active handlers. After obtaining a worker, SQL budgets and Firebase/SQL work
-receive a 20-second context deadline; Firebase cleanup retains its separate 10-second
-deadline. Body reads remain subject to the server's 30-second read deadline.
-JSON is bound after obtaining a worker slot and before the
-SQL budgets, so parsing is bounded and does not wait behind SQL before the HTTP
-body-read deadline. Queue waits are capped at 20 seconds; overflow/expiry returns
-429 and cancellation releases its reservation without calling Firebase.
+1,200/hour/IP budget remains for campus NATs. JSON is bound, structurally
+validated, and domain-checked (USN format, department alias, mobile format)
+before charging any per-IP or fleet budget, ensuring junk requests cannot
+exhaust shared campus allowances. Each API process admits at most 100
+active/queued requests with 8 active handlers. After obtaining a worker,
+SQL budgets and Firebase/SQL work receive a 20-second context deadline;
+Firebase cleanup retains its separate 10-second deadline. Body reads remain
+subject to the server's 30-second read deadline. Queue waits are capped at
+20 seconds; overflow/expiry returns 429 and cancellation releases its
+reservation without calling Firebase.
 
 These are initial safety budgets, not proof that 600 simultaneous signups or
 600 native judging jobs meet latency targets. Larger bursts can still be rejected

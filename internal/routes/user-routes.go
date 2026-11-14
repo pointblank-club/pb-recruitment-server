@@ -19,6 +19,7 @@ func AddUserRoutes(
 		userController.Signup,
 		middleware.SignupCapacity(),
 		middleware.ValidateRequest(new(dto.SignupRequest)),
+		middleware.ValidateUserInput(),
 		middleware.LimitRequests(limiter, "signup-ip", 1200, 3600),
 		middleware.LimitRequests(limiter, "signup-fleet", 100, 10),
 	)
@@ -26,8 +27,9 @@ func AddUserRoutes(
 	e.POST("/users/create",
 		userController.CreateUser,
 		middleware.RequireFirebaseAuth(authClient),
-		middleware.LimitRequests(limiter, "user-write", 60, 60),
 		middleware.ValidateRequest(new(dto.CreateUserRequest)),
+		middleware.ValidateUserInput(),
+		middleware.LimitRequests(limiter, "user-write", 60, 60),
 	)
 
 	e.GET("/users/profile",

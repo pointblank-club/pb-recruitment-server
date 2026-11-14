@@ -161,7 +161,10 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			}
 			for _, entry := range entries {
 				wantScore, wantRank, wantSolved := 10, 2, 1
-				if entry.UserID == user {
+				if !ended && viewer != user {
+					// Non-admins during live contest see code-only leaderboard (MCQs excluded).
+					wantScore, wantRank, wantSolved = 10, 1, 1
+				} else if entry.UserID == user {
 					wantScore, wantRank, wantSolved = 30, 1, 2
 				}
 				if entry.TotalScore != wantScore || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved {

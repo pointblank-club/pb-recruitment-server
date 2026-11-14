@@ -74,7 +74,7 @@ func TestUnauthenticatedReadsDoNotUseDatabaseAdmission(t *testing.T) {
 	}
 	// The independent signup budget must still fail closed before any Firebase work.
 	w := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(signupAdmissionBody))
+	request := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(validSignupAdmissionBody))
 	request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	e.ServeHTTP(w, request)
 	if w.Code != http.StatusServiceUnavailable || limiter.calls.Load() != 1 {

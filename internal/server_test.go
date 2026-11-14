@@ -14,6 +14,7 @@ func TestCORSExposesResponseHeaders(t *testing.T) {
 	headers := map[string]string{
 		echo.HeaderRetryAfter:    "5",
 		"X-Total-Count":          "1000",
+		"X-Total-Pages":          "10",
 		"X-Truncated":            "true",
 		"X-Max-Pairs-Per-Report": "1000",
 		"X-Min-Similarity":       "0.20",
