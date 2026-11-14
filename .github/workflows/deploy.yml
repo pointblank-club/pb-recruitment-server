@@ -67,6 +67,27 @@ jobs:
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
           docker push "$ECR_REGISTRY/$ECR_REPOSITORY:main"
 
+      # Migrations run inside the VPC as a one-off ECS task (defined in
+      # sih-infra): the API image just built supplies the migration files,
+      # the official migrate image applies what is pending. The step fails
+      # the deploy if a migration fails, before any new task starts.
+      - name: Apply database migrations
+        run: |
+          NET=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json)
+          SUBNETS=$(echo "$NET" | jq -r '.subnets | join(",")'); SG=$(echo "$NET" | jq -r '.securityGroups[0]')
+          TASK=$(aws ecs run-task --cluster "$ECS_CLUSTER" --task-definition pb-recruitment-migrate --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "migration task $TASK"
+          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK"
+          CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
+            --query 'tasks[0].containers[?name==`migrate`].exitCode | [0]' --output text)
+          ID=${TASK##*/}
+          aws logs get-log-events --log-group-name /pb-recruitment/api --log-stream-name "migrate/migrate/$ID" \
+            --query 'events[].message' --output text || true
+          test "$CODE" = "0" || { echo "migrations failed (exit $CODE)"; exit 1; }
+
       - name: Deploy
         run: |
           aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --force-new-deployment --query 'service.deployments[0].id' --output text
