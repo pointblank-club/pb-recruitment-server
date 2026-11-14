@@ -59,12 +59,14 @@ func (uc *UserController) CreateUser(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.CreateUserRequest)
 	userID := ctx.Get(common.AUTH_USER_ID).(string)
 
-	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear, reqBody.Department); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
-	}
+	if ctx.Get(common.USER_INPUT_VALIDATED) != true {
+		if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear, reqBody.Department); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
+		}
 
-	reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
-	reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
+		reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
+		reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
+	}
 
 	if err := uc.userService.CreateUser(ctx.Request().Context(), userID, reqBody); err != nil {
 		if errors.Is(err, common.USNAlreadyExistsError) {
@@ -182,12 +184,14 @@ func (uc *UserController) UpdateUserProfile(ctx echo.Context) error {
 func (uc *UserController) Signup(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.SignupRequest)
 
-	if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear, reqBody.Department); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
-	}
+	if ctx.Get(common.USER_INPUT_VALIDATED) != true {
+		if err, field := validateUserInput(reqBody.USN, reqBody.MobileNumber, reqBody.CurrentYear, reqBody.Department); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": err.Error(), "field": field})
+		}
 
-	reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
-	reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
+		reqBody.USN = strings.ToUpper(strings.TrimSpace(reqBody.USN))
+		reqBody.MobileNumber = strings.TrimSpace(reqBody.MobileNumber)
+	}
 
 	if uc.userService == nil || reflect.ValueOf(uc.userService).IsNil() {
 		return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": "user service unavailable"})

@@ -1076,7 +1076,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 
 // GetLeaderboard godoc
 // @Summary      Get contest leaderboard
-// @Description  Get ranked participants with pagination. Non-admins see scores updated periodically (every 5-10 mins) during live contests and live scores after contest ends. Individual problem breakdowns are admin-only.
+// @Description  Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.
 // @Tags         Contests
 // @Produce      json
 // @Param        id path string true "Contest ID"
@@ -1133,13 +1133,9 @@ func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
 	totalPagesStr := strconv.Itoa(totalPages)
 	currentPageStr := strconv.Itoa(leaderboard.Page)
 
-	// Set canonical and lowercase response headers for full client & proxy compatibility
 	ctx.Response().Header().Set("X-Total-Count", totalCountStr)
-	ctx.Response().Header().Set("x-total-count", totalCountStr)
 	ctx.Response().Header().Set("X-Total-Pages", totalPagesStr)
-	ctx.Response().Header().Set("x-total-pages", totalPagesStr)
 	ctx.Response().Header().Set("X-Current-Page", currentPageStr)
-	ctx.Response().Header().Set("x-current-page", currentPageStr)
 
 	entries := leaderboard.Entries
 	if entries == nil {

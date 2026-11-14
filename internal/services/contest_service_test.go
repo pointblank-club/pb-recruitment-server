@@ -80,7 +80,7 @@ type serviceRankingTestStore struct {
 	consolidateFunc     func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
 	updateFunc          func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
 	leaderboardFunc     func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
-	userLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	codeLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
 }
 
 func (s serviceRankingTestStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -104,18 +104,14 @@ func (s serviceRankingTestStore) GetLeaderboard(ctx context.Context, contestID s
 	return nil, nil
 }
 
-func (s serviceRankingTestStore) GetUserLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	if s.userLeaderboardFunc != nil {
-		return s.userLeaderboardFunc(ctx, contestID, page)
+func (s serviceRankingTestStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	if s.codeLeaderboardFunc != nil {
+		return s.codeLeaderboardFunc(ctx, contestID, page)
 	}
 	return s.GetLeaderboard(ctx, contestID, page)
 }
 
 func (s serviceRankingTestStore) InvalidateCache(contestID string) {}
-
-func (s serviceRankingTestStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.GetLeaderboard(ctx, contestID, page)
-}
 
 func TestConsolidateContestService(t *testing.T) {
 	t.Run("nil ranking store error", func(t *testing.T) {
@@ -253,14 +249,14 @@ func TestGetLeaderboard(t *testing.T) {
 		}
 	})
 
-	t.Run("non-admin during live contest calls GetUserLeaderboard", func(t *testing.T) {
-		userLeaderboardCalled := false
+	t.Run("non-admin during live contest calls GetCodeLeaderboard", func(t *testing.T) {
+		codeLeaderboardCalled := false
 		adminLeaderboardCalled := false
 		storage := &stores.Storage{
 			Contests: problemContestTestStore{start: now - 60_000, end: now + 60_000},
 			Rankings: serviceRankingTestStore{
-				userLeaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
-					userLeaderboardCalled = true
+				codeLeaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+					codeLeaderboardCalled = true
 					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1"}}}, nil
 				},
 				leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
@@ -271,16 +267,16 @@ func TestGetLeaderboard(t *testing.T) {
 		}
 		// Non-admin during live contest
 		_, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, false)
-		if err != nil || !userLeaderboardCalled || adminLeaderboardCalled {
-			t.Fatalf("expected userLeaderboardCalled=true, adminLeaderboardCalled=false; got user=%v admin=%v err=%v", userLeaderboardCalled, adminLeaderboardCalled, err)
+		if err != nil || !codeLeaderboardCalled || adminLeaderboardCalled {
+			t.Fatalf("expected codeLeaderboardCalled=true, adminLeaderboardCalled=false; got code=%v admin=%v err=%v", codeLeaderboardCalled, adminLeaderboardCalled, err)
 		}
 
 		// Admin during live contest
-		userLeaderboardCalled = false
+		codeLeaderboardCalled = false
 		adminLeaderboardCalled = false
 		_, err = NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, true)
-		if err != nil || userLeaderboardCalled || !adminLeaderboardCalled {
-			t.Fatalf("expected userLeaderboardCalled=false, adminLeaderboardCalled=true; got user=%v admin=%v err=%v", userLeaderboardCalled, adminLeaderboardCalled, err)
+		if err != nil || codeLeaderboardCalled || !adminLeaderboardCalled {
+			t.Fatalf("expected codeLeaderboardCalled=false, adminLeaderboardCalled=true; got code=%v admin=%v err=%v", codeLeaderboardCalled, adminLeaderboardCalled, err)
 		}
 	})
 }

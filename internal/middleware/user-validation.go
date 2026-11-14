@@ -61,6 +61,8 @@ func ValidateUserInput() echo.MiddlewareFunc {
 				normalize(strings.ToUpper(strings.TrimSpace(usn)), strings.TrimSpace(mobile))
 			}
 
+			c.Set(common.USER_INPUT_VALIDATED, true)
+
 			return next(c)
 		}
 	}

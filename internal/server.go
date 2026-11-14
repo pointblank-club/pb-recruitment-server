@@ -207,11 +207,8 @@ func NewEchoServer(
 		ExposeHeaders: []string{
 			echo.HeaderRetryAfter,
 			"X-Total-Count",
-			"x-total-count",
 			"X-Total-Pages",
-			"x-total-pages",
 			"X-Current-Page",
-			"x-current-page",
 			"X-Truncated",
 			"X-Max-Pairs-Per-Report",
 			"X-Min-Similarity",

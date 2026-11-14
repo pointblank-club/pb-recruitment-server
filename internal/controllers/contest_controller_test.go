@@ -147,10 +147,6 @@ func (m *mockRankingStore) GetLeaderboard(ctx context.Context, contestID string,
 	return nil, nil
 }
 
-func (m *mockRankingStore) GetUserLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return m.GetLeaderboard(ctx, contestID, page)
-}
-
 func (m *mockRankingStore) InvalidateCache(contestID string) {}
 
 func (m *mockRankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
@@ -655,11 +651,11 @@ func TestGetLeaderboardController(t *testing.T) {
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("expected status 200, got %d: %s", recorder.Code, recorder.Body.String())
 		}
-		if recorder.Header().Get("X-Total-Count") != "5" || recorder.Header().Get("x-total-count") != "5" {
-			t.Fatalf("expected X-Total-Count 5, got %s / %s", recorder.Header().Get("X-Total-Count"), recorder.Header().Get("x-total-count"))
+		if recorder.Header().Get("X-Total-Count") != "5" {
+			t.Fatalf("expected X-Total-Count 5, got %s", recorder.Header().Get("X-Total-Count"))
 		}
-		if recorder.Header().Get("X-Total-Pages") != "1" || recorder.Header().Get("x-total-pages") != "1" {
-			t.Fatalf("expected X-Total-Pages 1, got %s / %s", recorder.Header().Get("X-Total-Pages"), recorder.Header().Get("x-total-pages"))
+		if recorder.Header().Get("X-Total-Pages") != "1" {
+			t.Fatalf("expected X-Total-Pages 1, got %s", recorder.Header().Get("X-Total-Pages"))
 		}
 	})
 

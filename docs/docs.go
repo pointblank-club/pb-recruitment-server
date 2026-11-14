@@ -2153,7 +2153,7 @@ const docTemplate = `{
         },
         "/contests/{id}/leaderboard": {
             "get": {
-                "description": "Get ranked participants with pagination. Non-admins see scores updated periodically (every 5-10 mins) during live contests and live scores after contest ends. Individual problem breakdowns are admin-only.",
+                "description": "Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.",
                 "produces": [
                     "application/json"
                 ],

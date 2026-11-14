@@ -289,10 +289,10 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	}
 	var res *dto.GetLeaderboardResponse
 	if !isAdmin && contest.GetRunningStatus() != models.ContestRunningClosed {
-		// Non-admins during active contest receive periodic 5-10 minute cached snapshot to avoid instant MCQ leakage.
-		res, err = cs.stores.Rankings.GetUserLeaderboard(ctx, contestID, page)
+		// Non-admins during active contest see code-only leaderboard to prevent MCQ oracle leakage.
+		res, err = cs.stores.Rankings.GetCodeLeaderboard(ctx, contestID, page)
 	} else {
-		// Admins or closed contests receive real-time / final leaderboard.
+		// Admins or closed contests receive real-time / final full leaderboard.
 		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
 	}
 	if err != nil {

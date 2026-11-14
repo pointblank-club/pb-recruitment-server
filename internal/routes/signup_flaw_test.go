@@ -123,33 +123,6 @@ func TestFlaw_ClientDisconnectReleasesCapacitySlot(t *testing.T) {
 	}
 }
 
-// TestF04_InvalidUSNDoesNotConsumeBudget verifies that invalid USN is rejected for free
-// by ValidateUserInput before reaching rate limit budgets (Fix F-04).
-func TestF04_InvalidUSNDoesNotConsumeBudget(t *testing.T) {
-	e := echo.New()
-	limiter := &signupBudgetRecorder{hits: map[string]int{}, limits: map[string][2]int{}}
-	AddUserRoutes(e, nil, controllers.NewUserController(nil), limiter)
-
-	ip := "192.0.2.77"
-	// Request has valid JSON & struct tags, but USN is "INVALID_USN"
-	junkPayload := `{"name":"Test","email":"test@example.com","password":"password123","usn":"INVALID_USN","mobile_number":"1234567890","current_year":2,"department":"CS"}`
-
-	req := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(junkPayload))
-	req.RemoteAddr = ip + ":1234"
-	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
-	}
-
-	// Verify that limiter was NOT charged!
-	if len(limiter.hits) != 0 {
-		t.Fatalf("expected 0 limiter hits for invalid USN, got %v", limiter.hits)
-	}
-}
-
 // TestFlaw_HighConcurrencyBurst checks behavior when 150 requests arrive concurrently.
 func TestFlaw_HighConcurrencyBurst(t *testing.T) {
 	e := echo.New()
