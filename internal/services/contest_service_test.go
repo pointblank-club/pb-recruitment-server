@@ -80,7 +80,7 @@ type serviceRankingTestStore struct {
 	consolidateFunc     func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
 	updateFunc          func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
 	leaderboardFunc     func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
-	codeLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	liveLeaderboardFunc func(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error)
 }
 
 func (s serviceRankingTestStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -104,14 +104,14 @@ func (s serviceRankingTestStore) GetLeaderboard(ctx context.Context, contestID s
 	return nil, nil
 }
 
-func (s serviceRankingTestStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	if s.codeLeaderboardFunc != nil {
-		return s.codeLeaderboardFunc(ctx, contestID, page)
+func (s serviceRankingTestStore) InvalidateCache(contestID string) {}
+
+func (s serviceRankingTestStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
+	if s.liveLeaderboardFunc != nil {
+		return s.liveLeaderboardFunc(ctx, contestID, page, mcqCutoff)
 	}
 	return s.GetLeaderboard(ctx, contestID, page)
 }
-
-func (s serviceRankingTestStore) InvalidateCache(contestID string) {}
 
 func TestConsolidateContestService(t *testing.T) {
 	t.Run("nil ranking store error", func(t *testing.T) {
@@ -249,36 +249,63 @@ func TestGetLeaderboard(t *testing.T) {
 		}
 	})
 
-	t.Run("non-admin during live contest calls GetCodeLeaderboard", func(t *testing.T) {
-		codeLeaderboardCalled := false
-		adminLeaderboardCalled := false
-		storage := &stores.Storage{
-			Contests: problemContestTestStore{start: now - 60_000, end: now + 60_000},
-			Rankings: serviceRankingTestStore{
-				codeLeaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
-					codeLeaderboardCalled = true
-					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1"}}}, nil
-				},
-				leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
-					adminLeaderboardCalled = true
-					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1"}}}, nil
-				},
-			},
-		}
-		// Non-admin during live contest
-		_, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, false)
-		if err != nil || !codeLeaderboardCalled || adminLeaderboardCalled {
-			t.Fatalf("expected codeLeaderboardCalled=true, adminLeaderboardCalled=false; got code=%v admin=%v err=%v", codeLeaderboardCalled, adminLeaderboardCalled, err)
-		}
+}
 
-		// Admin during live contest
-		codeLeaderboardCalled = false
-		adminLeaderboardCalled = false
-		_, err = NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, true)
-		if err != nil || codeLeaderboardCalled || !adminLeaderboardCalled {
-			t.Fatalf("expected codeLeaderboardCalled=false, adminLeaderboardCalled=true; got code=%v admin=%v err=%v", codeLeaderboardCalled, adminLeaderboardCalled, err)
+func TestMCQLeaderboardCutoff(t *testing.T) {
+	const start int64 = 1_700_000_001_123
+	for _, tc := range []struct{ elapsed, cutoff int64 }{
+		{0, start / 1000},
+		{299_999, start / 1000},
+		{300_000, (start + 300_000) / 1000},
+		{599_999, (start + 300_000) / 1000},
+		{600_000, (start + 600_000) / 1000},
+	} {
+		if got := mcqLeaderboardCutoff(start, start+tc.elapsed); got != tc.cutoff {
+			t.Errorf("elapsed=%d cutoff=%d want=%d", tc.elapsed, got, tc.cutoff)
 		}
-	})
+	}
+}
+
+func TestLeaderboardMCQBatchPolicy(t *testing.T) {
+	now := time.Now().UnixMilli()
+	for _, tc := range []struct {
+		name         string
+		admin, ended bool
+		wantLive     bool
+	}{
+		{"public live", false, false, true},
+		{"admin live", true, false, false},
+		{"public ended", false, true, false},
+		{"admin ended", true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start, end := now-60_000, now+60_000
+			if tc.ended {
+				end = now - 1_000
+			}
+			liveCalled, fullCalled := false, false
+			storage := &stores.Storage{
+				Contests: problemContestTestStore{start: start, end: end},
+				Rankings: serviceRankingTestStore{
+					liveLeaderboardFunc: func(_ context.Context, contestID string, page int, cutoff int64) (*dto.GetLeaderboardResponse, error) {
+						liveCalled = true
+						if contestID != "c1" || page != 2 || cutoff != start/1000 {
+							t.Fatalf("unexpected live request: %s page=%d cutoff=%d", contestID, page, cutoff)
+						}
+						return &dto.GetLeaderboardResponse{}, nil
+					},
+					leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+						fullCalled = true
+						return &dto.GetLeaderboardResponse{}, nil
+					},
+				},
+			}
+			_, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 2, tc.admin)
+			if err != nil || liveCalled != tc.wantLive || fullCalled == tc.wantLive {
+				t.Fatalf("live=%v full=%v err=%v", liveCalled, fullCalled, err)
+			}
+		})
+	}
 }
 
 type visibilityContestTestStore struct {

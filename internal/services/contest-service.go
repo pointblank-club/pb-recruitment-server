@@ -12,6 +12,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -283,11 +284,10 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 		return nil, common.ErrContestNotStarted
 	}
 	var res *dto.GetLeaderboardResponse
-	if !isAdmin && contest.GetRunningStatus() != models.ContestRunningClosed {
-		// Non-admins during active contest see code-only leaderboard to prevent MCQ oracle leakage.
-		res, err = cs.stores.Rankings.GetCodeLeaderboard(ctx, contestID, page)
+	if !isAdmin && contest.GetRunningStatus() == models.ContestRunningOpen {
+		cutoff := mcqLeaderboardCutoff(contest.StartTime, time.Now().UnixMilli())
+		res, err = cs.stores.Rankings.GetLiveLeaderboard(ctx, contestID, page, cutoff)
 	} else {
-		// Admins or closed contests receive real-time / final full leaderboard.
 		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
 	}
 	if err != nil {
@@ -304,6 +304,11 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 		return &resCopy, nil
 	}
 	return res, nil
+}
+
+func mcqLeaderboardCutoff(start, now int64) int64 {
+	const interval = int64(5 * time.Minute / time.Millisecond)
+	return (start + (now-start)/interval*interval) / 1000
 }
 
 func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID string, userID string) error {

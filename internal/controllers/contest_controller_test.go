@@ -149,7 +149,7 @@ func (m *mockRankingStore) GetLeaderboard(ctx context.Context, contestID string,
 
 func (m *mockRankingStore) InvalidateCache(contestID string) {}
 
-func (m *mockRankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+func (m *mockRankingStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
 	return m.GetLeaderboard(ctx, contestID, page)
 }
 

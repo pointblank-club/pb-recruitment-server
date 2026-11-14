@@ -23,6 +23,7 @@ import (
 type leaderboardCacheEntry struct {
 	data      *dto.GetLeaderboardResponse
 	expiresAt time.Time
+	mcqCutoff int64
 }
 
 type RankingStore struct {
@@ -149,29 +150,29 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 const leaderboardPageSize = 20
 
 func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, false, s.cacheTTL, "")
+	return s.getLeaderboard(ctx, contestID, page, nil)
 }
 
-func (s *RankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, true, s.cacheTTL, "code")
+func (s *RankingStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
+	return s.getLeaderboard(ctx, contestID, page, &mcqCutoff)
 }
 
-func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool, ttl time.Duration, suffix string) (*dto.GetLeaderboardResponse, error) {
+func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff *int64) (*dto.GetLeaderboardResponse, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
 
 	page = max(0, page)
 	cacheKey := fmt.Sprintf("%s:%d", contestID, page)
-	if suffix != "" {
-		cacheKey += ":" + suffix
+	if mcqCutoff != nil {
+		cacheKey += ":live"
 	}
 
-	if ttl > 0 {
+	if s.cacheTTL > 0 {
 		s.cacheMu.RLock()
 		entry, ok := s.cache[cacheKey]
 		s.cacheMu.RUnlock()
-		if ok && time.Now().Before(entry.expiresAt) {
+		if ok && time.Now().Before(entry.expiresAt) && (mcqCutoff == nil || entry.mcqCutoff == *mcqCutoff) {
 			return cloneLeaderboardResponse(entry.data), nil
 		}
 	}
@@ -254,35 +255,37 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		LIMIT $2 OFFSET $3
 	`
 	}
-	if codeOnly {
-		// Recompute before pagination so neither stored MCQ points nor final ranks leak.
+
+	args := []any{contestID, leaderboardPageSize, offset}
+	if mcqCutoff != nil {
+		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
-		WITH first_code_solves AS (
+		WITH first_solves AS (
 			SELECT user_id, problem_id, MIN(created_at) AS solved_at
 			FROM submissions
-			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
+			WHERE contest_id = $1 AND status = 'accepted'
+			  AND (type <> 'mcq' OR created_at < $4)
 			GROUP BY user_id, problem_id
 		),
-		code_aggregates AS (
-			SELECT fcs.user_id,
-			       SUM(p.score) AS score,
-			       MAX(fcs.solved_at) AS last_solve_time
-			FROM first_code_solves fcs
-			JOIN problems p ON p.id = fcs.problem_id AND p.contest_id = $1
-			GROUP BY fcs.user_id
+		user_scores AS (
+			SELECT fs.user_id, SUM(p.score) AS score, MAX(fs.solved_at) AS last_solve_time
+			FROM first_solves fs
+			JOIN problems p ON p.id = fs.problem_id AND p.contest_id = $1
+			GROUP BY fs.user_id
 		)
-		SELECT RANK() OVER (ORDER BY COALESCE(ca.score, 0) DESC, ca.last_solve_time ASC NULLS LAST) AS rank,
-		       r.user_id, u.name, u.usn, COALESCE(ca.score, 0)
+		SELECT RANK() OVER (ORDER BY COALESCE(us.score, 0) DESC, us.last_solve_time ASC NULLS LAST) AS rank,
+		       r.user_id, u.name, u.usn, COALESCE(us.score, 0)
 		FROM rankings r
 		JOIN users u ON u.id = r.user_id
-		LEFT JOIN code_aggregates ca ON ca.user_id = r.user_id
+		LEFT JOIN user_scores us ON us.user_id = r.user_id
 		WHERE r.contest_id = $1 AND r.hidden = false AND r.disqualified = false
-		ORDER BY rank ASC, ca.last_solve_time ASC NULLS LAST, u.name ASC, r.user_id ASC
+		ORDER BY rank ASC, us.last_solve_time ASC NULLS LAST, u.name ASC, r.user_id ASC
 		LIMIT $2 OFFSET $3
 		`
+		args = append(args, *mcqCutoff)
 	}
 
-	rows, err := s.db.QueryContext(ctx, entriesQ, contestID, leaderboardPageSize, offset)
+	rows, err := s.db.QueryContext(ctx, entriesQ, args...)
 	if err != nil {
 		log.Printf("ranking-store: leaderboard query failed: %v", err)
 		return nil, fmt.Errorf("query leaderboard: %w", err)
@@ -306,7 +309,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 
-	problemScores, err := s.getProblemScores(ctx, contestID, userIDs, codeOnly)
+	problemScores, err := s.getProblemScores(ctx, contestID, userIDs, mcqCutoff)
 	if err != nil {
 		log.Printf("ranking-store: problem scores query failed : %v", err)
 		return nil, err
@@ -328,12 +331,13 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		TotalCount: totalCount,
 	}
 
-	if ttl > 0 && page < max(totalPages, 1) {
-		s.cacheMu.Lock()
-		s.cache[cacheKey] = leaderboardCacheEntry{
-			data:      resp,
-			expiresAt: time.Now().Add(ttl),
+	if s.cacheTTL > 0 && page < max(totalPages, 1) {
+		entry := leaderboardCacheEntry{data: resp, expiresAt: time.Now().Add(s.cacheTTL)}
+		if mcqCutoff != nil {
+			entry.mcqCutoff = *mcqCutoff
 		}
+		s.cacheMu.Lock()
+		s.cache[cacheKey] = entry
 		s.cacheMu.Unlock()
 	}
 
@@ -360,7 +364,7 @@ func summarizeSolves(scores []dto.ProblemScore) (solved int, lastSolve int64) {
 }
 
 // Attempts counts all submissions for display; the final-ranking penalty excludes judge errors.
-func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string, codeOnly bool) (map[string][]dto.ProblemScore, error) {
+func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string, mcqCutoff *int64) (map[string][]dto.ProblemScore, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
@@ -373,8 +377,9 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		args = append(args, uid)
 	}
 	typeFilter := ""
-	if codeOnly {
-		typeFilter = "AND sub.type = 'code'"
+	if mcqCutoff != nil {
+		args = append(args, *mcqCutoff)
+		typeFilter = fmt.Sprintf("AND (sub.type <> 'mcq' OR sub.created_at < $%d)", len(args))
 	}
 
 	query := fmt.Sprintf(`

@@ -146,9 +146,14 @@ before the website editor, which now consumes inputs and answers from one respon
 MCQ submission status, details, and history return `attempted` until the contest
 ends, then the stored verdict (`accepted` or `wrong_answer`). The problem overview
 shows `attempted`/`unsolved` while open and `solved`/`failed` after closing.
-The public live leaderboard uses only code submissions for scores, ranks, solved
-counts, and solve times. Admins see full results; after closing, public totals
-include MCQs. Per-problem leaderboard breakdowns remain admin-only.
+The public live leaderboard includes coding results immediately. MCQ scores,
+solved counts, ranks, and solve times update together at five-minute intervals
+from contest start (5, 10, 15 minutes, etc.), including submissions made before
+the latest interval boundary. Admins see all results immediately, and the public
+leaderboard shows all results as soon as the contest ends. Incorrect or pending
+answers do not count as solves. Per-problem breakdowns remain admin-only.
+Batch aggregate changes can still reveal MCQ correctness, even while individual
+submission verdicts are masked.
 
 ## PostgreSQL tests
 
