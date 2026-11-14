@@ -25,7 +25,6 @@ type Storage struct {
 		GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error)
 		ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) (int, error)
 		EndContestSession(ctx context.Context, contestID string, userID string) error
-		IsSessionEnded(ctx context.Context, contestID string, userID string) (bool, error)
 	}
 	Users interface {
 		CreateUser(context.Context, *auth.UserRecord, *dto.CreateUserRequest) error

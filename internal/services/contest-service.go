@@ -326,11 +326,11 @@ func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID st
 			return common.UserNotRegisteredError
 		}
 		if userID != "" {
-			ended, err := cs.stores.Contests.IsSessionEnded(ctx, contestID, userID)
+			status, err := cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
 			if err != nil {
 				return err
 			}
-			if ended {
+			if status != nil && status.IsSessionEnded {
 				return common.ErrContestSessionEnded
 			}
 		}
@@ -479,15 +479,8 @@ func (cs *ContestService) GetContestRegistrations(ctx context.Context, contestID
 }
 
 func (cs *ContestService) EndContestSession(ctx context.Context, contestID string, userID string) error {
-	contest, err := cs.GetContest(ctx, contestID, userID)
-	if err != nil {
-		return err
-	}
-	if contest.GetRunningStatus() != models.ContestRunningOpen {
-		return common.ContestNotRunningError
-	}
-	if contest.IsRegistered == nil || !*contest.IsRegistered {
-		return common.UserNotRegisteredError
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return fmt.Errorf("contest service: contest store not initialized")
 	}
 	return cs.stores.Contests.EndContestSession(ctx, contestID, userID)
 }

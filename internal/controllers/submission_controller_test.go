@@ -41,11 +41,17 @@ func (s submissionContestStore) IsRegistered(context.Context, string, string) (b
 	return s.registered, nil
 }
 
-func (s submissionContestStore) IsSessionEnded(context.Context, string, string) (bool, error) {
-	return false, nil
-}
-
-func (s submissionContestStore) EndContestSession(context.Context, string, string) error {
+func (s submissionContestStore) EndContestSession(_ context.Context, contestID string, userID string) error {
+	if s.err != nil {
+		return s.err
+	}
+	if !s.registered {
+		return common.UserNotRegisteredError
+	}
+	now := time.Now().UnixMilli()
+	if now < s.contest.StartTime || now > s.contest.EndTime {
+		return common.ContestNotRunningError
+	}
 	return nil
 }
 

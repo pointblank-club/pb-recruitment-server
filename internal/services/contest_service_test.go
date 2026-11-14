@@ -296,8 +296,10 @@ func (s visibilityContestTestStore) IsRegistered(context.Context, string, string
 	return s.isRegistered, nil
 }
 
-func (s visibilityContestTestStore) IsSessionEnded(context.Context, string, string) (bool, error) {
-	return s.sessionEnded, nil
+func (s visibilityContestTestStore) GetCandidateSessionStatus(context.Context, string, string) (*dto.CandidateSessionStatusResponse, error) {
+	return &dto.CandidateSessionStatusResponse{
+		IsSessionEnded: s.sessionEnded,
+	}, nil
 }
 
 func (s visibilityContestTestStore) EndContestSession(context.Context, string, string) error {

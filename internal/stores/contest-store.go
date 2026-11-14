@@ -673,54 +673,69 @@ func (s *ContestStore) EndContestSession(ctx context.Context, contestID string, 
 		return fmt.Errorf("contest store: db is not initialized")
 	}
 
-	const q = `
-		UPDATE contest_registrations
-		SET ended_at = $3
-		WHERE contest_id = $1 AND user_id = $2 AND ended_at IS NULL
-	`
-
-	res, err := s.db.ExecContext(ctx, q, contestID, userID, time.Now().UnixMilli())
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("end contest session: %w", err)
+		return fmt.Errorf("begin end contest session tx: %w", err)
 	}
+	defer tx.Rollback()
 
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("end contest session rows affected: %w", err)
-	}
-
-	if affected == 0 {
-		var exists bool
-		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM contest_registrations WHERE contest_id = $1 AND user_id = $2)`, contestID, userID).Scan(&exists); err != nil {
-			return fmt.Errorf("check registration: %w", err)
-		}
-		if !exists {
-			return common.UserNotRegisteredError
-		}
-	}
-
-	return nil
-}
-
-func (s *ContestStore) IsSessionEnded(ctx context.Context, contestID string, userID string) (bool, error) {
-	if s == nil || s.db == nil {
-		return false, nil
-	}
-
-	const q = `
-		SELECT ended_at IS NOT NULL
+	// 1. Lock candidate registration row to serialize against concurrent submissions/resets
+	const lockRegQ = `
+		SELECT ended_at
 		FROM contest_registrations
 		WHERE contest_id = $1 AND user_id = $2
+		FOR UPDATE
 	`
-
-	var ended bool
-	err := s.db.QueryRowContext(ctx, q, contestID, userID).Scan(&ended)
-	if err != nil {
+	var existingEndedAt sql.NullInt64
+	if err := tx.QueryRowContext(ctx, lockRegQ, contestID, userID).Scan(&existingEndedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
+			exists, existsErr := s.contestExists(ctx, tx, contestID)
+			if existsErr != nil {
+				return fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !exists {
+				return common.ContestNotFoundError
+			}
+			return common.UserNotRegisteredError
 		}
-		return false, fmt.Errorf("check session ended: %w", err)
+		return fmt.Errorf("lock registration for end session: %w", err)
 	}
 
-	return ended, nil
+	// 2. Sample ended_at timestamp AFTER acquiring the registration write lock
+	now := time.Now().UnixMilli()
+
+	// 3. Validate contest timing inside the store transaction
+	const contestTimingQ = `
+		SELECT start_time, end_time
+		FROM contests
+		WHERE id = $1
+	`
+	var startTime, endTime int64
+	if err := tx.QueryRowContext(ctx, contestTimingQ, contestID).Scan(&startTime, &endTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return common.ContestNotFoundError
+		}
+		return fmt.Errorf("check contest timing: %w", err)
+	}
+
+	if now < startTime || now > endTime {
+		return common.ContestNotRunningError
+	}
+
+	// 4. Idempotent: preserve original timestamp if already ended
+	if existingEndedAt.Valid {
+		return nil
+	}
+
+	// 5. Update ended_at
+	const updateQ = `
+		UPDATE contest_registrations
+		SET ended_at = $3
+		WHERE contest_id = $1 AND user_id = $2
+	`
+	if _, err := tx.ExecContext(ctx, updateQ, contestID, userID, now); err != nil {
+		return fmt.Errorf("update contest session ended_at: %w", err)
+	}
+
+	return tx.Commit()
 }
