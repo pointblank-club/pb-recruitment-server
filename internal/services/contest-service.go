@@ -326,11 +326,11 @@ func (cs *ContestService) GetProblemVisibility(ctx context.Context, contestID st
 			return common.UserNotRegisteredError
 		}
 		if userID != "" {
-			status, err := cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
+			sessionStatus, err := cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
 			if err != nil {
 				return err
 			}
-			if status != nil && status.IsSessionEnded {
+			if sessionStatus != nil && sessionStatus.IsSessionEnded {
 				return common.ErrContestSessionEnded
 			}
 		}
