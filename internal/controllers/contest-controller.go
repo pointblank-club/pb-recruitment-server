@@ -1076,7 +1076,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 
 // GetLeaderboard godoc
 // @Summary      Get contest leaderboard
-// @Description  Get ranked participants with pagination. Non-admins see code-only scores and ranks until the contest ends, then all scores. Problem breakdowns are admin-only.
+// @Description  Get ranked participants with pagination. Non-admins see scores updated periodically (every 5-10 mins) during live contests and live scores after contest ends. Individual problem breakdowns are admin-only.
 // @Tags         Contests
 // @Produce      json
 // @Param        id path string true "Contest ID"

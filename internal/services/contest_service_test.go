@@ -77,9 +77,10 @@ func TestProblemEditWindow(t *testing.T) {
 }
 
 type serviceRankingTestStore struct {
-	consolidateFunc func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
-	updateFunc      func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
-	leaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	consolidateFunc     func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
+	updateFunc          func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
+	leaderboardFunc     func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	userLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
 }
 
 func (s serviceRankingTestStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -101,6 +102,13 @@ func (s serviceRankingTestStore) GetLeaderboard(ctx context.Context, contestID s
 		return s.leaderboardFunc(ctx, contestID, page)
 	}
 	return nil, nil
+}
+
+func (s serviceRankingTestStore) GetUserLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	if s.userLeaderboardFunc != nil {
+		return s.userLeaderboardFunc(ctx, contestID, page)
+	}
+	return s.GetLeaderboard(ctx, contestID, page)
 }
 
 func (s serviceRankingTestStore) InvalidateCache(contestID string) {}
@@ -242,6 +250,37 @@ func TestGetLeaderboard(t *testing.T) {
 		}
 		if len(res.Entries[0].ProblemScores) != 1 {
 			t.Fatalf("expected 1 problem score for admin, got %v", res.Entries[0].ProblemScores)
+		}
+	})
+
+	t.Run("non-admin during live contest calls GetUserLeaderboard", func(t *testing.T) {
+		userLeaderboardCalled := false
+		adminLeaderboardCalled := false
+		storage := &stores.Storage{
+			Contests: problemContestTestStore{start: now - 60_000, end: now + 60_000},
+			Rankings: serviceRankingTestStore{
+				userLeaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+					userLeaderboardCalled = true
+					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1"}}}, nil
+				},
+				leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
+					adminLeaderboardCalled = true
+					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1"}}}, nil
+				},
+			},
+		}
+		// Non-admin during live contest
+		_, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, false)
+		if err != nil || !userLeaderboardCalled || adminLeaderboardCalled {
+			t.Fatalf("expected userLeaderboardCalled=true, adminLeaderboardCalled=false; got user=%v admin=%v err=%v", userLeaderboardCalled, adminLeaderboardCalled, err)
+		}
+
+		// Admin during live contest
+		userLeaderboardCalled = false
+		adminLeaderboardCalled = false
+		_, err = NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, true)
+		if err != nil || userLeaderboardCalled || !adminLeaderboardCalled {
+			t.Fatalf("expected userLeaderboardCalled=false, adminLeaderboardCalled=true; got user=%v admin=%v err=%v", userLeaderboardCalled, adminLeaderboardCalled, err)
 		}
 	})
 }

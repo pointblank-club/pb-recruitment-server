@@ -26,10 +26,11 @@ type leaderboardCacheEntry struct {
 }
 
 type RankingStore struct {
-	db       *sql.DB
-	cache    map[string]leaderboardCacheEntry
-	cacheMu  sync.RWMutex
-	cacheTTL time.Duration
+	db           *sql.DB
+	cache        map[string]leaderboardCacheEntry
+	cacheMu      sync.RWMutex
+	cacheTTL     time.Duration
+	userCacheTTL time.Duration
 }
 
 func NewRankingStore(db *sql.DB) *RankingStore {
@@ -42,10 +43,17 @@ func NewRankingStore(db *sql.DB) *RankingStore {
 			ttl = time.Duration(sec) * time.Second
 		}
 	}
+	userTTL := 5 * time.Minute
+	if ttlStr := os.Getenv("USER_LEADERBOARD_CACHE_TTL_SECONDS"); ttlStr != "" {
+		if sec, err := strconv.Atoi(ttlStr); err == nil && sec >= 0 {
+			userTTL = time.Duration(sec) * time.Second
+		}
+	}
 	return &RankingStore{
-		db:       db,
-		cache:    make(map[string]leaderboardCacheEntry),
-		cacheTTL: ttl,
+		db:           db,
+		cache:        make(map[string]leaderboardCacheEntry),
+		cacheTTL:     ttl,
+		userCacheTTL: userTTL,
 	}
 }
 
@@ -56,6 +64,15 @@ func (s *RankingStore) SetCacheTTL(d time.Duration) {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	s.cacheTTL = d
+}
+
+func (s *RankingStore) SetUserCacheTTL(d time.Duration) {
+	if s == nil {
+		return
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.userCacheTTL = d
 }
 
 func (s *RankingStore) InvalidateCache(contestID string) {
@@ -149,25 +166,29 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 const leaderboardPageSize = 20
 
 func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, false)
+	return s.getLeaderboard(ctx, contestID, page, false, s.cacheTTL, "")
+}
+
+func (s *RankingStore) GetUserLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	return s.getLeaderboard(ctx, contestID, page, false, s.userCacheTTL, "user")
 }
 
 func (s *RankingStore) GetCodeLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
-	return s.getLeaderboard(ctx, contestID, page, true)
+	return s.getLeaderboard(ctx, contestID, page, true, s.cacheTTL, "code")
 }
 
-func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool) (*dto.GetLeaderboardResponse, error) {
+func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, page int, codeOnly bool, ttl time.Duration, suffix string) (*dto.GetLeaderboardResponse, error) {
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
 
 	page = max(0, page)
 	cacheKey := fmt.Sprintf("%s:%d", contestID, page)
-	if codeOnly {
-		cacheKey += ":code"
+	if suffix != "" {
+		cacheKey += ":" + suffix
 	}
 
-	if s.cacheTTL > 0 {
+	if ttl > 0 {
 		s.cacheMu.RLock()
 		entry, ok := s.cache[cacheKey]
 		s.cacheMu.RUnlock()
@@ -325,11 +346,11 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		TotalCount: totalCount,
 	}
 
-	if s.cacheTTL > 0 && page < max(totalPages, 1) {
+	if ttl > 0 && page < max(totalPages, 1) {
 		s.cacheMu.Lock()
 		s.cache[cacheKey] = leaderboardCacheEntry{
 			data:      resp,
-			expiresAt: time.Now().Add(s.cacheTTL),
+			expiresAt: time.Now().Add(ttl),
 		}
 		s.cacheMu.Unlock()
 	}
