@@ -1,12 +1,37 @@
 package dto
 
 import (
+	"app/internal/models"
 	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/go-playground/validator/v10"
 )
+
+func TestProblemJSONOmitsResourceLimits(t *testing.T) {
+	var request CreateProblemRequest
+	if err := json.Unmarshal([]byte(`{"name":"p","type":"code","time_limit":9000,"memory_limit":500}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	for _, problem := range []any{request, models.Problem{Type: models.Code}, models.Problem{Type: models.MCQ},
+		ProblemOverview{Type: models.Code}, ProblemOverview{Type: models.MCQ},
+		GetProblemStatementResponse{Type: models.Code}, GetProblemStatementResponse{Type: models.MCQ}} {
+		encoded, err := json.Marshal(problem)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"time_limit", "memory_limit"} {
+			if _, exists := fields[key]; exists {
+				t.Errorf("%T still exposes %s", problem, key)
+			}
+		}
+	}
+}
 
 func TestCreateProblemRequestTestcaseValidation(t *testing.T) {
 	v := validator.New()
@@ -56,26 +81,6 @@ func TestCreateProblemRequestTestcaseValidation(t *testing.T) {
 		{"mcq needs at least two options", CreateProblemRequest{
 			Name: "p", Description: "d", Score: 10, Type: "mcq",
 			Answer: []int{0}, Options: []string{"only one"},
-		}, true},
-		{"limits at Judge0 maximum", CreateProblemRequest{
-			Name: "p", Description: "d", Score: 10, Type: "code",
-			Testcases: []CreateTestCaseRequest{{}}, TimeLimit: 10000, MemoryLimit: 500,
-		}, false},
-		{"time limit above Judge0 maximum", CreateProblemRequest{
-			Name: "p", Description: "d", Score: 10, Type: "code",
-			Testcases: []CreateTestCaseRequest{{}}, TimeLimit: 10001,
-		}, true},
-		{"memory limit above Judge0 maximum", CreateProblemRequest{
-			Name: "p", Description: "d", Score: 10, Type: "code",
-			Testcases: []CreateTestCaseRequest{{}}, MemoryLimit: 501,
-		}, true},
-		{"memory limit below Judge0 minimum", CreateProblemRequest{
-			Name: "p", Description: "d", Score: 10, Type: "code",
-			Testcases: []CreateTestCaseRequest{{}}, MemoryLimit: 1,
-		}, true},
-		{"negative limit", CreateProblemRequest{
-			Name: "p", Description: "d", Score: 10, Type: "code",
-			Testcases: []CreateTestCaseRequest{{}}, TimeLimit: -1,
 		}, true},
 	}
 

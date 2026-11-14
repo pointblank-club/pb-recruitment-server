@@ -56,7 +56,7 @@ func seedTabSwitchFixture(t *testing.T, db *sql.DB, startOffset, endOffset, regS
 		t.Fatal(err)
 	}
 	if err := ps.CreateProblem(context.Background(), &models.Problem{
-		ID: codeProblem, ContestID: contest, Name: "Code 1", Type: models.Code, Score: 100, TimeLimit: 1000, MemoryLimit: 256,
+		ID: codeProblem, ContestID: contest, Name: "Code 1", Type: models.Code, Score: 100,
 		Options: []string{}, Answer: []int{},
 		Testcases: "problems/" + contest + "/" + codeProblem + "/testcases.json",
 	}); err != nil {

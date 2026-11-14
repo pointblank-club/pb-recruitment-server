@@ -7,13 +7,11 @@ import (
 )
 
 type ProblemOverview struct {
-	ID          string                `json:"id"`
-	Name        string                `json:"name"`
-	Score       int                   `json:"score"`
-	Type        models.SubmissionType `json:"type"`
-	TimeLimit   int                   `json:"time_limit,omitempty"`
-	MemoryLimit int                   `json:"memory_limit,omitempty"`
-	Progress    string                `json:"progress,omitempty"`
+	ID       string                `json:"id"`
+	Name     string                `json:"name"`
+	Score    int                   `json:"score"`
+	Type     models.SubmissionType `json:"type"`
+	Progress string                `json:"progress,omitempty"`
 }
 
 type GetProblemStatementResponse struct {
@@ -27,8 +25,6 @@ type GetProblemStatementResponse struct {
 	Options      []string              `json:"options,omitempty"`
 	Testcases    []TestCaseResponse    `json:"testcases,omitempty"`
 	TestcasesKey string                `json:"-"`
-	TimeLimit    int                   `json:"time_limit,omitempty"`
-	MemoryLimit  int                   `json:"memory_limit,omitempty"`
 }
 
 type CreateProblemRequest struct {
@@ -39,8 +35,6 @@ type CreateProblemRequest struct {
 	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
 	Options     []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,max=100,dive,required,max=4096"`
 	Testcases   []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,max=100,dive"`
-	TimeLimit   int                     `json:"time_limit,omitempty" validate:"omitempty,min=1,max=10000"` // milliseconds; submissions run under Judge0's 10s default wall_time_limit
-	MemoryLimit int                     `json:"memory_limit,omitempty" validate:"omitempty,min=2,max=500"` // MB; Judge0 accepts 2048-512000 KB
 }
 
 type CreateTestCaseRequest struct {
