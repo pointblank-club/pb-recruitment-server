@@ -141,6 +141,34 @@ versioned edits. After any versioned edit, rollback must retain version-aware re
 or migrate references and both objects while traffic is stopped. Deploy the backend
 before the website editor, which now consumes inputs and answers from one response.
 
+## Server time for browser clocks
+
+All responses include `X-Server-Time-Ms`, the application server's current Unix
+time in milliseconds sampled immediately before headers are committed. CORS
+exposes it, including on errors and early request-bound rejections. Responses
+use `Cache-Control: private, no-store` so cached timestamps cannot establish a
+client clock. The existing endpoints and JSON bodies are unchanged.
+
+CORS runs after routing, so ordinary OPTIONS responses retain their `Allow`
+metadata. It runs after request logging and before body bounds: OPTIONS requests
+are logged and intentionally short-circuit body limits, while application
+telemetry continues to exclude OPTIONS. POST/admin/callback limits are unchanged.
+
+Deploy this backend change before the frontend clock integration. No migration
+is required. Application hosts must keep their system clocks synchronized; the
+frontend uses the same server clock as contest admission checks.
+
+## Private response caching
+
+The `/admin` group sets `Cache-Control: private, no-store` before authentication.
+Contest details (including `is_registered`), gated problem details, and candidate
+session status also set it at handler entry, covering success and error responses
+independently of the global response policy.
+
+CDN rules must respect origin cache directives or bypass caching for these paths.
+An explicit edge-TTL override can ignore origin headers; purge any previously
+cached private responses when correcting such a configuration.
+
 ## MCQ result visibility
 
 MCQ submission status, details, and history return `attempted` until the contest

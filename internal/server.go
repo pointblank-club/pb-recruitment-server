@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,7 +47,15 @@ func NewEchoServer(
 		return limiter.Allow()
 	}
 	e := echo.New()
-	middleware.ConfigureRequestBounds(e)
+	e.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Response().Before(func() {
+				c.Response().Header().Set("X-Server-Time-Ms", strconv.FormatInt(time.Now().UnixMilli(), 10))
+				c.Response().Header().Set(echo.HeaderCacheControl, "private, no-store")
+			})
+			return next(c)
+		}
+	})
 	e.Use(mdw.Recover())
 	e.Use(sentryecho.New(sentryecho.Options{
 		Repanic: true,
@@ -187,6 +196,7 @@ func NewEchoServer(
 		}
 	}
 
+	// Run after routing for OPTIONS metadata, but before bounds so early errors expose headers.
 	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{
@@ -205,6 +215,7 @@ func NewEchoServer(
 			"Idempotency-Key",
 		},
 		ExposeHeaders: []string{
+			"X-Server-Time-Ms",
 			echo.HeaderRetryAfter,
 			"X-Total-Count",
 			"X-Total-Pages",
@@ -215,6 +226,7 @@ func NewEchoServer(
 		},
 		AllowCredentials: true,
 	}))
+	middleware.ConfigureRequestBounds(e)
 
 	// Swagger UI - only exposed in development environment or when explicitly enabled
 	if os.Getenv("STAGE") == "dev" || os.Getenv("ENABLE_SWAGGER") == "true" {
