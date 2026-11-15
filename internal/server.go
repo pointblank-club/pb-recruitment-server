@@ -56,7 +56,6 @@ func NewEchoServer(
 			return next(c)
 		}
 	})
-	middleware.ConfigureRequestBounds(e)
 	e.Use(mdw.Recover())
 	e.Use(sentryecho.New(sentryecho.Options{
 		Repanic: true,
@@ -197,8 +196,8 @@ func NewEchoServer(
 		}
 	}
 
-	// Expose response headers even when request bounds reject a request early.
-	e.Pre(mdw.CORSWithConfig(mdw.CORSConfig{
+	// Run after routing for OPTIONS metadata, but before bounds so early errors expose headers.
+	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{
 			echo.GET,
@@ -227,6 +226,7 @@ func NewEchoServer(
 		},
 		AllowCredentials: true,
 	}))
+	middleware.ConfigureRequestBounds(e)
 
 	// Swagger UI - only exposed in development environment or when explicitly enabled
 	if os.Getenv("STAGE") == "dev" || os.Getenv("ENABLE_SWAGGER") == "true" {

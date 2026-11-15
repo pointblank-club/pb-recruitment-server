@@ -149,6 +149,11 @@ exposes it, including on errors and early request-bound rejections. Responses
 use `Cache-Control: private, no-store` so cached timestamps cannot establish a
 client clock. The existing endpoints and JSON bodies are unchanged.
 
+CORS runs after routing, so ordinary OPTIONS responses retain their `Allow`
+metadata. It runs after request logging and before body bounds: OPTIONS requests
+are logged and intentionally short-circuit body limits, while application
+telemetry continues to exclude OPTIONS. POST/admin/callback limits are unchanged.
+
 Deploy this backend change before the frontend clock integration. No migration
 is required. Application hosts must keep their system clocks synchronized; the
 frontend uses the same server clock as contest admission checks.
