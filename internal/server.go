@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,15 @@ func NewEchoServer(
 		return limiter.Allow()
 	}
 	e := echo.New()
+	e.Pre(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Response().Before(func() {
+				c.Response().Header().Set("X-Server-Time-Ms", strconv.FormatInt(time.Now().UnixMilli(), 10))
+				c.Response().Header().Set(echo.HeaderCacheControl, "private, no-store")
+			})
+			return next(c)
+		}
+	})
 	middleware.ConfigureRequestBounds(e)
 	e.Use(mdw.Recover())
 	e.Use(sentryecho.New(sentryecho.Options{
@@ -187,7 +197,8 @@ func NewEchoServer(
 		}
 	}
 
-	e.Use(mdw.CORSWithConfig(mdw.CORSConfig{
+	// Expose response headers even when request bounds reject a request early.
+	e.Pre(mdw.CORSWithConfig(mdw.CORSConfig{
 		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{
 			echo.GET,
@@ -205,6 +216,7 @@ func NewEchoServer(
 			"Idempotency-Key",
 		},
 		ExposeHeaders: []string{
+			"X-Server-Time-Ms",
 			echo.HeaderRetryAfter,
 			"X-Total-Count",
 			"X-Total-Pages",
