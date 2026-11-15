@@ -153,6 +153,17 @@ Deploy this backend change before the frontend clock integration. No migration
 is required. Application hosts must keep their system clocks synchronized; the
 frontend uses the same server clock as contest admission checks.
 
+## Private response caching
+
+The `/admin` group sets `Cache-Control: private, no-store` before authentication.
+Contest details (including `is_registered`), gated problem details, and candidate
+session status also set it at handler entry, covering success and error responses
+independently of the global response policy.
+
+CDN rules must respect origin cache directives or bypass caching for these paths.
+An explicit edge-TTL override can ignore origin headers; purge any previously
+cached private responses when correcting such a configuration.
+
 ## MCQ result visibility
 
 MCQ submission status, details, and history return `attempted` until the contest

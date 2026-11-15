@@ -609,6 +609,7 @@ func (cc *ContestController) HandleUpdateLeaderboardUser(ctx echo.Context) error
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id} [get]
 func (cc *ContestController) GetContest(ctx echo.Context) error {
+	ctx.Response().Header().Set(echo.HeaderCacheControl, "private, no-store")
 	contestID := ctx.Param("id")
 
 	userID, ok := ctx.Get(common.AUTH_USER_ID).(string)
@@ -701,6 +702,7 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id}/problems/{problem_id} [get]
 func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
+	ctx.Response().Header().Set(echo.HeaderCacheControl, "private, no-store")
 	contestID := ctx.Param("id")
 	problemID := ctx.Param("problem_id")
 	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
@@ -863,6 +865,7 @@ func (cc *ContestController) RecordTabSwitch(ctx echo.Context) error {
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{contestId}/session-status [get]
 func (cc *ContestController) GetCandidateSessionStatus(ctx echo.Context) error {
+	ctx.Response().Header().Set(echo.HeaderCacheControl, "private, no-store")
 	contestID := ctx.Param("contestId")
 	if contestID == "" {
 		contestID = ctx.Param("id")

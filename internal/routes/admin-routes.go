@@ -22,6 +22,7 @@ func AddAdminRoutes(
 	limiter middleware.RequestLimiter,
 ) {
 	adminGroup := e.Group("/admin")
+	adminGroup.Use(middleware.PrivateNoStore)
 	adminGroup.Use(middleware.RequireFirebaseAuth(authClient))
 	adminGroup.Use(middleware.RequireAdminRole(userService, adminService))
 	adminGroup.Use(middleware.LimitRequests(limiter, "admin", 180, 60))
