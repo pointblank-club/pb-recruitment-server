@@ -45,7 +45,7 @@ type Storage struct {
 		PendingCodeWithoutExecutions(context.Context, int64, int) ([]string, error)
 		CheckSubmissionRateLimit(context.Context, string, int64) error
 		CheckRunCapacity(context.Context) error
-		ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error)
+		ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict, submissionType string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error)
 		GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error)
 	}
 	Executions interface {

@@ -10,7 +10,7 @@ type GetContestResponse struct {
 
 type UpsertContestRequest struct {
 	Name                  string `json:"name" validate:"required"`
-	Description           string `json:"description" validate:"required"` // base64 encoded
+	Description           string `json:"description"` // base64 encoded
 	RegistrationStartTime int64  `json:"registration_start_time" validate:"required"`
 	RegistrationEndTime   int64  `json:"registration_end_time" validate:"required,gtfield=RegistrationStartTime"`
 	StartTime             int64  `json:"start_time" validate:"required,gtfield=RegistrationStartTime"`

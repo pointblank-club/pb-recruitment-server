@@ -377,6 +377,7 @@ func (sc *SubmissionController) GetAdminSubmissions(ctx echo.Context) error {
 	userID := ctx.QueryParam("user_id")
 	problemID := ctx.QueryParam("problem_id")
 	verdict := ctx.QueryParam("verdict")
+	submissionType := ctx.QueryParam("type")
 
 	page := 0
 	if p, err := strconv.Atoi(ctx.QueryParam("page")); err == nil && p >= 0 {
@@ -394,7 +395,7 @@ func (sc *SubmissionController) GetAdminSubmissions(ctx echo.Context) error {
 	if page > int(^uint(0)>>1)/pageSize {
 		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid pagination offset"})
 	}
-	submissions, totalCount, err := sc.submissionService.ListAdminSubmissions(ctx.Request().Context(), contestID, userID, problemID, verdict, page, pageSize)
+	submissions, totalCount, err := sc.submissionService.ListAdminSubmissions(ctx.Request().Context(), contestID, userID, problemID, verdict, submissionType, page, pageSize)
 	if err != nil {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "failed to list submissions",
