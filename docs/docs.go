@@ -3554,7 +3554,6 @@ const docTemplate = `{
                 },
                 "description": {
                     "type": "string",
-                    "description": "Required for code problems; optional for MCQs.",
                     "maxLength": 262144
                 },
                 "name": {
