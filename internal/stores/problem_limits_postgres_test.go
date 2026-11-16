@@ -104,7 +104,7 @@ func TestCodeProblemLimitsPostgres(t *testing.T) {
 			t.Fatalf("%s changed pending snapshot: %+v, error=%v", direction, snapshot, err)
 		}
 	}
-	// A pre-42 schema still has custom coding values: migration 46 preserves them.
+	// Normal upgrades lose custom values at 42; only an explicit backup restores them after 46.
 	for _, file := range []string{"000046_code_problem_limits.down.sql", "000042_remove_problem_limits.down.sql"} {
 		data, err := os.ReadFile("../migrations/" + file)
 		if err != nil {
@@ -117,16 +117,29 @@ func TestCodeProblemLimitsPostgres(t *testing.T) {
 	if _, err := db.Exec(`UPDATE problems SET time_limit=7000,memory_limit=384 WHERE id=$1`, problemID); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile("../migrations/000046_code_problem_limits.up.sql")
-	if err != nil {
+	var backupTime, backupMemory int
+	if err := db.QueryRow(`SELECT time_limit,memory_limit FROM problems WHERE id=$1`, problemID).Scan(&backupTime, &backupMemory); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(string(data)); err != nil {
-		t.Fatal(err)
+	for _, file := range []string{"000042_remove_problem_limits.up.sql", "000046_code_problem_limits.up.sql"} {
+		data, err := os.ReadFile("../migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	got, err := store.GetProblem(ctx, problemID, contest)
+	if err != nil || got.TimeLimit != 1000 || got.MemoryLimit != 256 {
+		t.Fatalf("sequential upgrade defaults=%+v error=%v", got, err)
+	}
+	if _, err := db.Exec(`UPDATE problems SET time_limit=$2,memory_limit=$3 WHERE id=$1`, problemID, backupTime, backupMemory); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.GetProblem(ctx, problemID, contest)
 	if err != nil || got.TimeLimit != 7000 || got.MemoryLimit != 384 {
-		t.Fatalf("legacy limits=%+v error=%v", got, err)
+		t.Fatalf("restored backup=%+v error=%v", got, err)
 	}
 	var mcqLimitCount int
 	if err := db.QueryRow(`SELECT count(*) FROM problems WHERE type='mcq' AND (time_limit IS NOT NULL OR memory_limit IS NOT NULL)`).Scan(&mcqLimitCount); err != nil || mcqLimitCount != 0 {

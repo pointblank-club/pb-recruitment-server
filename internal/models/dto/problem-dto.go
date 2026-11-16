@@ -43,6 +43,21 @@ type CreateProblemRequest struct {
 	MemoryLimit *int                    `json:"memory_limit,omitempty" validate:"excluded_unless=Type code,omitempty,min=2,max=500"` // MiB
 }
 
+func (req *CreateProblemRequest) UnmarshalJSON(data []byte) error {
+	var limits struct {
+		TimeLimit   json.RawMessage `json:"time_limit"`
+		MemoryLimit json.RawMessage `json:"memory_limit"`
+	}
+	if err := json.Unmarshal(data, &limits); err != nil {
+		return err
+	}
+	if string(limits.TimeLimit) == "null" || string(limits.MemoryLimit) == "null" {
+		return errors.New("time_limit and memory_limit must be integers when provided")
+	}
+	type request CreateProblemRequest
+	return json.Unmarshal(data, (*request)(req))
+}
+
 type CreateTestCaseRequest struct {
 	Input          string `json:"input" binding:"required" validate:"max=1048576"`
 	ExpectedOutput string `json:"expected_output" binding:"required" validate:"max=1048576"`

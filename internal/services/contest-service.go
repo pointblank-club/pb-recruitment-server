@@ -222,7 +222,6 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 
 func setProblemLimits(problem *models.Problem, req *dto.CreateProblemRequest) {
 	// Zero leaves omitted coding settings for the store to default or preserve atomically.
-	problem.TimeLimit, problem.MemoryLimit = 0, 0
 	if problem.Type != models.Code {
 		return
 	}

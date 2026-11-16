@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,50 @@ import (
 	"app/internal/models/dto"
 	"github.com/labstack/echo/v4"
 )
+
+func TestProblemResourceLimitsJSON(t *testing.T) {
+	for _, method := range []string{"POST", "PUT"} {
+		for _, kind := range []string{"code", "mcq"} {
+			for _, tc := range []struct {
+				name, limits string
+				codeValid    bool
+			}{
+				{"omitted", "", true},
+				{"custom", `,"time_limit":2500,"memory_limit":384`, true},
+				{"time only", `,"time_limit":2500`, true},
+				{"memory only", `,"memory_limit":384`, true},
+				{"null time", `,"time_limit":null`, false},
+				{"null memory", `,"memory_limit":null`, false},
+				{"both null", `,"time_limit":null,"memory_limit":null`, false},
+				{"zero", `,"time_limit":0`, false},
+				{"negative", `,"memory_limit":-1`, false},
+				{"fractional", `,"time_limit":1.5`, false},
+				{"string", `,"memory_limit":"256"`, false},
+				{"excess time", `,"time_limit":10001`, false},
+				{"excess memory", `,"memory_limit":501`, false},
+			} {
+				t.Run(method+"/"+kind+"/"+tc.name, func(t *testing.T) {
+					e := echo.New()
+					e.Add(method, "/problem", func(c echo.Context) error {
+						return c.NoContent(204)
+					}, ValidateRequest(new(dto.CreateProblemRequest)))
+					body := fmt.Sprintf(`{"name":"p","description":"d","score":1,"type":%q,"answer":[0],"options":["a","b"],"testcases":[{"input":"","expected_output":""}]%s}`, kind, tc.limits)
+					r := httptest.NewRequest(method, "/problem", strings.NewReader(body))
+					r.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+					w := httptest.NewRecorder()
+					e.ServeHTTP(w, r)
+					want := 400
+					if tc.codeValid && (kind == "code" || tc.limits == "") {
+						want = 204
+					}
+					if w.Code != want {
+						t.Fatalf("status=%d, want %d: %s", w.Code, want, w.Body.String())
+					}
+				})
+			}
+		}
+	}
+}
 
 type recordingLimiter struct {
 	keys  []string
