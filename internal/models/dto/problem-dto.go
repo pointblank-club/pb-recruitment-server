@@ -29,7 +29,7 @@ type GetProblemStatementResponse struct {
 
 type CreateProblemRequest struct {
 	Name        string                  `json:"name" validate:"required,max=200"`
-	Description string                  `json:"description" validate:"required,max=262144"`
+	Description string                  `json:"description" validate:"required_if=Type code,max=262144"`
 	Score       int                     `json:"score" validate:"required,gt=0"`
 	Type        models.SubmissionType   `json:"type" validate:"required,oneof=mcq code"`
 	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
