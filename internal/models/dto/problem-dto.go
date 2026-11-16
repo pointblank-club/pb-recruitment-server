@@ -4,6 +4,7 @@ import (
 	"app/internal/models"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 type ProblemOverview struct {
@@ -28,13 +29,34 @@ type GetProblemStatementResponse struct {
 }
 
 type CreateProblemRequest struct {
-	Name        string                  `json:"name" validate:"required,max=200"`
-	Description string                  `json:"description" validate:"required_if=Type code,max=262144"`
-	Score       int                     `json:"score" validate:"required,gt=0"`
-	Type        models.SubmissionType   `json:"type" validate:"required,oneof=mcq code"`
-	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
-	Options     []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,max=100,dive,required,max=4096"`
-	Testcases   []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,max=100,dive"`
+	Name                string                  `json:"name" validate:"required,max=200"`
+	Description         string                  `json:"description" validate:"required_if=Type code,max=262144"`
+	DescriptionProvided bool                    `json:"-"`
+	Score               int                     `json:"score" validate:"required,gt=0"`
+	Type                models.SubmissionType   `json:"type" validate:"required,oneof=mcq code"`
+	Answer              []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
+	Options             []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,max=100,dive,required,max=4096"`
+	Testcases           []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,max=100,dive"`
+}
+
+func (r *CreateProblemRequest) UnmarshalJSON(data []byte) error {
+	type requestAlias CreateProblemRequest
+	var decoded requestAlias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*r = CreateProblemRequest(decoded)
+	for key := range fields {
+		if strings.EqualFold(key, "description") {
+			r.DescriptionProvided = true
+			break
+		}
+	}
+	return nil
 }
 
 type CreateTestCaseRequest struct {
