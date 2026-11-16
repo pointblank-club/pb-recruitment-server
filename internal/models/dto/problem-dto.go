@@ -4,15 +4,16 @@ import (
 	"app/internal/models"
 	"encoding/json"
 	"errors"
-	"strings"
 )
 
 type ProblemOverview struct {
-	ID       string                `json:"id"`
-	Name     string                `json:"name"`
-	Score    int                   `json:"score"`
-	Type     models.SubmissionType `json:"type"`
-	Progress string                `json:"progress,omitempty"`
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	Score       int                   `json:"score"`
+	Type        models.SubmissionType `json:"type"`
+	Progress    string                `json:"progress,omitempty"`
+	TimeLimit   int                   `json:"time_limit,omitempty"`
+	MemoryLimit int                   `json:"memory_limit,omitempty"`
 }
 
 type GetProblemStatementResponse struct {
@@ -26,10 +27,12 @@ type GetProblemStatementResponse struct {
 	Options      []string              `json:"options,omitempty"`
 	Testcases    []TestCaseResponse    `json:"testcases,omitempty"`
 	TestcasesKey string                `json:"-"`
+	TimeLimit    int                   `json:"time_limit,omitempty"`
+	MemoryLimit  int                   `json:"memory_limit,omitempty"`
 }
 
 type CreateProblemRequest struct {
-	Name                string                  `json:"name" validate:"required,max=200"`
+	Name string `json:"name" validate:"required,max=200"`
 	// Required for code problems. For MCQ updates, omit to preserve the existing description or send an empty string to clear it.
 	Description         string                  `json:"description" validate:"required_if=Type code,max=262144"`
 	DescriptionProvided bool                    `json:"-"`
@@ -38,25 +41,29 @@ type CreateProblemRequest struct {
 	Answer              []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
 	Options             []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,max=100,dive,required,max=4096"`
 	Testcases           []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,max=100,dive"`
+	TimeLimit           *int                    `json:"time_limit,omitempty" validate:"excluded_unless=Type code,omitempty,min=1,max=10000"` // milliseconds
+	MemoryLimit         *int                    `json:"memory_limit,omitempty" validate:"excluded_unless=Type code,omitempty,min=2,max=500"` // MiB
 }
 
 func (r *CreateProblemRequest) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Description json.RawMessage `json:"description"`
+		TimeLimit   json.RawMessage `json:"time_limit"`
+		MemoryLimit json.RawMessage `json:"memory_limit"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if string(fields.TimeLimit) == "null" || string(fields.MemoryLimit) == "null" {
+		return errors.New("time_limit and memory_limit must be integers when provided")
+	}
 	type requestAlias CreateProblemRequest
 	var decoded requestAlias
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
 	*r = CreateProblemRequest(decoded)
-	for key := range fields {
-		if strings.EqualFold(key, "description") {
-			r.DescriptionProvided = true
-			break
-		}
-	}
+	r.DescriptionProvided = fields.Description != nil
 	return nil
 }
 

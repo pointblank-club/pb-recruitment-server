@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestProblemLimitsRemovedPostgres(t *testing.T) {
+func TestCodeProblemLimitsPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	_, contest, problemID, submissionID, executions := executionFixture(t, db, 1)
 	store := stores.NewProblemStore(db)
@@ -27,6 +27,7 @@ func TestProblemLimitsRemovedPostgres(t *testing.T) {
 		problem := &models.Problem{
 			ID: uuid.NewString(), ContestID: contest, Name: "original", Description: "question", Score: 10, Type: kind,
 			Answer: []int{0}, Options: []string{"one", "two"}, Testcases: "testcases.json",
+			TimeLimit: 2500, MemoryLimit: 384,
 		}
 		if err := store.CreateProblem(ctx, problem); err != nil {
 			t.Fatal(err)
@@ -38,6 +39,13 @@ func TestProblemLimitsRemovedPostgres(t *testing.T) {
 		got, err := store.GetProblem(ctx, problem.ID, contest)
 		if err != nil || got.Name != problem.Name || got.Type != kind || got.TestcasesKey != problem.Testcases {
 			t.Fatalf("problem=%+v error=%v", got, err)
+		}
+		wantTime, wantMemory := 2500, 384
+		if kind == models.MCQ {
+			wantTime, wantMemory = 0, 0
+		}
+		if got.TimeLimit != wantTime || got.MemoryLimit != wantMemory {
+			t.Fatalf("limits for %s: %+v", kind, got)
 		}
 	}
 	if list, err := store.GetProblemList(ctx, contest); err != nil || len(list) != 3 {
@@ -55,7 +63,7 @@ func TestProblemLimitsRemovedPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, direction := range []string{"down", "up"} {
-		migration, err := os.ReadFile("../migrations/000042_remove_problem_limits." + direction + ".sql")
+		migration, err := os.ReadFile("../migrations/000046_code_problem_limits." + direction + ".sql")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,13 +76,13 @@ func TestProblemLimitsRemovedPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := 0
-		if direction == "down" {
+		if direction == "up" {
 			want = 2
 		}
 		if count != want {
 			t.Fatalf("%s: resource columns=%d, want %d", direction, count, want)
 		}
-		if direction == "down" {
+		if direction == "up" {
 			var cpu, memory int
 			if err := db.QueryRow(`SELECT time_limit,memory_limit FROM problems WHERE id=$1`, problemID).Scan(&cpu, &memory); err != nil || cpu != 1000 || memory != 256 {
 				t.Fatalf("rollback defaults=%d/%d, error=%v", cpu, memory, err)
@@ -83,8 +91,9 @@ func TestProblemLimitsRemovedPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if list, err := store.GetProblemList(ctx, contest); err != nil || len(list) != 3 {
-			t.Fatalf("%s changed problem rows: list=%+v error=%v", direction, list, err)
+		var rowCount int
+		if err := db.QueryRow(`SELECT count(*) FROM problems WHERE contest_id=$1`, contest).Scan(&rowCount); err != nil || rowCount != 3 {
+			t.Fatalf("%s changed problem rows: count=%d error=%v", direction, rowCount, err)
 		}
 		var saved []byte
 		if err := db.QueryRow(`SELECT dispatch_payload FROM submission_executions WHERE id=$1`, executions[0].ID).Scan(&saved); err != nil {
@@ -94,6 +103,47 @@ func TestProblemLimitsRemovedPostgres(t *testing.T) {
 		if err := json.Unmarshal(saved, &snapshot); err != nil || !reflect.DeepEqual(snapshot, historical) {
 			t.Fatalf("%s changed pending snapshot: %+v, error=%v", direction, snapshot, err)
 		}
+	}
+	// Normal upgrades lose custom values at 42; only an explicit backup restores them after 46.
+	for _, file := range []string{"000046_code_problem_limits.down.sql", "000042_remove_problem_limits.down.sql"} {
+		data, err := os.ReadFile("../migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE problems SET time_limit=7000,memory_limit=384 WHERE id=$1`, problemID); err != nil {
+		t.Fatal(err)
+	}
+	var backupTime, backupMemory int
+	if err := db.QueryRow(`SELECT time_limit,memory_limit FROM problems WHERE id=$1`, problemID).Scan(&backupTime, &backupMemory); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"000042_remove_problem_limits.up.sql", "000046_code_problem_limits.up.sql"} {
+		data, err := os.ReadFile("../migrations/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(data)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := store.GetProblem(ctx, problemID, contest)
+	if err != nil || got.TimeLimit != 1000 || got.MemoryLimit != 256 {
+		t.Fatalf("sequential upgrade defaults=%+v error=%v", got, err)
+	}
+	if _, err := db.Exec(`UPDATE problems SET time_limit=$2,memory_limit=$3 WHERE id=$1`, problemID, backupTime, backupMemory); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.GetProblem(ctx, problemID, contest)
+	if err != nil || got.TimeLimit != 7000 || got.MemoryLimit != 384 {
+		t.Fatalf("restored backup=%+v error=%v", got, err)
+	}
+	var mcqLimitCount int
+	if err := db.QueryRow(`SELECT count(*) FROM problems WHERE type='mcq' AND (time_limit IS NOT NULL OR memory_limit IS NOT NULL)`).Scan(&mcqLimitCount); err != nil || mcqLimitCount != 0 {
+		t.Fatal("MCQ migration retained resource limits", mcqLimitCount, err)
 	}
 	var dispatches atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

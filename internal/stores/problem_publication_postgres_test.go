@@ -104,6 +104,50 @@ func storedTestcaseKey(t *testing.T, db *sql.DB, problem string) string {
 	return key
 }
 
+func TestCodeProblemLimitAuthoringPostgres(t *testing.T) {
+	db, _, cs, contest, _, _ := authoringFixture(t)
+	ctx := context.Background()
+	timeLimit, memoryLimit := 2500, 384
+	req := authoringRequest("custom coding limits", true)
+	req.TimeLimit, req.MemoryLimit = &timeLimit, &memoryLimit
+	created, err := cs.CreateProblem(ctx, contest, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := stores.NewProblemStore(db)
+	assertLimits := func(wantTime, wantMemory int) {
+		t.Helper()
+		got, err := store.GetProblem(ctx, created.ID, contest)
+		if err != nil || got.TimeLimit != wantTime || got.MemoryLimit != wantMemory {
+			t.Fatalf("problem=%+v error=%v", got, err)
+		}
+	}
+	assertLimits(2500, 384)
+	if _, err := cs.UpdateProblem(ctx, contest, created.ID, authoringRequest("omitted limits", false)); err != nil {
+		t.Fatal(err)
+	}
+	assertLimits(2500, 384)
+	timeLimit, memoryLimit = 4500, 400
+	if _, err := cs.UpdateProblem(ctx, contest, created.ID, req); err != nil {
+		t.Fatal(err)
+	}
+	assertLimits(4500, 400)
+	mcq := &dto.CreateProblemRequest{Name: "converted MCQ", Description: "question", Score: 1, Type: models.MCQ, Answer: []int{0}, Options: []string{"a", "b"}}
+	converted, err := cs.UpdateProblem(ctx, contest, created.ID, mcq)
+	if err != nil || converted.TimeLimit != 0 || converted.MemoryLimit != 0 {
+		t.Fatalf("mcq=%+v error=%v", converted, err)
+	}
+	assertLimits(0, 0)
+	var cleared bool
+	if err := db.QueryRow(`SELECT time_limit IS NULL AND memory_limit IS NULL FROM problems WHERE id=$1`, created.ID).Scan(&cleared); err != nil || !cleared {
+		t.Fatal("MCQ retains limits", err)
+	}
+	if _, err := cs.UpdateProblem(ctx, contest, created.ID, authoringRequest("converted coding", true)); err != nil {
+		t.Fatal(err)
+	}
+	assertLimits(1000, 256)
+}
+
 func TestProblemConcurrentMetadataEditPreservesVersionPostgres(t *testing.T) {
 	db, o, cs, contest, problem, old := authoringFixture(t)
 	ctx := context.Background()
@@ -122,7 +166,10 @@ func TestProblemConcurrentMetadataEditPreservesVersionPostgres(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("metadata edit did not reach storage")
 	}
-	if _, err := cs.UpdateProblem(ctx, contest, problem, authoringRequest("testcase-edit", true)); err != nil {
+	updated := authoringRequest("testcase-edit", true)
+	timeLimit, memoryLimit := 4500, 400
+	updated.TimeLimit, updated.MemoryLimit = &timeLimit, &memoryLimit
+	if _, err := cs.UpdateProblem(ctx, contest, problem, updated); err != nil {
 		t.Fatal(err)
 	}
 	published := storedTestcaseKey(t, db, problem)
@@ -135,6 +182,10 @@ func TestProblemConcurrentMetadataEditPreservesVersionPostgres(t *testing.T) {
 	}
 	if current := storedTestcaseKey(t, db, problem); current != published {
 		t.Fatalf("metadata edit reverted testcase version: current=%s published=%s", current, published)
+	}
+	got, err := stores.NewProblemStore(db).GetProblem(ctx, problem, contest)
+	if err != nil || got.TimeLimit != timeLimit || got.MemoryLimit != memoryLimit {
+		t.Fatalf("metadata edit reverted coding limits: %+v, error=%v", got, err)
 	}
 }
 

@@ -9,14 +9,13 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-func TestProblemJSONOmitsResourceLimits(t *testing.T) {
+func TestMCQProblemJSONOmitsResourceLimits(t *testing.T) {
 	var request CreateProblemRequest
-	if err := json.Unmarshal([]byte(`{"name":"p","type":"code","time_limit":9000,"memory_limit":500}`), &request); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"p","type":"mcq"}`), &request); err != nil {
 		t.Fatal(err)
 	}
-	for _, problem := range []any{request, models.Problem{Type: models.Code}, models.Problem{Type: models.MCQ},
-		ProblemOverview{Type: models.Code}, ProblemOverview{Type: models.MCQ},
-		GetProblemStatementResponse{Type: models.Code}, GetProblemStatementResponse{Type: models.MCQ}} {
+	for _, problem := range []any{request, models.Problem{Type: models.MCQ},
+		ProblemOverview{Type: models.MCQ}, GetProblemStatementResponse{Type: models.MCQ}} {
 		encoded, err := json.Marshal(problem)
 		if err != nil {
 			t.Fatal(err)
@@ -29,6 +28,54 @@ func TestProblemJSONOmitsResourceLimits(t *testing.T) {
 			if _, exists := fields[key]; exists {
 				t.Errorf("%T still exposes %s", problem, key)
 			}
+		}
+	}
+}
+
+func TestCodeProblemResourceLimits(t *testing.T) {
+	ptr := func(value int) *int { return &value }
+	for _, tc := range []struct {
+		name         string
+		kind         models.SubmissionType
+		time, memory *int
+		valid        bool
+	}{
+		{"defaults", models.Code, nil, nil, true},
+		{"custom", models.Code, ptr(2500), ptr(384), true},
+		{"maximum", models.Code, ptr(10000), ptr(500), true},
+		{"zero time", models.Code, ptr(0), nil, false},
+		{"excess time", models.Code, ptr(10001), nil, false},
+		{"negative memory", models.Code, nil, ptr(-1), false},
+		{"low memory", models.Code, nil, ptr(1), false},
+		{"excess memory", models.Code, nil, ptr(501), false},
+		{"mcq", models.MCQ, nil, nil, true},
+		{"mcq time rejected", models.MCQ, ptr(1000), nil, false},
+		{"mcq memory rejected", models.MCQ, nil, ptr(256), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := CreateProblemRequest{Name: "p", Description: "d", Score: 1, Type: tc.kind,
+				Answer: []int{0}, Options: []string{"a", "b"}, Testcases: []CreateTestCaseRequest{{}},
+				TimeLimit: tc.time, MemoryLimit: tc.memory}
+			if err := validator.New().Struct(req); (err == nil) != tc.valid {
+				t.Fatalf("validation=%v, valid=%v", err, tc.valid)
+			}
+		})
+	}
+	for _, problem := range []any{
+		models.Problem{Type: models.Code, TimeLimit: 2500, MemoryLimit: 384},
+		ProblemOverview{Type: models.Code, TimeLimit: 2500, MemoryLimit: 384},
+		GetProblemStatementResponse{Type: models.Code, TimeLimit: 2500, MemoryLimit: 384},
+	} {
+		encoded, err := json.Marshal(problem)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(encoded, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if fields["time_limit"] != float64(2500) || fields["memory_limit"] != float64(384) {
+			t.Fatal(string(encoded))
 		}
 	}
 }
@@ -168,6 +215,33 @@ func TestCreateProblemRequestDescriptionPresenceAndValidation(t *testing.T) {
 			err := validator.New().Struct(req)
 			if (err != nil) != tc.wantValidationErr {
 				t.Fatalf("validation error=%v, want error %v", err, tc.wantValidationErr)
+			}
+		})
+	}
+}
+
+func TestCreateProblemRequestDescriptionAndLimitsJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields            string
+		wantProvided, wantError bool
+	}{
+		{"omitted description", ``, false, false},
+		{"empty description", `,"description":""`, true, false},
+		{"null description", `,"description":null`, true, false},
+		{"case insensitive description", `,"DESCRIPTION":"text"`, true, false},
+		{"null time", `,"description":"text","time_limit":null`, false, true},
+		{"null memory", `,"description":"text","memory_limit":null`, false, true},
+		{"case insensitive null time", `,"TIME_LIMIT":null`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req CreateProblemRequest
+			body := `{"name":"p","type":"code","score":10,"time_limit":2500,"memory_limit":384` + tc.fields + `}`
+			err := json.Unmarshal([]byte(body), &req)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("decode error=%v, want error %v", err, tc.wantError)
+			}
+			if err == nil && (req.DescriptionProvided != tc.wantProvided || req.TimeLimit == nil || *req.TimeLimit != 2500 || req.MemoryLimit == nil || *req.MemoryLimit != 384) {
+				t.Fatalf("description presence or resource limits lost: %+v", req)
 			}
 		})
 	}
