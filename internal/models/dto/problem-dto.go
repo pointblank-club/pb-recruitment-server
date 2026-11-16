@@ -7,11 +7,13 @@ import (
 )
 
 type ProblemOverview struct {
-	ID       string                `json:"id"`
-	Name     string                `json:"name"`
-	Score    int                   `json:"score"`
-	Type     models.SubmissionType `json:"type"`
-	Progress string                `json:"progress,omitempty"`
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	Score       int                   `json:"score"`
+	Type        models.SubmissionType `json:"type"`
+	Progress    string                `json:"progress,omitempty"`
+	TimeLimit   int                   `json:"time_limit,omitempty"`
+	MemoryLimit int                   `json:"memory_limit,omitempty"`
 }
 
 type GetProblemStatementResponse struct {
@@ -25,6 +27,8 @@ type GetProblemStatementResponse struct {
 	Options      []string              `json:"options,omitempty"`
 	Testcases    []TestCaseResponse    `json:"testcases,omitempty"`
 	TestcasesKey string                `json:"-"`
+	TimeLimit    int                   `json:"time_limit,omitempty"`
+	MemoryLimit  int                   `json:"memory_limit,omitempty"`
 }
 
 type CreateProblemRequest struct {
@@ -35,6 +39,23 @@ type CreateProblemRequest struct {
 	Answer      []int                   `json:"answer,omitempty" validate:"required_if=Type mcq,omitempty,min=1,max=100,unique,dive,gte=0"`
 	Options     []string                `json:"options,omitempty" validate:"required_if=Type mcq,omitempty,min=2,max=100,dive,required,max=4096"`
 	Testcases   []CreateTestCaseRequest `json:"testcases,omitempty" validate:"required_if=Type code,max=100,dive"`
+	TimeLimit   *int                    `json:"time_limit,omitempty" validate:"excluded_unless=Type code,omitempty,min=1,max=10000"` // milliseconds
+	MemoryLimit *int                    `json:"memory_limit,omitempty" validate:"excluded_unless=Type code,omitempty,min=2,max=500"` // MiB
+}
+
+func (req *CreateProblemRequest) UnmarshalJSON(data []byte) error {
+	var limits struct {
+		TimeLimit   json.RawMessage `json:"time_limit"`
+		MemoryLimit json.RawMessage `json:"memory_limit"`
+	}
+	if err := json.Unmarshal(data, &limits); err != nil {
+		return err
+	}
+	if string(limits.TimeLimit) == "null" || string(limits.MemoryLimit) == "null" {
+		return errors.New("time_limit and memory_limit must be integers when provided")
+	}
+	type request CreateProblemRequest
+	return json.Unmarshal(data, (*request)(req))
 }
 
 type CreateTestCaseRequest struct {

@@ -184,7 +184,7 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 				if len(payload.Submissions) == 1 {
 					job := payload.Submissions[0]
 					source, decodeErr := base64.StdEncoding.DecodeString(job.SourceCode)
-					if decodeErr != nil || string(source) != "int main(){}" || job.CPUTimeLimit != 1 || job.MemoryLimit != 262144 || job.Stdin != "MQ==" || job.ExpectedOutput != "MQ==" {
+					if decodeErr != nil || string(source) != "int main(){}" || job.CPUTimeLimit != 2.5 || job.MemoryLimit != 393216 || job.Stdin != "MQ==" || job.ExpectedOutput != "MQ==" {
 						t.Errorf("source decoded twice or incorrect Judge0 units/payload: %+v source=%q error=%v", job, source, decodeErr)
 					}
 				}
@@ -230,7 +230,9 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 						return err
 					}
 					return tc.markErr
-				}}, Problems: problemTestStore{},
+				}}, Problems: problemTestStore{getProblem: func(context.Context, string, string) (*dto.GetProblemStatementResponse, error) {
+					return &dto.GetProblemStatementResponse{Type: models.Code, TimeLimit: 2500, MemoryLimit: 384}, nil
+				}},
 				Executions: executionTestStore{
 					insertBatch: func(ctx context.Context) error {
 						if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 5*time.Second {

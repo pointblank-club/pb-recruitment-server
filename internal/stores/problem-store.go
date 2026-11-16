@@ -28,10 +28,13 @@ func (s *ProblemStore) CreateProblem(ctx context.Context, p *models.Problem) err
 	}
 
 	const q = `
-		INSERT INTO problems (id, contest_id, name, score, type, answer, options, description, has_multiple_answers, testcases)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO problems (id, contest_id, name, score, type, answer, options, description, has_multiple_answers, testcases, time_limit, memory_limit)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+		  CASE WHEN $5::problem_type='code' THEN COALESCE(NULLIF($11,0),1000) END,
+		  CASE WHEN $5::problem_type='code' THEN COALESCE(NULLIF($12,0),256) END)
+        RETURNING COALESCE(time_limit,0), COALESCE(memory_limit,0)
     `
-	_, err := s.db.ExecContext(ctx, q,
+	err := s.db.QueryRowContext(ctx, q,
 		p.ID,
 		p.ContestID,
 		p.Name,
@@ -42,7 +45,8 @@ func (s *ProblemStore) CreateProblem(ctx context.Context, p *models.Problem) err
 		p.Description,
 		p.HasMultipleAnswers,
 		p.Testcases,
-	)
+		p.TimeLimit, p.MemoryLimit,
+	).Scan(&p.TimeLimit, &p.MemoryLimit)
 
 	if err != nil {
 		log.Printf("problem-store: insert failed: %v", err)
@@ -66,11 +70,14 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 			options = $7,
 			has_multiple_answers = $8,
 			description = $9,
-			testcases = COALESCE(NULLIF($10, ''), testcases)
+			testcases = COALESCE(NULLIF($10, ''), testcases),
+			time_limit = CASE WHEN $5::problem_type='code' THEN COALESCE(NULLIF($11,0),time_limit,1000) END,
+			memory_limit = CASE WHEN $5::problem_type='code' THEN COALESCE(NULLIF($12,0),memory_limit,256) END
         WHERE id = $1 AND contest_id = $2
+        RETURNING COALESCE(time_limit,0), COALESCE(memory_limit,0)
     `
 
-	_, err := s.db.ExecContext(ctx, q,
+	err := s.db.QueryRowContext(ctx, q,
 		p.ID,
 		p.ContestID,
 		p.Name,
@@ -81,7 +88,8 @@ func (s *ProblemStore) UpdateProblem(ctx context.Context, p *models.Problem) err
 		p.HasMultipleAnswers,
 		p.Description,
 		p.Testcases,
-	)
+		p.TimeLimit, p.MemoryLimit,
+	).Scan(&p.TimeLimit, &p.MemoryLimit)
 
 	if err != nil {
 		log.Printf("problem-store: update failed: %v", err)
@@ -110,7 +118,9 @@ func (s *ProblemStore) DeleteProblem(ctx context.Context, contestID string, prob
 
 func (s *ProblemStore) GetProblemList(ctx context.Context, contestID string) ([]dto.ProblemOverview, error) {
 	const q = `
-		SELECT id, name, score, type
+		SELECT id, name, score, type,
+		  CASE WHEN type='code' THEN COALESCE(time_limit,1000) ELSE 0 END,
+		  CASE WHEN type='code' THEN COALESCE(memory_limit,256) ELSE 0 END
 		FROM problems
 		WHERE contest_id = $1
 	`
@@ -126,7 +136,7 @@ func (s *ProblemStore) GetProblemList(ctx context.Context, contestID string) ([]
 	for rows.Next() {
 		var p dto.ProblemOverview
 
-		if err := rows.Scan(&p.ID, &p.Name, &p.Score, &p.Type); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Score, &p.Type, &p.TimeLimit, &p.MemoryLimit); err != nil {
 			log.Printf("problem-store: row scan failed: %v", err)
 			return nil, fmt.Errorf("scan problem row: %w", err)
 		}
@@ -146,7 +156,9 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 	const q = `
 		SELECT id, contest_id, name, COALESCE(description,''), score, type,
 		       COALESCE(answer, '{}'::integer[]), COALESCE(options, '{}'::text[]),
-		       COALESCE(testcases,'')
+		       COALESCE(testcases,''),
+		       CASE WHEN type='code' THEN COALESCE(time_limit,1000) ELSE 0 END,
+		       CASE WHEN type='code' THEN COALESCE(memory_limit,256) ELSE 0 END
 		FROM problems
 		WHERE id = $1 AND contest_id = $2
 	`
@@ -157,7 +169,7 @@ func (s *ProblemStore) GetProblem(ctx context.Context, problemID string, contest
 
 	err := s.db.QueryRowContext(ctx, q, problemID, contestID).Scan(
 		&p.ProblemID, &p.ContestID, &p.Name, &p.Description, &p.Score, &p.Type,
-		&answers, &options, &p.TestcasesKey,
+		&answers, &options, &p.TestcasesKey, &p.TimeLimit, &p.MemoryLimit,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {

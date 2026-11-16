@@ -584,7 +584,10 @@ func TestRecoveryResumesAfterOutagePostgres(t *testing.T) {
 func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 	t.Setenv("JUDGE0_BATCH_SIZE", "2")
 	db := postgresTestDB(t)
-	_, _, _, sub, _ := executionFixture(t, db, 2)
+	_, _, problemID, sub, _ := executionFixture(t, db, 2)
+	if _, err := db.Exec(`UPDATE problems SET time_limit=2500,memory_limit=384 WHERE id=$1`, problemID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`UPDATE submissions SET language='python' WHERE id=$1`, sub); err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +628,7 @@ func TestLegacyTokenlessRecoveryPostgres(t *testing.T) {
 			job := payload.Submissions[0]
 			source, err := base64.StdEncoding.DecodeString(job.SourceCode)
 			if err != nil || string(source) != "print(input())\n" || job.EnableNetwork ||
-				job.CPUTimeLimit != 1 || job.WallTimeLimit != 10 || job.MemoryLimit != 262144 || job.MaxFileSize != 1024 {
+				job.CPUTimeLimit != 2.5 || job.WallTimeLimit != 10 || job.MemoryLimit != 393216 || job.MaxFileSize != 1024 {
 				t.Error("legacy job corrupted", payload, err)
 			}
 			n := dispatches.Add(1)
