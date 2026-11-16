@@ -113,6 +113,7 @@ func (cs *ContestService) CreateProblem(ctx context.Context, contestID string, r
 		Options:            req.Options,
 		HasMultipleAnswers: req.Type == "mcq" && len(req.Answer) > 1,
 	}
+	setProblemLimits(problem, req)
 
 	s3Key := fmt.Sprintf("problems/%s/%s/description.json", contestID, problem.ID)
 
@@ -207,6 +208,7 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		HasMultipleAnswers: hasMultiple,
 		Testcases:          testcasesKey,
 	}
+	setProblemLimits(problem, req)
 
 	if problem.Options == nil {
 		problem.Options = []string{}
@@ -216,6 +218,20 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 	}
 
 	return problem, nil
+}
+
+func setProblemLimits(problem *models.Problem, req *dto.CreateProblemRequest) {
+	// Zero leaves omitted coding settings for the store to default or preserve atomically.
+	problem.TimeLimit, problem.MemoryLimit = 0, 0
+	if problem.Type != models.Code {
+		return
+	}
+	if req.TimeLimit != nil {
+		problem.TimeLimit = *req.TimeLimit
+	}
+	if req.MemoryLimit != nil {
+		problem.MemoryLimit = *req.MemoryLimit
+	}
 }
 
 func (cs *ContestService) writeTestcases(ctx context.Context, key string, cases []dto.CreateTestCaseRequest) error {
