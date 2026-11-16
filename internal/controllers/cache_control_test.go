@@ -37,7 +37,7 @@ func TestPrivateContestResponseCacheControl(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now().UnixMilli()
-			storage := &stores.Storage{
+			storage := &stores.Storage{SEB: browserSessionTestStore{},
 				Contests: &tabSwitchMockStore{submissionContestStore: submissionContestStore{
 					contest:    models.Contest{ID: "contest", StartTime: now - 60000, EndTime: now + 60000},
 					registered: tc.registered, err: tc.lookupErr,

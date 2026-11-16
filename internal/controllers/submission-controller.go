@@ -282,10 +282,17 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		return ctx.JSON(http.StatusForbidden, map[string]string{"error": common.ContestNotRunningError.Error()})
 	}
 
+	if err := requireBrowserSession(ctx, sc.contestService, req.ContestID, userID); err != nil {
+		return err
+	}
+
 	submissionType := req.Type
 
 	submissionID, err := sc.submissionService.CreateSubmission(reqCtx, userID, submissionType, req)
 	if err != nil {
+		if errors.Is(err, common.ErrBrowserSessionTerminated) {
+			return browserSessionError(err)
+		}
 		if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ContestNotFoundError) {
 			return ctx.NoContent(http.StatusNotFound)
 		}

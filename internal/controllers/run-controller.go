@@ -57,6 +57,11 @@ func (sc *SubmissionController) Run(c echo.Context) error {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected one JSON object"})
 	}
+	if req.ContestID != "" {
+		if err := requireBrowserSession(c, sc.contestService, req.ContestID, userID); err != nil {
+			return err
+		}
+	}
 	result, err := sc.submissionService.Run(c.Request().Context(), userID, req)
 	if err != nil {
 		switch {

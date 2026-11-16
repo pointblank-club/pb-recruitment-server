@@ -420,7 +420,7 @@ func TestProblemVisibilityBeforeStartAndRegistration(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			storage := &stores.Storage{
+			storage := &stores.Storage{SEB: browserSessionTestStore{},
 				Contests: submissionContestStore{
 					contest:    models.Contest{ID: "contest", StartTime: tc.start, EndTime: tc.end},
 					registered: tc.registered,

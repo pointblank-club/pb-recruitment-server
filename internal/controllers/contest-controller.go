@@ -673,6 +673,10 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 		})
 	}
 
+	if err := requireBrowserSession(ctx, cc.contestService, contestID, userID); err != nil {
+		return err
+	}
+
 	problems, err := cc.contestService.GetContestProblemsList(ctx.Request().Context(), contestID, userID)
 	if err != nil {
 		if errors.Is(err, common.ContestNotFoundError) {
@@ -723,6 +727,10 @@ func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": common.FetchContestFailedError.Error(),
 		})
+	}
+
+	if err := requireBrowserSession(ctx, cc.contestService, contestID, userID); err != nil {
+		return err
 	}
 
 	problem, err := cc.contestService.GetContestProblem(ctx.Request().Context(), contestID, problemID, false)

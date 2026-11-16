@@ -56,7 +56,7 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000046`: submission cooldowns
+- The current schema requires migrations through `000047`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
@@ -150,6 +150,50 @@ from the canonical path and cannot safely serve
 versioned edits. After any versioned edit, rollback must retain version-aware readers
 or migrate references and both objects while traffic is stopped. Deploy the backend
 before the website editor, which now consumes inputs and answers from one response.
+
+## Safe Exam Browser
+
+Apply migration `000047` and deploy all backend replicas and the companion website
+before an exam. There are no approved-key settings or per-contest SEB endpoints.
+SEB detection uses the native `SEB/<version>` user-agent marker and is best effort;
+a spoofed user agent can bypass detection and no SEB build/configuration is verified.
+
+`POST /contests/{id}/browser-session` checks authenticated, registered participants
+in a live exam. Non-SEB browsers set the persistent registration flag
+`seb_not_detected`, remain allowed, and do not create cookie sessions. Leaderboard,
+registration, and post-contest review requests do not create sessions or flags.
+An existing participation lock remains effective regardless of browser.
+
+SEB clients receive a Secure, HttpOnly, host-only session cookie bound to the
+participant and contest. Three distinct sessions are allowed, including the
+initial session. Refresh-free in-site navigation, reconnection, concurrent tabs,
+and startup retries reuse the cookie. Startup UUIDs deduplicate lost responses;
+a confirming request acknowledges delivery, after which the UUID cannot restore
+a deleted cookie. A fourth SEB session sets a persistent registration lock.
+Admission serializes on the registration, and code/MCQ submission transactions
+also enforce the lock. Replays of previously accepted code requests still resolve
+to their original submission.
+
+Admin-only `POST /admin/contests/{contestId}/contestants/{userId}/reset-browser-sessions`
+sets the current count to zero and clears that session lock. It advances
+`browser_session_generation` and records the authenticated admin ID, previous
+count, and timestamp in `browser_session_resets`. Prior session history and the
+non-SEB flag are preserved. A resumed SEB client is admitted as session 1 of 3
+without restarting. Startup requests with an old generation return HTTP 409 with
+`BROWSER_SESSION_STALE` and the current generation; the client reconciles and
+rotates its startup UUID instead of replaying old observations.
+
+Configure SEB to clear session cookies on exam startup. This tracks application
+sessions rather than proving individual SEB process launches. CloudFront must
+forward cookies, credentialed CORS must allow the explicit frontend origin, and
+the existing clock-header exposure/no-cache requirements still apply. No SEB keys,
+custom proof headers, or additional public-origin environment variables are needed.
+Migration 47 rollback deletes the session history, audit records, and browser flags.
+
+Run `go test -race ./...` with a disposable `TEST_DATABASE_URL` for HTTP admission,
+secure cookie attributes, non-SEB allowance, concurrent limits/resets, stale
+retries, audit identity, and locked code/MCQ admission checks. The frontend also
+has Chromium/Firefox session and admin-reset regressions.
 
 ## Server time for browser clocks
 

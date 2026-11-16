@@ -123,7 +123,7 @@ func TestSubmitSolutionContestWindow(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			submissions := &controllerSubmissionStore{}
-			storage := &stores.Storage{
+			storage := &stores.Storage{SEB: browserSessionTestStore{},
 				Contests: submissionContestStore{contest: models.Contest{StartTime: tc.start, EndTime: tc.end}, registered: tc.registered},
 				Problems: submissionProblemStore{}, Submissions: submissions,
 			}
@@ -172,7 +172,7 @@ func (s *rateLimitedSubmissionStore) JudgeMCQ(context.Context, string) error {
 
 func TestSubmitSolutionRateLimit(t *testing.T) {
 	now := time.Now().UnixMilli()
-	storage := &stores.Storage{
+	storage := &stores.Storage{SEB: browserSessionTestStore{},
 		Contests: submissionContestStore{
 			contest:    models.Contest{StartTime: now - 60_000, EndTime: now + 60_000},
 			registered: true,
@@ -202,7 +202,7 @@ func TestSubmitSolutionRateLimit(t *testing.T) {
 func TestSubmitSolutionLogsCreateFailure(t *testing.T) {
 	now := time.Now().UnixMilli()
 	storeErr := errors.New("relation submission_rate_limits does not exist")
-	storage := &stores.Storage{
+	storage := &stores.Storage{SEB: browserSessionTestStore{},
 		Contests: submissionContestStore{
 			contest: models.Contest{StartTime: now - 60_000, EndTime: now + 60_000}, registered: true,
 		},
@@ -251,7 +251,7 @@ func (s *duplicateSubmissionStore) JudgeMCQ(context.Context, string) error {
 
 func TestSubmitSolutionDuplicateMCQ(t *testing.T) {
 	now := time.Now().UnixMilli()
-	storage := &stores.Storage{
+	storage := &stores.Storage{SEB: browserSessionTestStore{},
 		Contests: submissionContestStore{
 			contest:    models.Contest{StartTime: now - 60_000, EndTime: now + 60_000},
 			registered: true,
@@ -403,7 +403,7 @@ func TestSubmitSolutionTransientFailures(t *testing.T) {
 			} else {
 				submissions.rateLimitErr = tc.failure
 			}
-			storage := &stores.Storage{Contests: contest, Problems: submissionProblemStore{}, Submissions: submissions}
+			storage := &stores.Storage{SEB: browserSessionTestStore{}, Contests: contest, Problems: submissionProblemStore{}, Submissions: submissions}
 			controller := NewSubmissionController(services.NewSubmissionService(storage, nil, nil), services.NewContestService(storage, nil), nil)
 			w := httptest.NewRecorder()
 			c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/submission/submit", nil), w)

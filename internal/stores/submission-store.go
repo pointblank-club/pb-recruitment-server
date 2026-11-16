@@ -315,7 +315,8 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 			c.start_time,
 			c.end_time,
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
-			cr.ended_at
+			cr.ended_at,
+			cr.is_browser_session_terminated
 		FROM contest_registrations cr
 		INNER JOIN contests c ON c.id = cr.contest_id
 		WHERE cr.contest_id = $1 AND cr.user_id = $2
@@ -323,8 +324,9 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 	`
 	var startTime, endTime int64
 	var isTerminated bool
+	var browserTerminated bool
 	var endedAt *int64
-	err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime, &endTime, &isTerminated, &endedAt)
+	err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime, &endTime, &isTerminated, &endedAt, &browserTerminated)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			var contestExists bool
@@ -348,6 +350,9 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 	}
 	if isTerminated {
 		return common.ErrTabSwitchTerminated
+	}
+	if browserTerminated {
+		return common.ErrBrowserSessionTerminated
 	}
 	return nil
 }
