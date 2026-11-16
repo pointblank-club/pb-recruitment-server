@@ -132,3 +132,43 @@ func TestCreateProblemRequestTestcaseJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateProblemRequestDescriptionPresenceAndValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		body              string
+		wantProvided      bool
+		wantValidationErr bool
+	}{
+		{
+			name:         "omitted description",
+			body:         `{"name":"p","score":10,"type":"mcq","options":["a","b"],"answer":[0]}`,
+			wantProvided: false,
+		},
+		{
+			name:         "explicit empty description",
+			body:         `{"name":"p","score":10,"type":"mcq","description":"","options":["a","b"],"answer":[0]}`,
+			wantProvided: true,
+		},
+		{
+			name:              "empty code description rejected",
+			body:              `{"name":"p","score":10,"type":"code","description":"","testcases":[{"input":"","expected_output":""}]}`,
+			wantProvided:      true,
+			wantValidationErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var req CreateProblemRequest
+			if err := json.Unmarshal([]byte(tc.body), &req); err != nil {
+				t.Fatal(err)
+			}
+			if req.DescriptionProvided != tc.wantProvided {
+				t.Fatalf("DescriptionProvided=%v, want %v", req.DescriptionProvided, tc.wantProvided)
+			}
+			err := validator.New().Struct(req)
+			if (err != nil) != tc.wantValidationErr {
+				t.Fatalf("validation error=%v, want error %v", err, tc.wantValidationErr)
+			}
+		})
+	}
+}

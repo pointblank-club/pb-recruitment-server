@@ -3553,6 +3553,7 @@ const docTemplate = `{
                     }
                 },
                 "description": {
+                    "description": "Required for code problems. For MCQ updates, omit to preserve the existing description or send an empty string to clear it.",
                     "type": "string",
                     "maxLength": 262144
                 },

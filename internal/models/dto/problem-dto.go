@@ -30,6 +30,7 @@ type GetProblemStatementResponse struct {
 
 type CreateProblemRequest struct {
 	Name                string                  `json:"name" validate:"required,max=200"`
+	// Required for code problems. For MCQ updates, omit to preserve the existing description or send an empty string to clear it.
 	Description         string                  `json:"description" validate:"required_if=Type code,max=262144"`
 	DescriptionProvided bool                    `json:"-"`
 	Score               int                     `json:"score" validate:"required,gt=0"`
