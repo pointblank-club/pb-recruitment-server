@@ -3374,6 +3374,12 @@ const docTemplate = `{
                 "memory": {
                     "type": "integer"
                 },
+                "option": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "problem_id": {
                     "type": "string"
                 },
@@ -3423,6 +3429,12 @@ const docTemplate = `{
                 },
                 "memory": {
                     "type": "integer"
+                },
+                "option": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "problem_id": {
                     "type": "string"
@@ -4006,6 +4018,9 @@ const docTemplate = `{
                 },
                 "solved_at": {
                     "type": "integer"
+                },
+                "type": {
+                    "type": "string"
                 }
             }
         },
@@ -4285,7 +4300,6 @@ const docTemplate = `{
         "app_internal_models_dto.UpsertContestRequest": {
             "type": "object",
             "required": [
-                "description",
                 "eligible_to",
                 "end_time",
                 "name",
