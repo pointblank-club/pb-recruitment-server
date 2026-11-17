@@ -239,6 +239,13 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 				if viewer == user && len(entry.ProblemScores) != wantBreakdowns {
 					t.Fatal("admin breakdown missing")
 				}
+				if viewer == user {
+					for _, ps := range entry.ProblemScores {
+						if ps.Type != "code" && ps.Type != "mcq" {
+							t.Fatalf("expected type 'code' or 'mcq', got %q for problem %s", ps.Type, ps.ProblemID)
+						}
+					}
+				}
 			}
 		}
 	}

@@ -395,7 +395,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		args = append(args, *mcqCutoff)
 		typeFilter = "AND sub.type = 'code'"
 		batchQuery = fmt.Sprintf(`UNION ALL
-            SELECT user_id, problem_id, problem_name, max_score, attempts, score, solved_at
+            SELECT user_id, problem_id, problem_name, 'mcq' AS problem_type, max_score, attempts, score, solved_at
             FROM leaderboard_mcq_scores
             WHERE contest_id = $1 AND cutoff = $%d AND user_id IN (%s)`, len(args), strings.Join(placeholders, ", "))
 	}
@@ -405,6 +405,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 			sub.user_id,
 			sub.problem_id,
 			p.name,
+			p.type::text AS problem_type,
 			p.score AS max_score,
 			COUNT(sub.id) AS attempts,
 			MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE 0 END) AS score,
@@ -414,7 +415,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 		WHERE sub.contest_id = $1
 		  AND sub.user_id IN (%s)
 		  %s
-		GROUP BY sub.user_id, sub.problem_id, p.name, p.score
+		GROUP BY sub.user_id, sub.problem_id, p.name, p.type, p.score
 		%s
         ORDER BY 1, 3
 	`, strings.Join(placeholders, ", "), typeFilter, batchQuery)
@@ -435,6 +436,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 			&userID,
 			&ps.ProblemID,
 			&ps.ProblemName,
+			&ps.Type,
 			&ps.MaxScore,
 			&ps.Attempts,
 			&ps.Score,

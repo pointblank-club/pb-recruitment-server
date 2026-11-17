@@ -44,6 +44,7 @@ type AdminSubmissionItem struct {
 	CreatedAt   int64                   `json:"created_at"`
 	Runtime     int64                   `json:"runtime"`
 	Memory      int64                   `json:"memory"`
+	Option      []int                   `json:"option,omitempty"`
 }
 
 type AdminSubmissionDetails struct {
