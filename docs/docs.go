@@ -2278,6 +2278,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "Stale reset generation or already-confirmed startup attempt",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -2495,6 +2504,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "428": {
+                        "description": "SEB cookie session must be started or resumed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -2560,6 +2578,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Contest or problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "SEB cookie session must be started or resumed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2791,11 +2818,29 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Contest is not live, registration is missing, or participation is locked/ended",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Run is disabled"
                     },
                     "413": {
                         "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "SEB cookie session must be started or resumed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {

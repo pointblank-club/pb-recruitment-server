@@ -331,6 +331,7 @@ func (s *progressResponseStore) GetUserProblemProgress(_ context.Context, userID
 func TestProblemOverviewProgressResponse(t *testing.T) {
 	progress := &progressResponseStore{}
 	storage := &stores.Storage{
+		SEB:         browserSessionTestStore{},
 		Contests:    submissionContestStore{contest: models.Contest{ID: "contest", StartTime: 1, EndTime: time.Now().Add(-time.Minute).UnixMilli()}},
 		Problems:    visibilityProblemStore{},
 		Submissions: progress,

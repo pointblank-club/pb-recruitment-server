@@ -358,7 +358,11 @@ seconds and at most one Run admission per database clock second across all repli
 using the existing cooldown table. After reserving that admission, it rejects Run if
 any scored code submission is pending, including parents without execution snapshots.
 Rejections return `429`, `Retry-After: 5`; explicit Judge0 queue-full responses do too.
-Run creates no contest rows, storage objects or ranking changes.
+Run creates no contest rows, storage objects or ranking changes. A supplied
+`contest_id` must identify a live registration. Admission also checks every active
+contest registration for manual completion, tab termination, and browser lockout,
+so omitting the ID or substituting another contest cannot bypass a participation
+lock. Standalone Run remains available when no active contest lock applies.
 
 The backlog guard includes every contest because recovery can still dispatch old
 pending work. Before enabling Run, inspect unresolved submissions:

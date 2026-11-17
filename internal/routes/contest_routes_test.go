@@ -17,6 +17,12 @@ import (
 
 type endedContestStore struct{ *stores.ContestStore }
 
+type endedBrowserStore struct{ *stores.SEBStore }
+
+func (endedBrowserStore) Observe(context.Context, string, string, string, string, bool, bool, *int) (*dto.BrowserSessionResponse, string, error) {
+	return &dto.BrowserSessionResponse{}, "", nil
+}
+
 func (endedContestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
 	now := time.Now().UnixMilli()
 	return &dto.GetContestResponse{Contest: models.Contest{StartTime: now - 120_000, EndTime: now - 60_000}}, nil
@@ -34,7 +40,7 @@ func (mcqProblemStore) GetProblem(context.Context, string, string) (*dto.GetProb
 
 // Guests reach ended-contest problems with no Authorization header.
 func TestProblemRoutesAllowGuestsAfterContestEnds(t *testing.T) {
-	cs := services.NewContestService(&stores.Storage{Contests: endedContestStore{}, Problems: mcqProblemStore{}}, nil)
+	cs := services.NewContestService(&stores.Storage{SEB: endedBrowserStore{}, Contests: endedContestStore{}, Problems: mcqProblemStore{}}, nil)
 	e := echo.New()
 	AddContestRoutes(e, nil, controllers.NewContestController(cs, nil), allowRequests{})
 	for _, path := range []string{"/contests/c1/problems", "/contests/c1/problems/p1"} {

@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -404,5 +405,88 @@ func TestRunResultsPostgres(t *testing.T) {
 			}
 			assertNoRunWrites(t, db)
 		})
+	}
+}
+
+func TestRunParticipationLocksCannotBeHiddenByContestID(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, _, _ := executionFixture(t, db, 0)
+	if _, err := db.Exec(`DELETE FROM submissions`); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"closed-run-contest", "other-live-contest"} {
+		end := int64(4102444800000)
+		if id == "closed-run-contest" {
+			end = 2
+		}
+		if _, err := db.Exec(`INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Run','',0,1,1,$2)`, id, end); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,1)`, id, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var dispatches atomic.Int32
+	judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { dispatches.Add(1); w.WriteHeader(500) }))
+	defer judge.Close()
+	t.Setenv("JUDGE0_URL", judge.URL)
+	storage := stores.NewStorage(db)
+	client := judge0.NewClient()
+	service := services.NewSubmissionService(storage, nil, client)
+	contestService := services.NewContestService(storage, nil)
+	controller := controllers.NewSubmissionController(service, contestService, client)
+	for _, lock := range []string{"browser", "tab", "ended"} {
+		if _, err := db.Exec(`UPDATE contest_registrations SET is_browser_session_terminated=$3,is_tab_switch_terminated=$4,ended_at=CASE WHEN $5 THEN 1 ELSE NULL END WHERE contest_id=$1 AND user_id=$2`, contest, user, lock == "browser", lock == "tab", lock == "ended"); err != nil {
+			t.Fatal(err)
+		}
+		for _, supplied := range []string{contest, "", "closed-run-contest", "other-live-contest"} {
+			if _, err := db.Exec(`DELETE FROM submission_rate_limits`); err != nil {
+				t.Fatal(err)
+			}
+			req := dto.RunRequest{ContestID: supplied, Language: "python", Code: "print(1)"}
+			if _, err := service.Run(context.Background(), user, req); err == nil || (!errors.Is(err, common.ErrBrowserSessionTerminated) && !errors.Is(err, common.ErrTabSwitchTerminated) && !errors.Is(err, common.ErrContestSessionEnded) && !errors.Is(err, common.ContestNotRunningError)) {
+				t.Fatalf("%s lock bypassed with contest %q: %v", lock, supplied, err)
+			}
+			if lock != "browser" {
+				continue
+			}
+			for _, agent := range []string{"SEB/3.9.0", "Chrome/139.0"} {
+				if _, err := db.Exec(`DELETE FROM submission_rate_limits`); err != nil {
+					t.Fatal(err)
+				}
+				body, _ := json.Marshal(req)
+				request := httptest.NewRequest("POST", "/submission/run", strings.NewReader(string(body)))
+				request.Header.Set("User-Agent", agent)
+				e := echo.New()
+				e.POST("/submission/run", controller.Run, func(next echo.HandlerFunc) echo.HandlerFunc {
+					return func(c echo.Context) error { c.Set(common.AUTH_USER_ID, user); return next(c) }
+				})
+				response := httptest.NewRecorder()
+				e.ServeHTTP(response, request)
+				if response.Code != 403 && response.Code != 428 {
+					t.Fatalf("Run HTTP lock with contest %q, agent %q: %d %s", supplied, agent, response.Code, response.Body.String())
+				}
+			}
+		}
+	}
+	if _, err := db.Exec(`UPDATE contest_registrations SET is_browser_session_terminated=FALSE,is_tab_switch_terminated=FALSE,ended_at=NULL WHERE user_id=$1`, user); err != nil {
+		t.Fatal(err)
+	}
+	for _, supplied := range []string{"closed-run-contest", "other-live-contest"} {
+		if _, err := db.Exec(`DELETE FROM submission_rate_limits`); err != nil {
+			t.Fatal(err)
+		}
+		if supplied == "other-live-contest" {
+			if _, err := db.Exec(`DELETE FROM contest_registrations WHERE contest_id=$1 AND user_id=$2`, supplied, user); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := service.Run(context.Background(), user, dto.RunRequest{ContestID: supplied, Language: "python", Code: "print(1)"})
+		if !errors.Is(err, common.ContestNotRunningError) && !errors.Is(err, common.UserNotRegisteredError) {
+			t.Fatalf("invalid supplied registration admitted: %q %v", supplied, err)
+		}
+	}
+	if dispatches.Load() != 0 {
+		t.Fatalf("locked Runs reached judge: %d", dispatches.Load())
 	}
 }

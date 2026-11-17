@@ -268,3 +268,112 @@ func TestBrowserSessionConcurrencyPostgres(t *testing.T) {
 		t.Fatal(count, err)
 	}
 }
+
+func TestBrowserStartupSamplesClockAfterRegistrationWait(t *testing.T) {
+	for _, initial := range []int{0, 3} {
+		t.Run(fmt.Sprintf("existing_%d", initial), func(t *testing.T) {
+			db := postgresTestDB(t)
+			user, contest, _, _, _ := executionFixture(t, db, 0)
+			store := stores.NewSEBStore(db)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			generation := 0
+			for range initial {
+				if _, _, err := store.Observe(ctx, contest, user, "", uuid.NewString(), true, true, &generation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var deadline int64
+			if err := db.QueryRow(`UPDATE contests SET end_time=(extract(epoch FROM clock_timestamp())*1000)::bigint+350 WHERE id=$1 RETURNING end_time`, contest).Scan(&deadline); err != nil {
+				t.Fatal(err)
+			}
+			lock, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer lock.Rollback()
+			if _, err := lock.ExecContext(ctx, `SELECT 1 FROM contest_registrations WHERE contest_id=$1 AND user_id=$2 FOR UPDATE`, contest, user); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, _, err := store.Observe(ctx, contest, user, "", uuid.NewString(), true, true, &generation)
+				done <- err
+			}()
+			var waiting bool
+			for !waiting {
+				if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE '%FROM contest_registrations WHERE contest_id=$1 AND user_id=$2 FOR UPDATE%')`).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				if !waiting {
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
+			for {
+				var now int64
+				if err := db.QueryRowContext(ctx, `SELECT (extract(epoch FROM clock_timestamp())*1000)::bigint`).Scan(&now); err != nil {
+					t.Fatal(err)
+				}
+				if now > deadline {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if err := lock.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; !errors.Is(err, common.ContestNotRunningError) {
+				t.Fatalf("queued admission after deadline: %v", err)
+			}
+			var locked bool
+			var count int
+			if err := db.QueryRow(`SELECT is_browser_session_terminated,(SELECT count(*) FROM contest_browser_sessions WHERE contest_id=$1 AND user_id=$2) FROM contest_registrations WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&locked, &count); err != nil {
+				t.Fatal(err)
+			}
+			if locked || count != initial {
+				t.Fatalf("late startup changed registration: locked=%t count=%d", locked, count)
+			}
+			if _, err := db.Exec(`UPDATE contests SET end_time=4102444800000 WHERE id=$1`, contest); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT is_browser_session_terminated FROM contest_registrations WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&locked); err != nil || locked {
+				t.Fatalf("extension retained late lock: %t %v", locked, err)
+			}
+		})
+	}
+}
+
+func TestTerminalStatusRemainsReadableWhenStartupIsForbidden(t *testing.T) {
+	db := postgresTestDB(t)
+	user, contest, _, _, _ := executionFixture(t, db, 0)
+	service := services.NewContestService(stores.NewStorage(db), nil)
+	controller := controllers.NewContestController(service, nil)
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error { c.Set(common.AUTH_USER_ID, user); return next(c) }
+	})
+	e.POST("/contests/:id/browser-session", controller.StartBrowserSession, middleware.ValidateRequest(new(dto.StartBrowserSessionRequest)))
+	e.GET("/contests/:id/session-status", controller.GetCandidateSessionStatus)
+	for _, terminal := range []string{"ended", "tab"} {
+		if _, err := db.Exec(`UPDATE contest_registrations SET ended_at=CASE WHEN $3 THEN 1 ELSE NULL END,is_tab_switch_terminated=$4 WHERE contest_id=$1 AND user_id=$2`, contest, user, terminal == "ended", terminal == "tab"); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest("POST", "/contests/"+contest+"/browser-session", strings.NewReader(fmt.Sprintf(`{"attempt_id":%q,"generation":0}`, uuid.NewString())))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("User-Agent", "SEB/3.9.0")
+		response := httptest.NewRecorder()
+		e.ServeHTTP(response, request)
+		if response.Code != 403 || !strings.Contains(response.Body.String(), "BROWSER_SESSION_FORBIDDEN") {
+			t.Fatalf("%s startup: %d %s", terminal, response.Code, response.Body.String())
+		}
+		status := httptest.NewRecorder()
+		e.ServeHTTP(status, httptest.NewRequest("GET", "/contests/"+contest+"/session-status", nil))
+		var snapshot dto.CandidateSessionStatusResponse
+		if err := json.Unmarshal(status.Body.Bytes(), &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if status.Code != 200 || snapshot.IsSessionEnded != (terminal == "ended") || snapshot.IsTabSwitchTerminated != (terminal == "tab") || snapshot.BrowserSessionCount != 0 {
+			t.Fatalf("%s status: %d %s", terminal, status.Code, status.Body.String())
+		}
+	}
+}

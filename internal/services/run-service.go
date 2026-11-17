@@ -37,7 +37,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	if err := ss.stores.Submissions.CheckSubmissionRateLimit(ctx, "run:user:"+userID, 5); err != nil {
 		return nil, err
 	}
-	if err := ss.stores.Submissions.CheckRunCapacity(ctx); err != nil {
+	if err := ss.stores.Submissions.CheckRunCapacity(ctx, userID, req.ContestID); err != nil {
 		return nil, err
 	}
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{{

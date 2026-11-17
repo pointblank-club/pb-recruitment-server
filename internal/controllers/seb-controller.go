@@ -81,6 +81,7 @@ func requireBrowserSession(c echo.Context, service *services.ContestService, con
 // @Success 200 {object} dto.BrowserSessionResponse
 // @Failure 400 {object} map[string]string
 // @Failure 403 {object} map[string]string
+// @Failure 409 {object} map[string]string "Stale reset generation or already-confirmed startup attempt"
 // @Failure 503 {object} map[string]string
 // @Router /contests/{id}/browser-session [post]
 func (cc *ContestController) StartBrowserSession(c echo.Context) error {

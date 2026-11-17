@@ -341,7 +341,10 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 		return fmt.Errorf("lock contest registration: %w", err)
 	}
 
-	now := time.Now().UnixMilli()
+	var now int64
+	if err := tx.QueryRowContext(ctx, `SELECT (extract(epoch FROM clock_timestamp())*1000)::bigint`).Scan(&now); err != nil {
+		return fmt.Errorf("sample admission clock: %w", err)
+	}
 	if now < startTime || now > endTime {
 		return common.ContestNotRunningError
 	}
@@ -628,7 +631,7 @@ func checkSubmissionRateLimit(ctx context.Context, exec interface {
 	return nil
 }
 
-func (s *SubmissionStore) CheckRunCapacity(ctx context.Context) error {
+func (s *SubmissionStore) CheckRunCapacity(ctx context.Context, userID, contestID string) error {
 	if s == nil || s.db == nil {
 		return errors.New("run capacity database unavailable")
 	}
@@ -637,14 +640,54 @@ func (s *SubmissionStore) CheckRunCapacity(ctx context.Context) error {
 	if err := s.CheckSubmissionRateLimit(ctx, "run:capacity", 1); err != nil {
 		return err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// A supplied contest cannot hide another live registration's participation lock.
+	rows, err := tx.QueryContext(ctx, `SELECT cr.contest_id FROM contest_registrations cr
+		JOIN contests c ON c.id=cr.contest_id WHERE cr.user_id=$1 AND
+		(cr.contest_id=$2 OR (c.start_time <= (extract(epoch FROM clock_timestamp())*1000)::bigint
+		AND c.end_time >= (extract(epoch FROM clock_timestamp())*1000)::bigint))
+		ORDER BY cr.contest_id FOR UPDATE OF cr`, userID, contestID)
+	if err != nil {
+		return err
+	}
+	var contests []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		contests = append(contests, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	found := contestID == ""
+	for _, id := range contests {
+		if err := admitContestRegistrationInTx(ctx, tx, id, userID); err != nil {
+			return err
+		}
+		found = found || id == contestID
+	}
+	if !found {
+		if err := admitContestRegistrationInTx(ctx, tx, contestID, userID); err != nil {
+			return err
+		}
+	}
 	var pending bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending')`).Scan(&pending); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM submissions WHERE type='code' AND status='pending')`).Scan(&pending); err != nil {
 		return fmt.Errorf("check run capacity: %w", err)
 	}
 	if pending {
 		return common.ErrRateLimitExceeded
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {

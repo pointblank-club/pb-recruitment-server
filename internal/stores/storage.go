@@ -48,7 +48,7 @@ type Storage struct {
 		MarkFailed(context.Context, string) error
 		PendingCodeWithoutExecutions(context.Context, int64, int) ([]string, error)
 		CheckSubmissionRateLimit(context.Context, string, int64) error
-		CheckRunCapacity(context.Context) error
+		CheckRunCapacity(context.Context, string, string) error
 		ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error)
 		GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error)
 	}

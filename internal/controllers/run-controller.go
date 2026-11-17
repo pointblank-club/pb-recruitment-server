@@ -26,7 +26,9 @@ import (
 // @Success 200 {object} dto.RunResponse
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string "Contest is not live, registration is missing, or participation is locked/ended"
 // @Failure 404 "Run is disabled"
+// @Failure 428 {object} map[string]string "SEB cookie session must be started or resumed"
 // @Failure 413 {object} map[string]string
 // @Failure 429 {object} map[string]string
 // @Failure 502 {object} map[string]string
@@ -67,6 +69,12 @@ func (sc *SubmissionController) Run(c echo.Context) error {
 		switch {
 		case errors.Is(err, services.ErrInvalidRun):
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case errors.Is(err, common.ErrBrowserSessionTerminated), errors.Is(err, common.ErrTabSwitchTerminated),
+			errors.Is(err, common.ErrContestSessionEnded), errors.Is(err, common.UserNotRegisteredError),
+			errors.Is(err, common.ContestNotRunningError):
+			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		case errors.Is(err, common.ContestNotFoundError):
+			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 		case errors.Is(err, common.ErrRateLimitExceeded):
 			c.Response().Header().Set("Retry-After", "5")
 			return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "run capacity busy; wait five seconds before trying again"})
