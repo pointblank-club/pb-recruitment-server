@@ -163,23 +163,23 @@ func (cs *ContestService) UpdateProblem(ctx context.Context, contestID string, p
 		return nil, err
 	}
 
-	// Use existing S3 key if it's valid, otherwise create a new one
 	s3Key := meta.Description
-	if s3Key == "" || !strings.HasPrefix(s3Key, "problems/") {
-		// Create new S3 key for NULL/empty descriptions or legacy direct descriptions
-		s3Key = fmt.Sprintf("problems/%s/%s/description.json", contestID, problemID)
-	}
+	publishDescription := req.Type == models.Code || req.DescriptionProvided || req.Description != ""
+	if publishDescription {
+		// Use the existing S3 key if it's valid, otherwise create a new one.
+		if s3Key == "" || !strings.HasPrefix(s3Key, "problems/") {
+			// Create a new key for NULL/empty descriptions or legacy direct descriptions.
+			s3Key = fmt.Sprintf("problems/%s/%s/description.json", contestID, problemID)
+		}
 
-	payload := map[string]string{
-		"description": req.Description,
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := cs.s3.PutObjectOverwrite(ctx, s3Key, string(data)); err != nil {
-		return nil, err
+		payload := map[string]string{"description": req.Description}
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		if err := cs.s3.PutObjectOverwrite(ctx, s3Key, string(data)); err != nil {
+			return nil, err
+		}
 	}
 
 	// An empty key leaves the current database reference unchanged.
