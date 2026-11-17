@@ -945,14 +945,14 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Get all coding submissions made in a contest, optionally filtered by user_id and problem_id",
+                "description": "Get all submissions made in a contest, optionally filtered by user_id, problem_id, verdict, and type",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "Admin - Contests"
                 ],
-                "summary": "Get contest coding submissions (Admin)",
+                "summary": "Get contest submissions (Admin)",
                 "parameters": [
                     {
                         "type": "string",
@@ -971,6 +971,22 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Problem ID (optional)",
                         "name": "problem_id",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "code",
+                            "mcq"
+                        ],
+                        "type": "string",
+                        "description": "Submission type (code, mcq; defaults to all)",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Verdict filter (e.g. accepted, wrong_answer, pending)",
+                        "name": "verdict",
                         "in": "query"
                     },
                     {

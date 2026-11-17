@@ -350,14 +350,16 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 }
 
 // GetAdminSubmissions godoc
-// @Summary      Get contest coding submissions (Admin)
-// @Description  Get all coding submissions made in a contest, optionally filtered by user_id and problem_id
+// @Summary      Get contest submissions (Admin)
+// @Description  Get all submissions made in a contest, optionally filtered by user_id, problem_id, verdict, and type
 // @Tags         Admin - Contests
 // @Produce      json
 // @Security     BearerAuth
 // @Param        contestId path string true "Contest ID"
 // @Param        user_id query string false "User ID (optional)"
 // @Param        problem_id query string false "Problem ID (optional)"
+// @Param        type query string false "Submission type (code, mcq; defaults to all)" Enums(code, mcq)
+// @Param        verdict query string false "Verdict filter (e.g. accepted, wrong_answer, pending)"
 // @Param        page query int false "Page number (defaults to 0)"
 // @Param        page_size query int false "Page size (defaults to 50)"
 // @Success      200 {array} dto.AdminSubmissionItem
