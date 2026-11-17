@@ -310,8 +310,8 @@ func TestConsolidationAttemptPenaltyPostgres(t *testing.T) {
 						t.Errorf("run %d: stored score/rank=%d/%d, leaderboard=%+v; want score=10 rank=%d solves=1 finish=100000", run, score, rank, entry, wantRank)
 					}
 					// Displayed submissions include infrastructure failures; the rank penalty does not.
-					if len(entry.ProblemScores) != 1 || entry.ProblemScores[0].Attempts != wantSubmissions {
-						t.Errorf("run %d: problem scores=%+v, want %d displayed submissions", run, entry.ProblemScores, wantSubmissions)
+					if len(entry.ProblemScores) != 1 || entry.ProblemScores[0].Attempts != wantSubmissions || entry.ProblemScores[0].Type != "code" {
+						t.Errorf("run %d: problem scores=%+v, want %d displayed submissions of type code", run, entry.ProblemScores, wantSubmissions)
 					}
 				}
 			}

@@ -126,23 +126,7 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 		return nil, fmt.Errorf("scan submission: %w", err)
 	}
 
-	sub.Option = []int{}
-	if rawChoices.Valid && rawChoices.String != "" && rawChoices.String != "{}" {
-		choiceStr := strings.TrimSpace(strings.Trim(rawChoices.String, "{}"))
-
-		if choiceStr != "" {
-			parts := strings.Split(choiceStr, ",")
-
-			for _, part := range parts {
-				val, err := strconv.Atoi(strings.TrimSpace(part))
-				if err != nil {
-					log.Printf("submission-store: failed to parse choice value '%s': %v", part, err)
-					continue
-				}
-				sub.Option = append(sub.Option, val)
-			}
-		}
-	}
+	sub.Option = parseRawChoices(rawChoices)
 
 	testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, id)
 	if err != nil {
@@ -642,7 +626,7 @@ func (s *SubmissionStore) CheckRunCapacity(ctx context.Context) error {
 	return nil
 }
 
-func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
+func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict, submissionType string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, fmt.Errorf("submission store: db is not initialized")
 	}
@@ -661,13 +645,14 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 	const countQ = `
 		SELECT COUNT(*)
 		FROM submissions s
-		WHERE s.contest_id = $1 AND s.type = 'code'
+		WHERE s.contest_id = $1
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
 		  AND ($4 = '' OR LOWER(s.status::text) = LOWER($4))
+		  AND ($5 = '' OR LOWER(s.type::text) = LOWER($5))
 	`
 	var totalCount int
-	if err := s.db.QueryRowContext(ctx, countQ, contestID, userID, problemID, verdict).Scan(&totalCount); err != nil {
+	if err := s.db.QueryRowContext(ctx, countQ, contestID, userID, problemID, verdict, submissionType).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("count admin submissions: %w", err)
 	}
 
@@ -685,19 +670,21 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			s.status,
 			s.created_at,
 			COALESCE(s.runtime, 0),
-			COALESCE(s.memory, 0)
+			COALESCE(s.memory, 0),
+			s.choices
 		FROM submissions s
 		LEFT JOIN users u ON s.user_id = u.id
 		LEFT JOIN problems p ON s.problem_id = p.id
-		WHERE s.contest_id = $1 AND s.type = 'code'
+		WHERE s.contest_id = $1
 		  AND ($2 = '' OR s.user_id = $2)
 		  AND ($3 = '' OR s.problem_id = $3)
 		  AND ($6 = '' OR LOWER(s.status::text) = LOWER($6))
+		  AND ($7 = '' OR LOWER(s.type::text) = LOWER($7))
 		ORDER BY s.created_at DESC, s.submission_seq DESC
 		LIMIT $4 OFFSET $5
 	`
 
-	rows, err := s.db.QueryContext(ctx, q, contestID, userID, problemID, pageSize, offset, verdict)
+	rows, err := s.db.QueryContext(ctx, q, contestID, userID, problemID, pageSize, offset, verdict, submissionType)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query admin submissions: %w", err)
 	}
@@ -706,6 +693,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 	items := make([]dto.AdminSubmissionItem, 0)
 	for rows.Next() {
 		var item dto.AdminSubmissionItem
+		var rawChoices sql.NullString
 		if err := rows.Scan(
 			&item.ID,
 			&item.UserID,
@@ -720,10 +708,12 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			&item.CreatedAt,
 			&item.Runtime,
 			&item.Memory,
+			&rawChoices,
 		); err != nil {
 			log.Printf("submission-store: failed to scan admin submission row: %v", err)
 			continue
 		}
+		item.Option = parseRawChoices(rawChoices)
 		items = append(items, item)
 	}
 
@@ -753,7 +743,8 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 			s.status,
 			s.created_at,
 			COALESCE(s.runtime, 0),
-			COALESCE(s.memory, 0)
+			COALESCE(s.memory, 0),
+			s.choices
 		FROM submissions s
 		LEFT JOIN users u ON s.user_id = u.id
 		LEFT JOIN problems p ON s.problem_id = p.id
@@ -761,6 +752,7 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 	`
 
 	var details dto.AdminSubmissionDetails
+	var rawChoices sql.NullString
 	row := s.db.QueryRowContext(ctx, q, submissionID)
 	if err := row.Scan(
 		&details.ID,
@@ -776,6 +768,7 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 		&details.CreatedAt,
 		&details.Runtime,
 		&details.Memory,
+		&rawChoices,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
@@ -783,11 +776,30 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 		return nil, fmt.Errorf("scan admin submission details: %w", err)
 	}
 
-	testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, submissionID)
-	if err != nil {
-		return nil, fmt.Errorf("get test case results: %w", err)
+	details.Option = parseRawChoices(rawChoices)
+
+	if details.Type == models.Code {
+		testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, submissionID)
+		if err != nil {
+			return nil, fmt.Errorf("get test case results: %w", err)
+		}
+		details.TestCaseResults = testCaseResults
+	} else {
+		details.TestCaseResults = []models.TestCaseResult{}
 	}
-	details.TestCaseResults = testCaseResults
 
 	return &details, nil
+}
+
+func parseRawChoices(rawChoices sql.NullString) []int {
+	options := []int{}
+	if rawChoices.Valid && rawChoices.String != "" && rawChoices.String != "{}" {
+		trimmed := strings.Trim(rawChoices.String, "{}")
+		for _, part := range strings.Split(trimmed, ",") {
+			if num, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
+				options = append(options, num)
+			}
+		}
+	}
+	return options
 }

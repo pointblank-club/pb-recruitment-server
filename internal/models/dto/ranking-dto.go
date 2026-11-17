@@ -19,6 +19,7 @@ type LeaderboardEntry struct {
 type ProblemScore struct {
 	ProblemID   string `json:"problem_id"`
 	ProblemName string `json:"problem_name"`
+	Type        string `json:"type,omitempty"`
 	Score       int    `json:"score"`
 	MaxScore    int    `json:"max_score"`
 	Attempts    int    `json:"attempts"`

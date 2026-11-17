@@ -80,8 +80,8 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 	return sub, nil
 }
 
-func (ss *SubmissionService) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
-	return ss.stores.Submissions.ListAdminSubmissions(ctx, contestID, userID, problemID, verdict, page, pageSize)
+func (ss *SubmissionService) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict, submissionType string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {
+	return ss.stores.Submissions.ListAdminSubmissions(ctx, contestID, userID, problemID, verdict, submissionType, page, pageSize)
 }
 
 func (ss *SubmissionService) GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error) {
