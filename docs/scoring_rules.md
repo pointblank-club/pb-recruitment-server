@@ -30,11 +30,26 @@ Each MCQ problem has a configured maximum score (`Score`), a set of options (`Op
   - Incorrect attempts do not deduct from already accumulated points from other problems, but count toward the total attempt penalty used in tie-breaking.
 
 ### 1.2 Coding Problems
-Each coding problem has a configured score (`Score`) and a set of test cases evaluated via Judge0.
+Each coding problem has a configured score (`Score`) and a set of $N$ test cases evaluated via Judge0.
 
-- **Points**:
-  - A submission earns **100% of the problem score** if all test cases pass and the parent submission receives an `accepted` verdict.
-  - Non-accepted verdicts (`wrong_answer`, `tle`, `rte`, `failed_to_process`, `judge_error`) earn **0 points**.
+- **Graduated Partial Credit Scheme**:
+  - Let $N$ be the total number of test cases and $K$ be the number of test cases passed.
+  - **Zero-Credit Threshold ($K \le \lfloor N/2 \rfloor$)**: A submission that passes half or fewer test cases receives **0 points**.
+  - **Intermediate Test Cases ($\lfloor N/2 \rfloor < K < N$)**: For each test case passed beyond $\lfloor N/2 \rfloor$, the submission earns:
+    $$\Delta\% = \frac{50\%}{N - \lfloor N/2 \rfloor - 1}$$
+    of the problem score. Across all intermediate test cases, candidates can earn up to 50% of the total problem score.
+  - **Full Solve ($K = N$)**: Passing all $N$ test cases awards the remaining 50%, for **100% of the problem score**.
+  - **Precision**: Scores support decimal precision rounded to **2 decimal places** (e.g. `1.25`, `12.50`).
+  - **Edge-Cases**:
+    - $N = 2$: Passing 1 test case awards 0%; passing 2 test cases awards 100% (all-or-nothing).
+    - $N = 3$: Passing 1 awards 0%; passing 2 awards 50%; passing 3 awards 100%.
+    - $N = 1$: Passing 1 awards 100%.
+
+- **Per-Problem Score Aggregation**:
+  - A candidate's score for a problem is the maximum score achieved across all valid submissions for that problem:
+    $$\text{Score}(p) = \max_{s \in \text{Submissions}(p)} \text{Score}(s)$$
+  - Resubmitting with fewer passed test cases never lowers a candidate's already achieved score.
+  - A problem is officially counted as **solved** (`ProblemsSolved`) when it has achieved an `accepted` verdict ($100\%$ test cases passed).
 
 ### 1.3 Per-Problem Solve Idempotency
 - Candidates may submit multiple times for any problem (coding or MCQ).

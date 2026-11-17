@@ -10,20 +10,20 @@ type LeaderboardEntry struct {
 	UserID             string         `json:"user_id"`
 	Username           string         `json:"username"`
 	USN                string         `json:"usn"`
-	TotalScore         int            `json:"total_score"`
+	TotalScore         float64        `json:"total_score"`
 	ProblemsSolved     int            `json:"problems_solved"`
 	LastSubmissionTime int64          `json:"last_submission_time"`
 	ProblemScores      []ProblemScore `json:"problem_scores,omitempty"`
 }
 
 type ProblemScore struct {
-	ProblemID   string `json:"problem_id"`
-	ProblemName string `json:"problem_name"`
-	Type        string `json:"type,omitempty"`
-	Score       int    `json:"score"`
-	MaxScore    int    `json:"max_score"`
-	Attempts    int    `json:"attempts"`
-	SolvedAt    *int64 `json:"solved_at,omitempty"`
+	ProblemID   string  `json:"problem_id"`
+	ProblemName string  `json:"problem_name"`
+	Type        string  `json:"type,omitempty"`
+	Score       float64 `json:"score"`
+	MaxScore    float64 `json:"max_score"`
+	Attempts    int     `json:"attempts"`
+	SolvedAt    *int64  `json:"solved_at,omitempty"`
 }
 
 type GetLeaderboardResponse struct {

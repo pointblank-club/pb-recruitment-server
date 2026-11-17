@@ -38,7 +38,7 @@ func TestMCQBatchFinalizationPostgres(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(lb.Entries) != 1 || lb.Entries[0].TotalScore != score || lb.Entries[0].ProblemsSolved != solved {
+		if len(lb.Entries) != 1 || lb.Entries[0].TotalScore != float64(score) || lb.Entries[0].ProblemsSolved != solved {
 			t.Fatalf("cutoff=%d: %+v", cutoff, lb)
 		}
 		wantTime := int64(0)

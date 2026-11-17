@@ -503,10 +503,10 @@ func TestLiveRankingResubmissionOrderPostgres(t *testing.T) {
 			t.Fatalf("%s: expected 2 entries, got %d", stage, len(lb.Entries))
 		}
 		if lb.Entries[0].UserID != alice || lb.Entries[0].Rank != 1 || lb.Entries[0].TotalScore != 100 || lb.Entries[0].LastSubmissionTime != 1_000_000 {
-			t.Errorf("%s: expected alice rank 1 score 100 finish 1000000, got user %s rank %d score %d finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
+			t.Errorf("%s: expected alice rank 1 score 100 finish 1000000, got user %s rank %d score %v finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
 		}
 		if lb.Entries[1].UserID != bob || lb.Entries[1].Rank != 2 || lb.Entries[1].TotalScore != 100 || lb.Entries[1].LastSubmissionTime != 2_000_000 {
-			t.Errorf("%s: expected bob rank 2 score 100 finish 2000000, got user %s rank %d score %d finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
+			t.Errorf("%s: expected bob rank 2 score 100 finish 2000000, got user %s rank %d score %v finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
 		}
 	}
 
@@ -581,10 +581,10 @@ func TestCodeLeaderboardFinishTimeTieBreakPostgres(t *testing.T) {
 		}
 		// Z Earlier must be rank 1 despite being alphabetically after A Later
 		if lb.Entries[0].UserID != userZ || lb.Entries[0].Rank != 1 || lb.Entries[0].TotalScore != 100 || lb.Entries[0].LastSubmissionTime != 1_000_000 {
-			t.Errorf("%s: expected Z Earlier rank 1 score 100 finish 1000000, got user %s (%s) rank %d score %d finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Username, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
+			t.Errorf("%s: expected Z Earlier rank 1 score 100 finish 1000000, got user %s (%s) rank %d score %v finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Username, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
 		}
 		if lb.Entries[1].UserID != userA || lb.Entries[1].Rank != 2 || lb.Entries[1].TotalScore != 100 || lb.Entries[1].LastSubmissionTime != 2_000_000 {
-			t.Errorf("%s: expected A Later rank 2 score 100 finish 2000000, got user %s (%s) rank %d score %d finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Username, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
+			t.Errorf("%s: expected A Later rank 2 score 100 finish 2000000, got user %s (%s) rank %d score %v finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Username, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
 		}
 	}
 

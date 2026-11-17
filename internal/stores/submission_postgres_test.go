@@ -161,12 +161,12 @@ func TestJudgeMCQPostgres(t *testing.T) {
 			t.Fatalf("entries=%d", len(leaderboard.Entries))
 		}
 		entry := leaderboard.Entries[0]
-		sum := 0
+		sum := 0.0
 		for _, score := range entry.ProblemScores {
 			sum += score.Score
 		}
 		if entry.TotalScore != 10 || sum != entry.TotalScore {
-			t.Fatalf("total=%d breakdown=%d", entry.TotalScore, sum)
+			t.Fatalf("total=%v breakdown=%v", entry.TotalScore, sum)
 		}
 	}
 	assertScore()

@@ -230,7 +230,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 						wantRank = 2
 					}
 				}
-				if entry.TotalScore != wantScore || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved || entry.LastSubmissionTime != wantTime {
+				if entry.TotalScore != float64(wantScore) || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved || entry.LastSubmissionTime != wantTime {
 					t.Fatalf("stage=%s viewer=%q entry=%+v, want score/rank/solves/time=%d/%d/%d/%d", stage, viewer, entry, wantScore, wantRank, wantSolved, wantTime)
 				}
 				if viewer != user && len(entry.ProblemScores) != 0 {
@@ -264,7 +264,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, entry := range res.Entries {
-			if entry.UserID == user && entry.TotalScore != tc.userScore || entry.UserID == mcqOnly && entry.TotalScore != tc.mcqOnlyScore {
+			if entry.UserID == user && entry.TotalScore != float64(tc.userScore) || entry.UserID == mcqOnly && entry.TotalScore != float64(tc.mcqOnlyScore) {
 				t.Fatalf("cutoff=%d unexpected cached totals: %+v", tc.cutoff, res.Entries)
 			}
 		}

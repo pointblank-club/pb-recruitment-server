@@ -95,7 +95,7 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 
 	const q = `
 		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.choices,
-		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time
+		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0)
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
 		WHERE sub.id = $1
@@ -118,6 +118,7 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 		&sub.Runtime,
 		&sub.Memory,
 		&sub.ContestEndTime,
+		&sub.Score,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
@@ -192,7 +193,7 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 
 	const q = `
 		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.status,
-		       sub.created_at, sub.runtime, sub.memory, c.end_time
+		       sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0)
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
 		WHERE sub.user_id = $1 AND sub.problem_id = $2
@@ -222,6 +223,7 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 			&sub.Runtime,
 			&sub.Memory,
 			&sub.ContestEndTime,
+			&sub.Score,
 		); err != nil {
 			log.Printf("submission-store: failed to scan submission row: %v", err)
 			continue
@@ -506,11 +508,16 @@ func (s *SubmissionStore) JudgeMCQ(ctx context.Context, submissionID string) (er
 		awardScore = !alreadySolved
 	}
 
+	mcqScore := 0.0
+	if result == models.Accepted {
+		mcqScore = float64(problemScore)
+	}
+
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE submissions
-		SET status = $2
+		SET status = $2, score = $3
 		WHERE id = $1 AND status = 'pending'
-	`, submissionID, result); err != nil {
+	`, submissionID, result, mcqScore); err != nil {
 		return fmt.Errorf("update MCQ submission status: %w", err)
 	}
 
@@ -725,6 +732,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			s.type,
 			COALESCE(s.language, ''),
 			s.status,
+			COALESCE(s.score, 0),
 			s.created_at,
 			COALESCE(s.runtime, 0),
 			COALESCE(s.memory, 0),
@@ -762,6 +770,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			&item.Type,
 			&item.Language,
 			&item.Status,
+			&item.Score,
 			&item.CreatedAt,
 			&item.Runtime,
 			&item.Memory,
@@ -798,6 +807,7 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 			s.type,
 			COALESCE(s.language, ''),
 			s.status,
+			COALESCE(s.score, 0),
 			s.created_at,
 			COALESCE(s.runtime, 0),
 			COALESCE(s.memory, 0),
@@ -822,6 +832,7 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 		&details.Type,
 		&details.Language,
 		&details.Status,
+		&details.Score,
 		&details.CreatedAt,
 		&details.Runtime,
 		&details.Memory,

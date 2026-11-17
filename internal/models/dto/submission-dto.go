@@ -41,6 +41,7 @@ type AdminSubmissionItem struct {
 	Type        models.SubmissionType   `json:"type"`
 	Language    string                  `json:"language"`
 	Status      models.SubmissionStatus `json:"status"`
+	Score       float64                 `json:"score"`
 	CreatedAt   int64                   `json:"created_at"`
 	Runtime     int64                   `json:"runtime"`
 	Memory      int64                   `json:"memory"`

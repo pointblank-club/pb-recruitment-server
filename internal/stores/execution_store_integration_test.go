@@ -402,7 +402,7 @@ func TestLeaderboardCachePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cachedResp.Entries[0].TotalScore != 50 {
-		t.Fatalf("expected cached score 50, got %d", cachedResp.Entries[0].TotalScore)
+		t.Fatalf("expected cached score 50, got %v", cachedResp.Entries[0].TotalScore)
 	}
 
 	// Page 5 (out of bounds, page >= max(totalPages, 1) which is 1)
@@ -423,6 +423,6 @@ func TestLeaderboardCachePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if freshResp.Entries[0].TotalScore != 99 {
-		t.Fatalf("expected fresh score 99, got %d", freshResp.Entries[0].TotalScore)
+		t.Fatalf("expected fresh score 99, got %v", freshResp.Entries[0].TotalScore)
 	}
 }

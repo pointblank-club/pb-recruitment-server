@@ -74,7 +74,7 @@ func TestMCQBatchCommitCrossingPostgres(t *testing.T) {
 			t.Error(e)
 			return
 		}
-		if len(lb.Entries) != 1 || lb.Entries[0].TotalScore != score || lb.Entries[0].ProblemsSolved != solves {
+		if len(lb.Entries) != 1 || lb.Entries[0].TotalScore != float64(score) || lb.Entries[0].ProblemsSolved != solves {
 			t.Errorf("cutoff=%d: %+v", boundary, lb)
 		}
 	}
