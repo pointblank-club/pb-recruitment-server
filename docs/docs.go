@@ -2787,7 +2787,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
+                "description": "Requires contest_id identifying a live registration and a confirmed cookie for detected SEB clients. Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2800,7 +2800,7 @@ const docTemplate = `{
                 "summary": "Run code with custom stdin",
                 "parameters": [
                     {
-                        "description": "Language, code (64 KiB), stdin (64 KiB)",
+                        "description": "Contest ID, language, code (64 KiB), stdin (64 KiB)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -2959,6 +2959,15 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Submission already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "SEB cookie session must be resumed after an admin reset",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -4308,6 +4317,7 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "code",
+                "contest_id",
                 "language"
             ],
             "properties": {

@@ -59,15 +59,24 @@ func observeBrowserSession(c echo.Context, service *services.ContestService, con
 	return res, nil
 }
 
-func requireBrowserSession(c echo.Context, service *services.ContestService, contestID, userID string) error {
+func requireBrowserSession(c echo.Context, service *services.ContestService, contestID, userID string, requireCookie bool) (*int, error) {
 	res, err := observeBrowserSession(c, service, contestID, userID, "", false, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if res.IsTerminated {
-		return browserSessionError(common.ErrBrowserSessionTerminated)
+		return nil, browserSessionError(common.ErrBrowserSessionTerminated)
 	}
-	return nil
+	if res.IsSEB {
+		if !res.CookieConfirmed {
+			if requireCookie {
+				return nil, browserSessionError(common.ErrBrowserSessionRequired)
+			}
+			return nil, nil
+		}
+		return &res.Generation, nil
+	}
+	return nil, nil
 }
 
 // StartBrowserSession starts or resumes a cookie session; retries reuse attempt_id until the cookie is confirmed.

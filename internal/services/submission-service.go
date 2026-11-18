@@ -134,11 +134,13 @@ func (ss *SubmissionService) ReplaySubmission(ctx context.Context, userID string
 	return ss.stores.Submissions.FindCodeSubmissionRequest(ctx, userID, req.RequestID, submissionFingerprint(req, req.Type))
 }
 
-func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string, submissionType models.SubmissionType, req *dto.SubmitSubmissionRequest) (string, error) {
+func (ss *SubmissionService) CreateSubmission(ctx context.Context, userID string, submissionType models.SubmissionType, req *dto.SubmitSubmissionRequest, generation *int) (string, error) {
 	ctx, cancelPreparation := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelPreparation()
 
 	sub := &models.Submission{
+		BrowserSessionGeneration: generation,
+
 		UserID:    userID,
 		ContestID: req.ContestID,
 		ProblemID: req.ProblemID,

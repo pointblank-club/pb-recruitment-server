@@ -73,7 +73,7 @@ func (s *SEBStore) Observe(ctx context.Context, contestID, userID, token, attemp
 		if create {
 			return nil, "", common.ContestNotRunningError
 		}
-		return &dto.BrowserSessionResponse{}, "", nil
+		return &dto.BrowserSessionResponse{IsSEB: detected}, "", nil
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", common.UserNotRegisteredError

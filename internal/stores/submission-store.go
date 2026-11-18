@@ -293,14 +293,15 @@ func (s *SubmissionStore) insertSubmission(ctx context.Context, runner queryRowe
 	return submissionID, nil
 }
 
-func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, userID string) error {
+func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, userID string, expectedGeneration *int) error {
 	const lockQ = `
 		SELECT
 			c.start_time,
 			c.end_time,
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
 			cr.ended_at,
-			cr.is_browser_session_terminated
+			cr.is_browser_session_terminated,
+			cr.browser_session_generation
 		FROM contest_registrations cr
 		INNER JOIN contests c ON c.id = cr.contest_id
 		WHERE cr.contest_id = $1 AND cr.user_id = $2
@@ -309,8 +310,9 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 	var startTime, endTime int64
 	var isTerminated bool
 	var browserTerminated bool
+	var generation int
 	var endedAt *int64
-	err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime, &endTime, &isTerminated, &endedAt, &browserTerminated)
+	err := tx.QueryRowContext(ctx, lockQ, contestID, userID).Scan(&startTime, &endTime, &isTerminated, &endedAt, &browserTerminated, &generation)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			var contestExists bool
@@ -341,6 +343,9 @@ func admitContestRegistrationInTx(ctx context.Context, tx *sql.Tx, contestID, us
 	if browserTerminated {
 		return common.ErrBrowserSessionTerminated
 	}
+	if expectedGeneration != nil && *expectedGeneration != generation {
+		return common.ErrBrowserSessionRequired
+	}
 	return nil
 }
 
@@ -355,7 +360,7 @@ func (s *SubmissionStore) CreateMCQSubmission(ctx context.Context, sub *models.S
 	}
 	defer tx.Rollback()
 
-	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID); err != nil {
+	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID, sub.BrowserSessionGeneration); err != nil {
 		return "", err
 	}
 
@@ -615,7 +620,7 @@ func checkSubmissionRateLimit(ctx context.Context, exec interface {
 	return nil
 }
 
-func (s *SubmissionStore) CheckRunCapacity(ctx context.Context, userID, contestID string) error {
+func (s *SubmissionStore) CheckRunCapacity(ctx context.Context, userID, contestID string, generation *int) error {
 	if s == nil || s.db == nil {
 		return errors.New("run capacity database unavailable")
 	}
@@ -652,15 +657,19 @@ func (s *SubmissionStore) CheckRunCapacity(ctx context.Context, userID, contestI
 		return err
 	}
 	rows.Close()
-	found := contestID == ""
+	found := false
 	for _, id := range contests {
-		if err := admitContestRegistrationInTx(ctx, tx, id, userID); err != nil {
+		var expected *int
+		if id == contestID {
+			expected = generation
+		}
+		if err := admitContestRegistrationInTx(ctx, tx, id, userID, expected); err != nil {
 			return err
 		}
 		found = found || id == contestID
 	}
 	if !found {
-		if err := admitContestRegistrationInTx(ctx, tx, contestID, userID); err != nil {
+		if err := admitContestRegistrationInTx(ctx, tx, contestID, userID, generation); err != nil {
 			return err
 		}
 	}

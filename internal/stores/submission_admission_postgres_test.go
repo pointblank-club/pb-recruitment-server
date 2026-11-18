@@ -162,12 +162,12 @@ func TestCodeRetryDoesNotRepeatJudgeDispatchPostgres(t *testing.T) {
 	t.Setenv("JUDGE0_CALLBACK_SECRET", "")
 	service := services.NewSubmissionService(stores.NewStorage(db), dispatchObjects(t), judge0.NewClient())
 	req := &dto.SubmitSubmissionRequest{RequestID: uuid.NewString(), ContestID: contest, ProblemID: problem, Type: models.Code, Language: "python", Code: "print('hello')"}
-	id, err := service.CreateSubmission(context.Background(), user, models.Code, req)
+	id, err := service.CreateSubmission(context.Background(), user, models.Code, req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 5 {
-		got, err := service.CreateSubmission(context.Background(), user, models.Code, req)
+		got, err := service.CreateSubmission(context.Background(), user, models.Code, req, nil)
 		if err != nil || got != id {
 			t.Fatal(got, err)
 		}
@@ -180,7 +180,7 @@ func TestCodeRetryDoesNotRepeatJudgeDispatchPostgres(t *testing.T) {
 		t.Fatal(jobs, err)
 	}
 	req.Code = "print('changed')"
-	if _, err := service.CreateSubmission(context.Background(), user, models.Code, req); !errors.Is(err, common.ErrIdempotencyConflict) {
+	if _, err := service.CreateSubmission(context.Background(), user, models.Code, req, nil); !errors.Is(err, common.ErrIdempotencyConflict) {
 		t.Fatal(err)
 	}
 }

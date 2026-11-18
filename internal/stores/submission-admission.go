@@ -64,7 +64,7 @@ func (s *SubmissionStore) CreateCodeSubmission(ctx context.Context, sub *models.
 			return "", false, err
 		}
 	}
-	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID); err != nil {
+	if err := admitContestRegistrationInTx(ctx, tx, sub.ContestID, sub.UserID, sub.BrowserSessionGeneration); err != nil {
 		return "", false, err
 	}
 	slot, err := reserveCodeAdmissionSlot(ctx, tx, maxPending)

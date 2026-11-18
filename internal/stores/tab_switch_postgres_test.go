@@ -357,7 +357,7 @@ func TestSubmissionAtomicAdmissionAndRacePostgres(t *testing.T) {
 			ProblemID: mcqProblem,
 			Type:      models.MCQ,
 			Option:    []int{1},
-		})
+		}, nil)
 		mcqDone <- err
 	}()
 
@@ -395,7 +395,7 @@ func TestSubmissionAtomicAdmissionAndRacePostgres(t *testing.T) {
 			Type:      models.Code,
 			Language:  "python",
 			Code:      base64.StdEncoding.EncodeToString([]byte("print(1)\n")),
-		})
+		}, nil)
 		codeRaceDone <- err
 	}()
 	time.Sleep(100 * time.Millisecond)
@@ -413,7 +413,7 @@ func TestSubmissionAtomicAdmissionAndRacePostgres(t *testing.T) {
 		Type:      models.Code,
 		Language:  "python",
 		Code:      base64.StdEncoding.EncodeToString([]byte("print(1)\n")),
-	})
+	}, nil)
 	if !errors.Is(codeErr, common.ErrTabSwitchTerminated) {
 		t.Fatalf("direct Code CreateSubmission while terminated: got %v, want ErrTabSwitchTerminated", codeErr)
 	}
@@ -455,7 +455,7 @@ func TestSubmissionAtomicAdmissionAndRacePostgres(t *testing.T) {
 		Type:      models.Code,
 		Language:  "python",
 		Code:      base64.StdEncoding.EncodeToString([]byte("print(1)\n")),
-	})
+	}, nil)
 	if err != nil || codeID == "" {
 		t.Fatalf("Code submission after admin reset failed: id=%q err=%v", codeID, err)
 	}

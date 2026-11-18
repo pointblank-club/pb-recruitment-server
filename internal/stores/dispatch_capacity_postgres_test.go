@@ -87,7 +87,7 @@ func TestDispatchOutagePreservesScoredWorkPostgres(t *testing.T) {
 			t.Setenv("JUDGE0_CALLBACK_SECRET", "")
 			service := services.NewSubmissionService(stores.NewStorage(db), dispatchObjects(t), judge0.NewClient())
 			ctx := context.Background()
-			sub, err := service.CreateSubmission(ctx, user, models.Code, &dto.SubmitSubmissionRequest{ContestID: contest, ProblemID: problem, Language: "python", Code: "print('hello')\n"})
+			sub, err := service.CreateSubmission(ctx, user, models.Code, &dto.SubmitSubmissionRequest{ContestID: contest, ProblemID: problem, Language: "python", Code: "print('hello')\n"}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

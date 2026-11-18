@@ -674,7 +674,7 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 		})
 	}
 
-	if err := requireBrowserSession(ctx, cc.contestService, contestID, userID); err != nil {
+	if _, err := requireBrowserSession(ctx, cc.contestService, contestID, userID, false); err != nil {
 		return err
 	}
 
@@ -731,7 +731,7 @@ func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
 		})
 	}
 
-	if err := requireBrowserSession(ctx, cc.contestService, contestID, userID); err != nil {
+	if _, err := requireBrowserSession(ctx, cc.contestService, contestID, userID, false); err != nil {
 		return err
 	}
 

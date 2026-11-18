@@ -11,10 +11,10 @@ import (
 	"unicode/utf8"
 )
 
-var ErrInvalidRun = errors.New("invalid run: supported language, UTF-8 code (up to 64 KiB) and stdin (up to 64 KiB) required")
+var ErrInvalidRun = errors.New("invalid run: contest_id, supported language, UTF-8 code (up to 64 KiB) and stdin (up to 64 KiB) required")
 
-func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.RunRequest) (*dto.RunResponse, error) {
-	if userID == "" {
+func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.RunRequest, generation *int) (*dto.RunResponse, error) {
+	if userID == "" || strings.TrimSpace(req.ContestID) == "" {
 		return nil, ErrInvalidRun
 	}
 	if len(req.Code) > 64<<10 || len(req.Stdin) > 64<<10 || !utf8.ValidString(req.Code) || !utf8.ValidString(req.Stdin) {
@@ -37,7 +37,7 @@ func (ss *SubmissionService) Run(ctx context.Context, userID string, req dto.Run
 	if err := ss.stores.Submissions.CheckSubmissionRateLimit(ctx, "run:user:"+userID, 5); err != nil {
 		return nil, err
 	}
-	if err := ss.stores.Submissions.CheckRunCapacity(ctx, userID, req.ContestID); err != nil {
+	if err := ss.stores.Submissions.CheckRunCapacity(ctx, userID, req.ContestID, generation); err != nil {
 		return nil, err
 	}
 	results, err := ss.judge0.CreateBatch(ctx, []judge0.SubmissionRequest{{

@@ -33,7 +33,9 @@ type TestCaseResult struct {
 }
 
 type Submission struct {
-	ContestEndTime  int64            `json:"-"`
+	BrowserSessionGeneration *int  `json:"-" swaggerignore:"true"`
+	ContestEndTime           int64 `json:"-"`
+
 	ID              string           `json:"id"`
 	UserID          string           `json:"user_id"`
 	ContestID       string           `json:"contest_id"`

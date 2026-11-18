@@ -170,9 +170,12 @@ initial session. Refresh-free in-site navigation, reconnection, concurrent tabs,
 and startup retries reuse the cookie. Startup UUIDs deduplicate lost responses;
 a confirming request acknowledges delivery, after which the UUID cannot restore
 a deleted cookie. A fourth SEB session sets a persistent registration lock.
-Admission serializes on the registration, and code/MCQ submission transactions
-also enforce the lock. Replays of previously accepted code requests still resolve
-to their original submission.
+Admission serializes on the registration. Code, MCQ, and Run admission recheck
+participation locks and the validated SEB cookie generation under that same lock.
+An admin reset invalidates in-flight SEB requests that have not been admitted yet;
+they return HTTP 428 and must resume their cookie session before retrying.
+Ordinary browsers remain allowed without a SEB generation. Replays of previously
+accepted code requests still resolve to their original submission.
 
 Admin-only `POST /admin/contests/{contestId}/contestants/{userId}/reset-browser-sessions`
 sets the current count to zero and clears that session lock. It advances
@@ -348,7 +351,7 @@ measured on the shared judge. This switch applies at the API, including direct c
 `POST /submission/run` requires the existing Firebase bearer token and accepts raw UTF-8:
 
 ```json
-{"language":"python","code":"print(input())\n","stdin":"hello\n"}
+{"contest_id":"live-contest-id","language":"python","code":"print(input())\n","stdin":"hello\n"}
 ```
 
 Languages match submit. Code and stdin are each limited to 64 KiB; the JSON body to 1 MiB.
@@ -358,11 +361,13 @@ seconds and at most one Run admission per database clock second across all repli
 using the existing cooldown table. After reserving that admission, it rejects Run if
 any scored code submission is pending, including parents without execution snapshots.
 Rejections return `429`, `Retry-After: 5`; explicit Judge0 queue-full responses do too.
-Run creates no contest rows, storage objects or ranking changes. A supplied
-`contest_id` must identify a live registration. Admission also checks every active
-contest registration for manual completion, tab termination, and browser lockout,
+Run creates no contest rows, storage objects or ranking changes. The required
+`contest_id` must identify a live registration, and detected SEB clients must
+present their confirmed cookie. Omitted IDs return HTTP 400. Admission also checks
+every active contest registration for manual completion, tab termination, and browser lockout,
 so omitting the ID or substituting another contest cannot bypass a participation
-lock. Standalone Run remains available when no active contest lock applies.
+lock. The website supplies the active contest ID; standalone Run without a contest
+is not supported.
 
 The backlog guard includes every contest because recovery can still dispatch old
 pending work. Before enabling Run, inspect unresolved submissions:
