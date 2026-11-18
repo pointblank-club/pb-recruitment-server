@@ -3455,6 +3455,9 @@ const docTemplate = `{
                 "runtime": {
                     "type": "integer"
                 },
+                "score": {
+                    "type": "number"
+                },
                 "status": {
                     "description": "e.g., \"Pending\", \"Accepted\", \"Wrong Answer\", etc.",
                     "allOf": [
@@ -3598,6 +3601,9 @@ const docTemplate = `{
                 "runtime": {
                     "type": "integer"
                 },
+                "score": {
+                    "type": "number"
+                },
                 "status": {
                     "$ref": "#/definitions/app_internal_models.SubmissionStatus"
                 },
@@ -3653,6 +3659,9 @@ const docTemplate = `{
                 },
                 "runtime": {
                     "type": "integer"
+                },
+                "score": {
+                    "type": "number"
                 },
                 "status": {
                     "$ref": "#/definitions/app_internal_models.SubmissionStatus"
@@ -4056,6 +4065,9 @@ const docTemplate = `{
                 "runtime": {
                     "type": "integer"
                 },
+                "score": {
+                    "type": "number"
+                },
                 "status": {
                     "description": "e.g., \"Pending\", \"Accepted\", \"Wrong Answer\", etc.",
                     "allOf": [
@@ -4097,7 +4109,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total_score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "user_id": {
                     "type": "string"
@@ -4261,7 +4273,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "problem_id": {
                     "type": "string"
@@ -4270,7 +4282,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "solved_at": {
                     "type": "integer"
