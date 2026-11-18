@@ -81,21 +81,23 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 	}
 
 	// Verify user1 has score 30 (10 MCQ + 20 Code), rank 1
-	var score1, rank1 int
+	var score1 float64
+	var rank1 int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user1).Scan(&score1, &rank1); err != nil {
 		t.Fatalf("query user1 ranking: %v", err)
 	}
 	if score1 != 30 || rank1 != 1 {
-		t.Fatalf("user1 got score=%d rank=%d, want score=30 rank=1", score1, rank1)
+		t.Fatalf("user1 got score=%v rank=%d, want score=30 rank=1", score1, rank1)
 	}
 
 	// Verify user2 has score 0, rank 2
-	var score2, rank2 int
+	var score2 float64
+	var rank2 int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user2).Scan(&score2, &rank2); err != nil {
 		t.Fatalf("query user2 ranking: %v", err)
 	}
 	if score2 != 0 || rank2 != 2 {
-		t.Fatalf("user2 got score=%d rank=%d, want score=0 rank=2", score2, rank2)
+		t.Fatalf("user2 got score=%v rank=%d, want score=0 rank=2", score2, rank2)
 	}
 
 	// Run second consolidation (re-run should be idempotent)
@@ -108,20 +110,22 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 	}
 
 	// Verify scores and ranks are preserved identically
-	var score1Again, rank1Again int
+	var score1Again float64
+	var rank1Again int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user1).Scan(&score1Again, &rank1Again); err != nil {
 		t.Fatalf("query user1 ranking again: %v", err)
 	}
 	if score1Again != 30 || rank1Again != 1 {
-		t.Fatalf("repeated consolidation changed user1: score=%d rank=%d", score1Again, rank1Again)
+		t.Fatalf("repeated consolidation changed user1: score=%v rank=%d", score1Again, rank1Again)
 	}
 
-	var score2Again, rank2Again int
+	var score2Again float64
+	var rank2Again int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user2).Scan(&score2Again, &rank2Again); err != nil {
 		t.Fatalf("query user2 ranking again: %v", err)
 	}
 	if score2Again != 0 || rank2Again != 2 {
-		t.Fatalf("repeated consolidation changed user2: score=%d rank=%d", score2Again, rank2Again)
+		t.Fatalf("repeated consolidation changed user2: score=%v rank=%d", score2Again, rank2Again)
 	}
 }
 
@@ -185,12 +189,12 @@ func TestConsolidationConcurrentWithJudgeMCQPostgres(t *testing.T) {
 	}
 
 	// Verify that user got the 10 points without lost update
-	var finalScore int
+	var finalScore float64
 	if err := db.QueryRowContext(ctx, `SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&finalScore); err != nil {
 		t.Fatalf("query rankings score: %v", err)
 	}
 	if finalScore != 10 {
-		t.Fatalf("expected final score 10, got %d (lost update detected)", finalScore)
+		t.Fatalf("expected final score 10, got %v (lost update detected)", finalScore)
 	}
 }
 
@@ -302,12 +306,13 @@ func TestConsolidationAttemptPenaltyPostgres(t *testing.T) {
 					if entry.UserID == user {
 						wantRank, wantSubmissions = tc.wantRank, 3
 					}
-					var score, rank int
+					var score float64
+					var rank int
 					if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, entry.UserID).Scan(&score, &rank); err != nil {
 						t.Fatal(err)
 					}
 					if rank != wantRank || score != 10 || entry.Rank != wantRank || entry.TotalScore != 10 || entry.ProblemsSolved != 1 || entry.LastSubmissionTime != 100_000 {
-						t.Errorf("run %d: stored score/rank=%d/%d, leaderboard=%+v; want score=10 rank=%d solves=1 finish=100000", run, score, rank, entry, wantRank)
+						t.Errorf("run %d: stored score/rank=%v/%d, leaderboard=%+v; want score=10 rank=%d solves=1 finish=100000", run, score, rank, entry, wantRank)
 					}
 					// Displayed submissions include infrastructure failures; the rank penalty does not.
 					if len(entry.ProblemScores) != 1 || entry.ProblemScores[0].Attempts != wantSubmissions || entry.ProblemScores[0].Type != "code" {

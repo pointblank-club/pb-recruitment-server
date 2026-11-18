@@ -233,7 +233,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		WITH first_solves AS (
 			SELECT user_id, problem_id, MIN(created_at) AS solved_at
 			FROM submissions
-			WHERE contest_id = $1 AND score > 0
+			WHERE contest_id = $1 AND (status = 'accepted' OR score > 0)
 			GROUP BY user_id, problem_id
 		),
 		user_solve_time AS (
@@ -271,10 +271,13 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
 		WITH first_solves AS (
-			SELECT user_id, problem_id, MAX(score) AS score, MIN(created_at) AS solved_at
+			SELECT sub.user_id, sub.problem_id,
+			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS score,
+			       MIN(sub.created_at) AS solved_at
 			FROM submissions sub
-			WHERE contest_id = $1 AND type = 'code' AND score > 0
-			GROUP BY user_id, problem_id
+			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
+			WHERE sub.contest_id = $1 AND sub.type = 'code' AND (sub.status = 'accepted' OR sub.score > 0)
+			GROUP BY sub.user_id, sub.problem_id
 		),
 		user_scores AS (
 			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time
@@ -409,7 +412,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
 			p.type::text AS problem_type,
 			p.score AS max_score,
 			COUNT(sub.id) AS attempts,
-			COALESCE(MAX(sub.score), 0) AS score,
+			COALESCE(MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END), 0) AS score,
 			MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at ELSE NULL END) AS solved_at
 		FROM submissions sub
 		INNER JOIN problems p ON sub.problem_id = p.id AND sub.contest_id = p.contest_id
@@ -799,10 +802,14 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 				data.earliestAccepted[pid] = createdAt
 			}
 		}
-		if subScore > 0 {
+		if subScore > 0 || status == string(models.Accepted) {
+			effectiveScore := subScore
+			if status == string(models.Accepted) && effectiveScore < float64(problemScores[pid]) {
+				effectiveScore = float64(problemScores[pid])
+			}
 			prevScore := data.maxProblemScore[pid]
-			if subScore > prevScore {
-				data.maxProblemScore[pid] = subScore
+			if effectiveScore > prevScore {
+				data.maxProblemScore[pid] = effectiveScore
 				data.earliestMaxScore[pid] = createdAt
 			}
 		}

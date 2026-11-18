@@ -153,16 +153,16 @@ func TestJudge0FinalResults(t *testing.T) {
 			}
 
 			// Assert that ProcessFinal creates a ranking row with 0 score for non-accepted and full score for accepted
-			var rankingScore int
+			var rankingScore float64
 			if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&rankingScore); err != nil {
 				t.Fatalf("ranking row missing for verdict %s: %v", tc.verdict, err)
 			}
-			wantScore := 0
+			wantScore := 0.0
 			if tc.verdict == "accepted" {
-				wantScore = 10
+				wantScore = 10.0
 			}
 			if rankingScore != wantScore {
-				t.Fatalf("ranking score = %d, want %d for verdict %s", rankingScore, wantScore, tc.verdict)
+				t.Fatalf("ranking score = %v, want %v for verdict %s", rankingScore, wantScore, tc.verdict)
 			}
 		})
 	}
@@ -208,9 +208,9 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var score int
+	var score float64
 	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
-		t.Fatalf("score = %d, %v", score, err)
+		t.Fatalf("score = %v, %v", score, err)
 	}
 	// The MCQ scorer shares the same ranking lock and must preserve the code score.
 	mcq := uuid.NewString()
@@ -239,7 +239,7 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 		}
 	}
 	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 30 {
-		t.Fatalf("combined score = %d, %v", score, err)
+		t.Fatalf("combined score = %v, %v", score, err)
 	}
 }
 

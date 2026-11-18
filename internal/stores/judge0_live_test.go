@@ -104,7 +104,8 @@ func TestLiveJudge0Smoke(t *testing.T) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	var score, resultsCount int
+	var score float64
+	var resultsCount int
 	if err := db.QueryRow(`SELECT sum(score) FROM rankings`).Scan(&score); err != nil || score != 10 {
 		t.Fatal("score", score, err)
 	}

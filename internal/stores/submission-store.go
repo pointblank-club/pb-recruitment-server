@@ -478,13 +478,13 @@ func (s *SubmissionStore) JudgeMCQ(ctx context.Context, submissionID string) (er
 	if _, err = tx.ExecContext(ctx, ensureRankingQ, contestID, userID); err != nil {
 		return fmt.Errorf("ensure ranking: %w", err)
 	}
-	var currentScore int
+	var lockedUser string
 	if err = tx.QueryRowContext(ctx, `
-		SELECT score
+		SELECT user_id
 		FROM rankings
 		WHERE contest_id = $1 AND user_id = $2
 		FOR UPDATE
-	`, contestID, userID).Scan(&currentScore); err != nil {
+	`, contestID, userID).Scan(&lockedUser); err != nil {
 		return fmt.Errorf("lock ranking: %w", err)
 	}
 
