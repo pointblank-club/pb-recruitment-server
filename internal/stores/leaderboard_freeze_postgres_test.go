@@ -2,17 +2,26 @@ package stores_test
 
 import (
 	"app/internal/common"
+	"app/internal/controllers"
+	"app/internal/middleware"
+	"app/internal/models/dto"
+	"app/internal/services"
 	"app/internal/stores"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
 )
 
 // seedFreezeContest creates an open contest whose users each have some accepted code solves.
@@ -46,7 +55,7 @@ func seedFreezeContest(t *testing.T, db *sql.DB, users int) (contest string, use
 func TestLeaderboardFreezeSnapshotUnderConcurrentScoringPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	ctx := context.Background()
-	const users = 150 // eight pages
+	const users = 600 // thirty pages
 	contest, userIDs, problems := seedFreezeContest(t, db, users)
 	store := stores.NewRankingStore(db)
 
@@ -120,7 +129,7 @@ func TestLeaderboardFreezeLifecyclePostgres(t *testing.T) {
 	store := stores.NewRankingStore(db)
 	store.SetCacheTTL(time.Minute)
 
-	// Concurrent and repeated freezes keep one snapshot.
+	// Overlapping freezes may conflict; successful and repeated freezes keep one snapshot.
 	var wg sync.WaitGroup
 	errs := make([]error, 4)
 	for i := range errs {
@@ -129,7 +138,7 @@ func TestLeaderboardFreezeLifecyclePostgres(t *testing.T) {
 	}
 	wg.Wait()
 	for _, err := range errs {
-		if err != nil {
+		if err != nil && !errors.Is(err, common.ErrLeaderboardFreezeInProgress) {
 			t.Fatal(err)
 		}
 	}
@@ -188,37 +197,80 @@ func TestLeaderboardFreezeWithoutMigrationPostgres(t *testing.T) {
 	}
 }
 
-// An unfreeze sent while a freeze is capturing waits for it and then wins.
-func TestLeaderboardUnfreezeDuringCapturePostgres(t *testing.T) {
+// Contention returns 409 instead of waiting with a connection from the shared pool.
+func TestLeaderboardFreezeContentionPostgres(t *testing.T) {
 	db := postgresTestDB(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	db.SetMaxOpenConns(25)
+	contest, _, _ := seedFreezeContest(t, db, 2)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	contest, _, _ := seedFreezeContest(t, db, 600)
-	store := stores.NewRankingStore(db)
-	cutoff := time.Now().UnixMilli()
-	freezeDone := make(chan error, 1)
-	go func() { freezeDone <- store.SetLeaderboardFrozen(ctx, contest, true, &cutoff) }()
+	guard, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer guard.Rollback()
+	if _, err := guard.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('leaderboard_freeze:' || $1, 0))`, contest); err != nil {
+		t.Fatal(err)
+	}
 
-	for held := false; !held; {
-		if err := db.QueryRowContext(ctx, `
-			SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND objsubid = 1
-			  AND ((classid::bigint << 32) | objid::bigint) = hashtextextended('leaderboard_freeze:' || $1, 0))
-		`, contest).Scan(&held); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case err := <-freezeDone:
-			t.Fatalf("freeze finished (%v) before the unfreeze could overlap it", err)
-		default:
-		}
+	controller := controllers.NewContestController(services.NewContestService(stores.NewStorage(db), nil), nil)
+	e := echo.New()
+	e.PUT("/admin/contest/:id/leaderboard-freeze", controller.SetLeaderboardFreezeStatus, middleware.ValidateRequest(new(dto.SetLeaderboardFreezeRequest)))
+	request := func(frozen bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/admin/contest/"+contest+"/leaderboard-freeze", strings.NewReader(fmt.Sprintf(`{"frozen":%t}`, frozen))).WithContext(ctx)
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		w := httptest.NewRecorder()
+		e.ServeHTTP(w, req)
+		return w
 	}
-	if err := store.SetLeaderboardFrozen(ctx, contest, false, nil); err != nil {
+	var wg sync.WaitGroup
+	for i := 0; i < 25; i++ {
+		wg.Add(1)
+		go func(frozen bool) {
+			defer wg.Done()
+			w := request(frozen)
+			if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), common.ErrLeaderboardFreezeInProgress.Error()) {
+				t.Errorf("overlapping frozen=%v: HTTP %d %s", frozen, w.Code, w.Body.String())
+			}
+		}(i%2 == 0)
+	}
+	wg.Wait()
+	if err := guard.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-freezeDone; err != nil {
-		t.Fatal(err)
-	}
+	store := stores.NewRankingStore(db)
 	if frozen, err := store.GetLeaderboardFreezeStatus(ctx, contest); err != nil || frozen {
-		t.Fatalf("leaderboard frozen=%v err=%v after the later unfreeze", frozen, err)
+		t.Fatalf("rejected changes mutated freeze state: frozen=%v err=%v", frozen, err)
+	}
+	for _, frozen := range []bool{true, false} {
+		if w := request(frozen); w.Code != http.StatusOK {
+			t.Fatalf("retry frozen=%v: HTTP %d %s", frozen, w.Code, w.Body.String())
+		}
+		if current, err := store.GetLeaderboardFreezeStatus(ctx, contest); err != nil || current != frozen {
+			t.Fatalf("retry frozen=%v: current=%v err=%v", frozen, current, err)
+		}
+	}
+}
+
+func TestLeaderboardFrozenCacheBoundsPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	contest, _, _ := seedFreezeContest(t, db, 2)
+	store := stores.NewRankingStore(db)
+	store.SetCacheTTL(time.Minute)
+	ctx := context.Background()
+	if err := store.SetLeaderboardFrozen(ctx, contest, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetFrozenLeaderboard(ctx, contest, 0); err != nil {
+		t.Fatal(err)
+	}
+	for page := 1; page <= 100; page++ {
+		lb, err := store.GetFrozenLeaderboard(ctx, contest, page)
+		if err != nil || lb == nil || len(lb.Entries) != 0 {
+			t.Fatalf("page %d: %+v, %v", page, lb, err)
+		}
+	}
+	if size := reflect.ValueOf(store).Elem().FieldByName("cache").Len(); size != 1 {
+		t.Fatalf("cache has %d entries after 100 nonexistent pages, want only the valid page", size)
 	}
 }

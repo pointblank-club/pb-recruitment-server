@@ -75,6 +75,9 @@ make swagger
   applies only pending migrations; do not force the version or roll back a
   production database.
 
+On pushes to `main`, the deployment pipeline applies pending migrations before
+rolling out the ECS service. A separate manual migration deployment is not required.
+
 Coding questions accept `time_limit` in milliseconds (1–10000) and `memory_limit`
 in MiB (2–500). New coding questions default to 1000 ms / 256 MiB; omitted limits
 on edits preserve existing settings. MCQs reject these request fields, omit them
@@ -251,6 +254,8 @@ suspense. Submissions and score processing continue normally, admin leaderboard
 views remain live, and unfreezing reveals the current ranking. Freezing again keeps
 the original snapshot. Freeze before the contest ends to hide final results: the
 public sees full results as soon as an unfrozen contest ends.
+Overlapping freeze or unfreeze changes return `409 Conflict`; retry after the
+current change finishes.
 If a freeze remains active after the contest ends, public viewers continue to see
 the saved snapshot until an admin releases it. Hiding or disqualifying a user during
 a freeze removes them from the snapshot and closes the rank gap (ties stay tied).

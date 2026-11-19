@@ -1237,6 +1237,7 @@ func (cc *ContestController) GetLeaderboardFreezeStatus(ctx echo.Context) error 
 // @Failure      400 {object} map[string]string "Invalid input"
 // @Failure      403 {object} map[string]string "Contest has not started yet"
 // @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      409 {object} map[string]string "Leaderboard freeze change in progress; retry"
 // @Failure      503 {object} map[string]string "Leaderboard freeze migration is not applied"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /admin/contest/{id}/leaderboard-freeze [put]
@@ -1251,6 +1252,9 @@ func (cc *ContestController) SetLeaderboardFreezeStatus(ctx echo.Context) error 
 	}
 	status, err := cc.contestService.SetLeaderboardFrozen(ctx.Request().Context(), contestID, *req.Frozen)
 	if err != nil {
+		if errors.Is(err, common.ErrLeaderboardFreezeInProgress) {
+			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		}
 		if errors.Is(err, common.ErrLeaderboardFreezeUnavailable) {
 			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		}

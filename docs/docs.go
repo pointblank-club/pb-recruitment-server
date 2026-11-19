@@ -548,6 +548,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "409": {
+                        "description": "Leaderboard freeze change in progress; retry",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {

@@ -459,7 +459,7 @@ func (s *RankingStore) GetFrozenLeaderboard(ctx context.Context, contestID strin
 		TotalCount: totalCount,
 		Frozen:     true,
 	}
-	if s.cacheTTL > 0 {
+	if s.cacheTTL > 0 && page < resp.TotalPages {
 		s.cacheMu.Lock()
 		s.cache[fmt.Sprintf("%s:%d:frozen:%d", contestID, page, frozenAt)] = leaderboardCacheEntry{data: resp, expiresAt: time.Now().Add(s.cacheTTL)}
 		s.cacheMu.Unlock()
@@ -473,15 +473,18 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 	if s == nil || s.db == nil {
 		return fmt.Errorf("ranking store: db is not initialized")
 	}
-	// The per-contest lock serializes freeze and unfreeze, so an unfreeze sent
-	// while a snapshot is being captured waits for it and then wins.
+	// Reject overlapping changes so lock waiters cannot exhaust the shared pool.
 	lock, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin leaderboard freeze: %w", err)
 	}
 	defer lock.Rollback()
-	if _, err := lock.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('leaderboard_freeze:' || $1, 0))`, contestID); err != nil {
+	var acquired bool
+	if err := lock.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('leaderboard_freeze:' || $1, 0))`, contestID).Scan(&acquired); err != nil {
 		return fmt.Errorf("lock leaderboard freeze: %w", err)
+	}
+	if !acquired {
+		return common.ErrLeaderboardFreezeInProgress
 	}
 	if !frozen {
 		if _, err := lock.ExecContext(ctx, `DELETE FROM leaderboard_freezes WHERE contest_id = $1`, contestID); err != nil {

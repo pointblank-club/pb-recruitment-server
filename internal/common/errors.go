@@ -53,6 +53,7 @@ var (
 )
 
 var ErrLeaderboardFreezeUnavailable = errors.New("leaderboard freeze is unavailable until migration 000049 is applied")
+var ErrLeaderboardFreezeInProgress = errors.New("leaderboard freeze change in progress, try again")
 
 type BrowserSessionStaleError struct{ Generation int }
 
