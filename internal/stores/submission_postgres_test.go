@@ -402,9 +402,7 @@ func TestSubmissionExecutionDenominatorAndCompletedCount(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Exec Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
-	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{
-		ID: problem, ContestID: contest, Name: "Exec Problem", Type: models.Code, Score: 10,
-	}); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Exec Problem', 10, 'code')`, problem, contest); err != nil {
 		t.Fatal(err)
 	}
 
@@ -472,9 +470,7 @@ func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Backfill Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
-	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{
-		ID: problem, ContestID: contest, Name: "Backfill Problem", Type: models.Code, Score: 10,
-	}); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Backfill Problem', 10, 'code')`, problem, contest); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1,$2,0.00,0,false,false)`, contest, user); err != nil {

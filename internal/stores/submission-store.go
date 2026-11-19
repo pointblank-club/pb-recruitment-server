@@ -176,7 +176,7 @@ func (s *SubmissionStore) GetSubmissionTestCaseCounts(ctx context.Context, submi
 		tcr AS (
 			SELECT 
 				COUNT(*)::int AS total,
-				COUNT(*) FILTER (WHERE status = 'pass' OR status = 'accepted')::int AS passed
+				COUNT(*) FILTER (WHERE status::text IN ('pass', 'accepted'))::int AS passed
 			FROM test_case_results
 			WHERE submission_id = $1
 		)
