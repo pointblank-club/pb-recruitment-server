@@ -129,7 +129,8 @@ func TestDispatchOutagePreservesScoredWorkPostgres(t *testing.T) {
 				service.RecoverJudge0(ctx)
 			}
 			assertSubmission(t, db, sub, "accepted", 3, 0)
-			var score, results int
+			var score float64
+			var results int
 			if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
 				t.Fatal(score, err)
 			}

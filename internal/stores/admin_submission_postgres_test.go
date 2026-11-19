@@ -36,6 +36,9 @@ func TestListAdminSubmissionsEnumVerdictFilterPostgres(t *testing.T) {
 	if allCount != 3 || len(all) != 2 {
 		t.Fatalf("unfiltered page = %d items, count %d; want 2 items, count 3", len(all), allCount)
 	}
+	if all[0].MaxScore != 10 {
+		t.Fatalf("expected MaxScore 10, got %v", all[0].MaxScore)
+	}
 	accepted, acceptedCount, err := store.ListAdminSubmissions(ctx, contestID, "", "", "accepted", "", 0, 1)
 	if err != nil {
 		t.Fatalf("filtered list: %v", err)

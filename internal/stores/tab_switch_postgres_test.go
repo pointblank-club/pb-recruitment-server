@@ -306,9 +306,16 @@ func TestTabSwitchAdminResetGenerationAndDelayedReportsPostgres(t *testing.T) {
 		t.Fatalf("unexpected gen-2 result: %+v", okRes)
 	}
 
+	if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1, $2, 2.50, 1, false, false) ON CONFLICT(contest_id, user_id) DO UPDATE SET score=2.50`, contest, user); err != nil {
+		t.Fatal(err)
+	}
+
 	regs, err := cs.GetContestRegistrations(ctx, contest)
 	if err != nil || len(regs) != 1 {
 		t.Fatalf("GetContestRegistrations: len=%d err=%v", len(regs), err)
+	}
+	if regs[0].Score != 2.50 {
+		t.Fatalf("expected score 2.50, got %v", regs[0].Score)
 	}
 	if regs[0].ResetGeneration != 2 || regs[0].TabSwitchCount != 1 || regs[0].IsTabSwitchTerminated {
 		t.Fatalf("unexpected registration listing fields: %+v", regs[0])

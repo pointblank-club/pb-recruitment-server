@@ -3088,10 +3088,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Submission status",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_models_dto.GetSubmissionStatusResponse"
                         }
                     },
                     "401": {
@@ -3439,6 +3436,9 @@ const docTemplate = `{
                     "description": "For code submissions",
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -3455,6 +3455,9 @@ const docTemplate = `{
                 "runtime": {
                     "type": "integer"
                 },
+                "score": {
+                    "type": "number"
+                },
                 "status": {
                     "description": "e.g., \"Pending\", \"Accepted\", \"Wrong Answer\", etc.",
                     "allOf": [
@@ -3468,6 +3471,12 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/app_internal_models.TestCaseResult"
                     }
+                },
+                "test_cases_passed": {
+                    "type": "integer"
+                },
+                "total_test_cases": {
+                    "type": "integer"
                 },
                 "type": {
                     "$ref": "#/definitions/app_internal_models.SubmissionType"
@@ -3580,6 +3589,9 @@ const docTemplate = `{
                 "language": {
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -3597,6 +3609,9 @@ const docTemplate = `{
                 },
                 "runtime": {
                     "type": "integer"
+                },
+                "score": {
+                    "type": "number"
                 },
                 "status": {
                     "$ref": "#/definitions/app_internal_models.SubmissionStatus"
@@ -3636,6 +3651,9 @@ const docTemplate = `{
                 "language": {
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -3653,6 +3671,9 @@ const docTemplate = `{
                 },
                 "runtime": {
                     "type": "integer"
+                },
+                "score": {
+                    "type": "number"
                 },
                 "status": {
                     "$ref": "#/definitions/app_internal_models.SubmissionStatus"
@@ -3792,7 +3813,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "seb_not_detected": {
                     "type": "boolean"
@@ -4040,6 +4061,9 @@ const docTemplate = `{
                     "description": "For code submissions",
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -4056,6 +4080,9 @@ const docTemplate = `{
                 "runtime": {
                     "type": "integer"
                 },
+                "score": {
+                    "type": "number"
+                },
                 "status": {
                     "description": "e.g., \"Pending\", \"Accepted\", \"Wrong Answer\", etc.",
                     "allOf": [
@@ -4070,11 +4097,37 @@ const docTemplate = `{
                         "$ref": "#/definitions/app_internal_models.TestCaseResult"
                     }
                 },
+                "test_cases_passed": {
+                    "type": "integer"
+                },
+                "total_test_cases": {
+                    "type": "integer"
+                },
                 "type": {
                     "$ref": "#/definitions/app_internal_models.SubmissionType"
                 },
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.GetSubmissionStatusResponse": {
+            "type": "object",
+            "properties": {
+                "max_score": {
+                    "type": "number"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "status": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                },
+                "test_cases_passed": {
+                    "type": "integer"
+                },
+                "total_test_cases": {
+                    "type": "integer"
                 }
             }
         },
@@ -4097,7 +4150,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "total_score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "user_id": {
                     "type": "string"
@@ -4261,7 +4314,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "problem_id": {
                     "type": "string"
@@ -4270,7 +4323,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "solved_at": {
                     "type": "integer"

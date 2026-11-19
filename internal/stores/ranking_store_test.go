@@ -215,7 +215,6 @@ func TestConsolidatorIdempotency(t *testing.T) {
 	}
 }
 
-
 func TestLeaderboardCache(t *testing.T) {
 	store := NewRankingStore(nil)
 	store.SetCacheTTL(100 * time.Millisecond)

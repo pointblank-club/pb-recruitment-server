@@ -26,6 +26,12 @@ import (
 
 func postgresTestDB(t *testing.T) *sql.DB {
 	t.Helper()
+	return postgresTestDBBefore(t, "")
+}
+
+// postgresTestDBBefore applies migrations sorting before stop ("" applies all).
+func postgresTestDBBefore(t *testing.T, stop string) *sql.DB {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
@@ -55,6 +61,9 @@ func postgresTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("migration files: %v", err)
 	}
 	for _, path := range paths {
+		if stop != "" && filepath.Base(path) >= stop {
+			break
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -153,16 +162,16 @@ func TestJudge0FinalResults(t *testing.T) {
 			}
 
 			// Assert that ProcessFinal creates a ranking row with 0 score for non-accepted and full score for accepted
-			var rankingScore int
+			var rankingScore float64
 			if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&rankingScore); err != nil {
 				t.Fatalf("ranking row missing for verdict %s: %v", tc.verdict, err)
 			}
-			wantScore := 0
+			wantScore := 0.0
 			if tc.verdict == "accepted" {
-				wantScore = 10
+				wantScore = 10.0
 			}
 			if rankingScore != wantScore {
-				t.Fatalf("ranking score = %d, want %d for verdict %s", rankingScore, wantScore, tc.verdict)
+				t.Fatalf("ranking score = %v, want %v for verdict %s", rankingScore, wantScore, tc.verdict)
 			}
 		})
 	}
@@ -208,9 +217,9 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	var score int
+	var score float64
 	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
-		t.Fatalf("score = %d, %v", score, err)
+		t.Fatalf("score = %v, %v", score, err)
 	}
 	// The MCQ scorer shares the same ranking lock and must preserve the code score.
 	mcq := uuid.NewString()
@@ -239,7 +248,7 @@ func TestConcurrentExecutionScoring(t *testing.T) {
 		}
 	}
 	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 30 {
-		t.Fatalf("combined score = %d, %v", score, err)
+		t.Fatalf("combined score = %v, %v", score, err)
 	}
 }
 
@@ -402,7 +411,7 @@ func TestLeaderboardCachePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cachedResp.Entries[0].TotalScore != 50 {
-		t.Fatalf("expected cached score 50, got %d", cachedResp.Entries[0].TotalScore)
+		t.Fatalf("expected cached score 50, got %v", cachedResp.Entries[0].TotalScore)
 	}
 
 	// Page 5 (out of bounds, page >= max(totalPages, 1) which is 1)
@@ -423,6 +432,56 @@ func TestLeaderboardCachePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	if freshResp.Entries[0].TotalScore != 99 {
-		t.Fatalf("expected fresh score 99, got %d", freshResp.Entries[0].TotalScore)
+		t.Fatalf("expected fresh score 99, got %v", freshResp.Entries[0].TotalScore)
+	}
+}
+
+func TestPartialScoreJudgeErrorAndScoreEditPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+	finish := func(execs []models.Execution, statuses ...string) {
+		t.Helper()
+		for i, e := range execs {
+			if err := stores.NewExecutionStore(db).ProcessFinal(ctx, stores.FinalExecutionResult{ExecutionID: e.ID, Attempt: e.Attempt, Token: uuid.NewString(), Status: statuses[i]}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	score := func(q string, args ...any) (f float64) {
+		t.Helper()
+		if err := db.QueryRow(q, args...).Scan(&f); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	// 4/5 passed plus a judge error must not earn more than a clean 4/5 (2.50); it earns nothing.
+	user, contest, problem, sub, execs := executionFixture(t, db, 5)
+	finish(execs, "accepted", "accepted", "accepted", "wrong_answer", "judge_error")
+	if got := score(`SELECT score FROM submissions WHERE id=$1`, sub); got != 0 {
+		t.Fatalf("judge error set score = %.2f, want 0", got)
+	}
+
+	// After a problem score edit, callbacks, live leaderboard and consolidation agree.
+	_, execs = executionSubmission(t, db, user, contest, problem, 5)
+	finish(execs, "accepted", "accepted", "accepted", "accepted", "accepted")
+	if _, err := db.Exec(`UPDATE problems SET score=4 WHERE id=$1`, problem); err != nil {
+		t.Fatal(err)
+	}
+	_, execs = executionSubmission(t, db, user, contest, problem, 5)
+	finish(execs, "wrong_answer", "wrong_answer", "wrong_answer", "wrong_answer", "wrong_answer")
+	rankingQ := `SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`
+	rs := stores.NewRankingStore(db)
+	rs.SetCacheTTL(0)
+	live, err := rs.GetLiveLeaderboard(ctx, contest, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := score(rankingQ, contest, user)
+	if _, err := rs.ConsolidateContest(ctx, contest, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if consolidated := score(rankingQ, contest, user); callback != 4 || live.Entries[0].TotalScore != 4 || consolidated != 4 {
+		t.Fatalf("callback/live/consolidated = %.2f/%.2f/%.2f, want 4", callback, live.Entries[0].TotalScore, consolidated)
 	}
 }

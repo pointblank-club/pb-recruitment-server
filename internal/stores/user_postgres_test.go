@@ -49,4 +49,3 @@ func TestUpdateUserProfileDepartmentImmutablePostgres(t *testing.T) {
 		t.Fatalf("expected department to remain 'CSE', got %q", dept)
 	}
 }
-

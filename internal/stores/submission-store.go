@@ -62,22 +62,32 @@ func (s *SubmissionStore) GetUserProblemProgress(ctx context.Context, userID, co
 	return progress, nil
 }
 
+// testCaseCountsSQL selects passed and total test cases. An MCQ counts as one test
+// case; a code submission has one execution row per test case.
+const testCaseCountsSQL = `
+	CASE WHEN sub.type = 'mcq' THEN (sub.status = 'accepted')::int
+	     ELSE (SELECT COUNT(*) FILTER (WHERE e.status = 'accepted') FROM submission_executions e WHERE e.submission_id = sub.id)::int END,
+	CASE WHEN sub.type = 'mcq' THEN 1
+	     ELSE (SELECT COUNT(*) FROM submission_executions e WHERE e.submission_id = sub.id)::int END`
+
 func (s *SubmissionStore) GetSubmissionStatusByID(ctx context.Context, id string) (*models.Submission, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("submission store: db is not initialized")
 	}
 
 	const q = `
-		SELECT sub.status, sub.user_id, sub.type, sub.contest_id, c.end_time
+		SELECT sub.status, sub.user_id, sub.type, sub.contest_id, c.end_time,
+		       sub.problem_id, sub.score, p.score, ` + testCaseCountsSQL + `
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
+		JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 		WHERE sub.id = $1
 	`
 	var sub models.Submission
 	sub.ID = id
 
 	row := s.db.QueryRowContext(ctx, q, id)
-	if err := row.Scan(&sub.Status, &sub.UserID, &sub.Type, &sub.ContestID, &sub.ContestEndTime); err != nil {
+	if err := row.Scan(&sub.Status, &sub.UserID, &sub.Type, &sub.ContestID, &sub.ContestEndTime, &sub.ProblemID, &sub.Score, &sub.MaxScore, &sub.TestCasesPassed, &sub.TotalTestCases); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
 		}
@@ -94,10 +104,12 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 	}
 
 	const q = `
-		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.choices,
-		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time
+		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, COALESCE(sub.language, ''), sub.choices,
+		       sub.status, sub.created_at, COALESCE(sub.runtime, 0), COALESCE(sub.memory, 0), c.end_time, sub.score,
+		       p.score, ` + testCaseCountsSQL + `
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
+		JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 		WHERE sub.id = $1
 	`
 	var sub dto.GetSubmissionDetailsResponse
@@ -118,6 +130,10 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 		&sub.Runtime,
 		&sub.Memory,
 		&sub.ContestEndTime,
+		&sub.Score,
+		&sub.MaxScore,
+		&sub.TestCasesPassed,
+		&sub.TotalTestCases,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
@@ -131,10 +147,9 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 	testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, id)
 	if err != nil {
 		log.Printf("submission-store: failed to get test case results for submission ID %s: %v", id, err)
-		sub.TestCaseResults = []models.TestCaseResult{}
-	} else {
-		sub.TestCaseResults = testCaseResults
+		return nil, fmt.Errorf("get test case results: %w", err)
 	}
+	sub.TestCaseResults = testCaseResults
 
 	return &sub, nil
 }
@@ -191,10 +206,12 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 	offset := page * pageSize
 
 	const q = `
-		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.status,
-		       sub.created_at, sub.runtime, sub.memory, c.end_time
+		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, COALESCE(sub.language, ''), sub.status,
+		       sub.created_at, COALESCE(sub.runtime, 0), COALESCE(sub.memory, 0), c.end_time, sub.score,
+		       p.score, ` + testCaseCountsSQL + `
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
+		JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 		WHERE sub.user_id = $1 AND sub.problem_id = $2
 		ORDER BY sub.created_at DESC
 		LIMIT $3 OFFSET $4
@@ -222,9 +239,13 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 			&sub.Runtime,
 			&sub.Memory,
 			&sub.ContestEndTime,
+			&sub.Score,
+			&sub.MaxScore,
+			&sub.TestCasesPassed,
+			&sub.TotalTestCases,
 		); err != nil {
 			log.Printf("submission-store: failed to scan submission row: %v", err)
-			continue
+			return nil, fmt.Errorf("scan submission row: %w", err)
 		}
 		submissions = append(submissions, sub)
 	}
@@ -467,7 +488,7 @@ func (s *SubmissionStore) JudgeMCQ(ctx context.Context, submissionID string) (er
 	}
 
 	// The ranking row is also the per-contest/user lock. Taking this lock before
-	// checking earlier accepts makes concurrent correct attempts idempotent.
+	// recomputing the score serializes concurrent attempts by the same user.
 	const ensureRankingQ = `
 		INSERT INTO rankings (contest_id, user_id)
 		VALUES ($1, $2)
@@ -476,52 +497,32 @@ func (s *SubmissionStore) JudgeMCQ(ctx context.Context, submissionID string) (er
 	if _, err = tx.ExecContext(ctx, ensureRankingQ, contestID, userID); err != nil {
 		return fmt.Errorf("ensure ranking: %w", err)
 	}
-	var currentScore int
+	var lockedUser string
 	if err = tx.QueryRowContext(ctx, `
-		SELECT score
+		SELECT user_id
 		FROM rankings
 		WHERE contest_id = $1 AND user_id = $2
 		FOR UPDATE
-	`, contestID, userID).Scan(&currentScore); err != nil {
+	`, contestID, userID).Scan(&lockedUser); err != nil {
 		return fmt.Errorf("lock ranking: %w", err)
 	}
 
-	awardScore := false
+	mcqScore := 0.0
 	if result == models.Accepted {
-		const alreadySolvedQ = `
-			SELECT EXISTS (
-				SELECT 1
-				FROM submissions
-				WHERE user_id = $1
-				  AND contest_id = $2
-				  AND problem_id = $3
-				  AND status = 'accepted'
-				  AND id <> $4
-			)
-		`
-		var alreadySolved bool
-		if err = tx.QueryRowContext(ctx, alreadySolvedQ, userID, contestID, problemID, submissionID).Scan(&alreadySolved); err != nil {
-			return fmt.Errorf("check prior accepted MCQ submission: %w", err)
-		}
-		awardScore = !alreadySolved
+		mcqScore = float64(problemScore)
 	}
 
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE submissions
-		SET status = $2
+		SET status = $2, score = $3
 		WHERE id = $1 AND status = 'pending'
-	`, submissionID, result); err != nil {
+	`, submissionID, result, mcqScore); err != nil {
 		return fmt.Errorf("update MCQ submission status: %w", err)
 	}
 
-	if awardScore {
-		if _, err = tx.ExecContext(ctx, `
-			UPDATE rankings
-			SET score = score + $3
-			WHERE contest_id = $1 AND user_id = $2
-		`, contestID, userID, problemScore); err != nil {
-			return fmt.Errorf("award MCQ score: %w", err)
-		}
+	// Taking the best score per problem keeps repeated correct attempts idempotent.
+	if _, err = tx.ExecContext(ctx, recomputeRankingScoreQ, contestID, userID); err != nil {
+		return fmt.Errorf("update MCQ ranking score: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -725,6 +726,8 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			s.type,
 			COALESCE(s.language, ''),
 			s.status,
+			s.score,
+			COALESCE(p.score, 0),
 			s.created_at,
 			COALESCE(s.runtime, 0),
 			COALESCE(s.memory, 0),
@@ -762,6 +765,8 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			&item.Type,
 			&item.Language,
 			&item.Status,
+			&item.Score,
+			&item.MaxScore,
 			&item.CreatedAt,
 			&item.Runtime,
 			&item.Memory,
@@ -798,6 +803,8 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 			s.type,
 			COALESCE(s.language, ''),
 			s.status,
+			s.score,
+			COALESCE(p.score, 0),
 			s.created_at,
 			COALESCE(s.runtime, 0),
 			COALESCE(s.memory, 0),
@@ -822,6 +829,8 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 		&details.Type,
 		&details.Language,
 		&details.Status,
+		&details.Score,
+		&details.MaxScore,
 		&details.CreatedAt,
 		&details.Runtime,
 		&details.Memory,
