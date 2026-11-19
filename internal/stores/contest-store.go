@@ -800,6 +800,7 @@ func (s *ContestStore) SubmitFeedback(ctx context.Context, contestID string, use
 		SELECT end_time
 		FROM contests
 		WHERE id = $1
+		FOR SHARE
 	`
 	var endTime int64
 	if err := tx.QueryRowContext(ctx, contestTimingQ, contestID).Scan(&endTime); err != nil {
