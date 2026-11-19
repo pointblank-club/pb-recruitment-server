@@ -81,9 +81,8 @@ type serviceRankingTestStore struct {
 	updateFunc            func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
 	leaderboardFunc       func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
 	liveLeaderboardFunc   func(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error)
-	frozenLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, bool, error)
+	frozenLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
 	freezeStatus          bool
-	setFrozenFunc         func(ctx context.Context, contestID string, frozen bool, cutoff *int64) (bool, error)
 }
 
 func (s serviceRankingTestStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -120,18 +119,15 @@ func (s serviceRankingTestStore) GetLeaderboardFreezeStatus(context.Context, str
 	return s.freezeStatus, nil
 }
 
-func (s serviceRankingTestStore) GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, bool, error) {
+func (s serviceRankingTestStore) GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
 	if s.frozenLeaderboardFunc != nil {
 		return s.frozenLeaderboardFunc(ctx, contestID, page)
 	}
-	return nil, false, nil
+	return nil, nil
 }
 
-func (s serviceRankingTestStore) SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool, cutoff *int64) (bool, error) {
-	if s.setFrozenFunc != nil {
-		return s.setFrozenFunc(ctx, contestID, frozen, cutoff)
-	}
-	return frozen, nil
+func (s serviceRankingTestStore) SetLeaderboardFrozen(context.Context, string, bool, *int64) error {
+	return nil
 }
 
 func TestConsolidateContestService(t *testing.T) {
@@ -289,11 +285,11 @@ func TestGetLeaderboardRechecksFreezeAfterLiveFetch(t *testing.T) {
 				<-finishLiveFetch
 				return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1", TotalScore: 10}}}, nil
 			},
-			frozenLeaderboardFunc: func(context.Context, string, int) (*dto.GetLeaderboardResponse, bool, error) {
+			frozenLeaderboardFunc: func(context.Context, string, int) (*dto.GetLeaderboardResponse, error) {
 				if freezeCommitted {
-					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1", TotalScore: 0}}}, true, nil
+					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1", TotalScore: 0}}, Frozen: true}, nil
 				}
-				return nil, false, nil
+				return nil, nil
 			},
 		},
 	}

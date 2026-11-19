@@ -1133,7 +1133,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 // @Header       200 {string} X-Total-Count "Total count of leaderboard entries"
 // @Header       200 {string} X-Total-Pages "Total pages"
 // @Header       200 {string} X-Current-Page "Current page"
-// @Header       200 {string} X-Leaderboard-Frozen "Whether the public leaderboard is showing a frozen snapshot"
+// @Header       200 {string} X-Leaderboard-Frozen "Whether this response is the frozen public snapshot (always false for admins)"
 // @Failure      403 {object} map[string]string "Contest has not started yet"
 // @Failure      404 {object} map[string]string "Contest not found"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -1181,15 +1181,11 @@ func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
 	totalCountStr := strconv.Itoa(totalCount)
 	totalPagesStr := strconv.Itoa(totalPages)
 	currentPageStr := strconv.Itoa(leaderboard.Page)
-	frozenHeader := "false"
-	if leaderboard.Frozen {
-		frozenHeader = "true"
-	}
 
 	ctx.Response().Header().Set("X-Total-Count", totalCountStr)
 	ctx.Response().Header().Set("X-Total-Pages", totalPagesStr)
 	ctx.Response().Header().Set("X-Current-Page", currentPageStr)
-	ctx.Response().Header().Set("X-Leaderboard-Frozen", frozenHeader)
+	ctx.Response().Header().Set("X-Leaderboard-Frozen", strconv.FormatBool(leaderboard.Frozen))
 
 	entries := leaderboard.Entries
 	if entries == nil {

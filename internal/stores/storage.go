@@ -67,8 +67,8 @@ type Storage struct {
 		GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
 		GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error)
 		GetLeaderboardFreezeStatus(ctx context.Context, contestID string) (bool, error)
-		GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, bool, error)
-		SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool, mcqCutoff *int64) (bool, error)
+		GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+		SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool, mcqCutoff *int64) error
 		ConsolidateContest(ctx context.Context, contestID string, regradeMCQs bool, force bool) (*dto.ConsolidationResponse, error)
 		InvalidateCache(contestID string)
 	}

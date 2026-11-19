@@ -2574,7 +2574,7 @@ const docTemplate = `{
                             },
                             "X-Leaderboard-Frozen": {
                                 "type": "string",
-                                "description": "Whether the public leaderboard is showing a frozen snapshot"
+                                "description": "Whether this response is the frozen public snapshot (always false for admins)"
                             },
                             "X-Total-Count": {
                                 "type": "string",
