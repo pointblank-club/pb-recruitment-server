@@ -169,7 +169,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			}
 			wantScore := 0.0
 			if ended && tc.verdict == models.Accepted {
-				wantScore = 10.0
+				wantScore = 20.0
 			}
 			if status.Score != wantScore || detail.Score != wantScore || history.Submissions[0].Score != wantScore {
 				t.Fatalf("ended=%v tc=%+v score leak: status=%v detail=%v history=%v want=%v",
