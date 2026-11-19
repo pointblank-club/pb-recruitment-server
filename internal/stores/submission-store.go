@@ -206,8 +206,8 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 	offset := page * pageSize
 
 	const q = `
-		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.status,
-		       sub.created_at, sub.runtime, sub.memory, c.end_time, sub.score,
+		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, COALESCE(sub.language, ''), sub.status,
+		       sub.created_at, COALESCE(sub.runtime, 0), COALESCE(sub.memory, 0), c.end_time, sub.score,
 		       p.score, ` + testCaseCountsSQL + `
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
@@ -245,7 +245,7 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 			&sub.TotalTestCases,
 		); err != nil {
 			log.Printf("submission-store: failed to scan submission row: %v", err)
-			continue
+			return nil, fmt.Errorf("scan submission row: %w", err)
 		}
 		submissions = append(submissions, sub)
 	}

@@ -269,15 +269,10 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	if mcqCutoff != nil {
 		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
-		WITH code_first_solves AS (
-			SELECT user_id, problem_id, MIN(created_at) AS solved_at
-			FROM submissions
-			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
-			GROUP BY user_id, problem_id
-		),
-		code_scores AS (
+		WITH code_scores AS (
 			SELECT sub.user_id, sub.problem_id,
-			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS score
+			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS score,
+			       MIN(sub.created_at) FILTER (WHERE sub.status = 'accepted') AS solved_at
 			FROM submissions sub
 			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 			WHERE sub.contest_id = $1 AND sub.type = 'code' AND (sub.status = 'accepted' OR sub.score > 0)
@@ -286,9 +281,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		user_scores AS (
 			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time
 			FROM (
-				SELECT cs.user_id, cs.score, cfs.solved_at
-				FROM code_scores cs
-				LEFT JOIN code_first_solves cfs ON cfs.user_id = cs.user_id AND cfs.problem_id = cs.problem_id
+				SELECT user_id, score, solved_at FROM code_scores
 				UNION ALL
 				SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
 				WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
