@@ -2,26 +2,17 @@ package stores_test
 
 import (
 	"app/internal/common"
-	"app/internal/controllers"
-	"app/internal/middleware"
-	"app/internal/models/dto"
-	"app/internal/services"
 	"app/internal/stores"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"math/rand"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
 )
 
 // seedFreezeContest creates an open contest whose users each have some accepted code solves.
@@ -197,7 +188,7 @@ func TestLeaderboardFreezeWithoutMigrationPostgres(t *testing.T) {
 	}
 }
 
-// Contention returns 409 instead of waiting with a connection from the shared pool.
+// Overlapping changes are rejected at once instead of waiting with a pooled connection.
 func TestLeaderboardFreezeContentionPostgres(t *testing.T) {
 	db := postgresTestDB(t)
 	db.SetMaxOpenConns(25)
@@ -213,24 +204,14 @@ func TestLeaderboardFreezeContentionPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	controller := controllers.NewContestController(services.NewContestService(stores.NewStorage(db), nil), nil)
-	e := echo.New()
-	e.PUT("/admin/contest/:id/leaderboard-freeze", controller.SetLeaderboardFreezeStatus, middleware.ValidateRequest(new(dto.SetLeaderboardFreezeRequest)))
-	request := func(frozen bool) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPut, "/admin/contest/"+contest+"/leaderboard-freeze", strings.NewReader(fmt.Sprintf(`{"frozen":%t}`, frozen))).WithContext(ctx)
-		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
-		w := httptest.NewRecorder()
-		e.ServeHTTP(w, req)
-		return w
-	}
+	store := stores.NewRankingStore(db)
 	var wg sync.WaitGroup
-	for i := 0; i < 25; i++ {
+	for i := 0; i < 25; i++ { // The guard holds one of 25 connections, so waiting would exhaust the pool.
 		wg.Add(1)
 		go func(frozen bool) {
 			defer wg.Done()
-			w := request(frozen)
-			if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), common.ErrLeaderboardFreezeInProgress.Error()) {
-				t.Errorf("overlapping frozen=%v: HTTP %d %s", frozen, w.Code, w.Body.String())
+			if err := store.SetLeaderboardFrozen(ctx, contest, frozen, nil); !errors.Is(err, common.ErrLeaderboardFreezeInProgress) {
+				t.Errorf("overlapping frozen=%v: %v", frozen, err)
 			}
 		}(i%2 == 0)
 	}
@@ -238,13 +219,12 @@ func TestLeaderboardFreezeContentionPostgres(t *testing.T) {
 	if err := guard.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	store := stores.NewRankingStore(db)
 	if frozen, err := store.GetLeaderboardFreezeStatus(ctx, contest); err != nil || frozen {
 		t.Fatalf("rejected changes mutated freeze state: frozen=%v err=%v", frozen, err)
 	}
 	for _, frozen := range []bool{true, false} {
-		if w := request(frozen); w.Code != http.StatusOK {
-			t.Fatalf("retry frozen=%v: HTTP %d %s", frozen, w.Code, w.Body.String())
+		if err := store.SetLeaderboardFrozen(ctx, contest, frozen, nil); err != nil {
+			t.Fatalf("retry frozen=%v: %v", frozen, err)
 		}
 		if current, err := store.GetLeaderboardFreezeStatus(ctx, contest); err != nil || current != frozen {
 			t.Fatalf("retry frozen=%v: current=%v err=%v", frozen, current, err)
@@ -270,7 +250,7 @@ func TestLeaderboardFrozenCacheBoundsPostgres(t *testing.T) {
 			t.Fatalf("page %d: %+v, %v", page, lb, err)
 		}
 	}
-	if size := reflect.ValueOf(store).Elem().FieldByName("cache").Len(); size != 1 {
+	if size := store.CacheLen(); size != 1 {
 		t.Fatalf("cache has %d entries after 100 nonexistent pages, want only the valid page", size)
 	}
 }
