@@ -169,7 +169,11 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
-	return s.getLeaderboardUsing(ctx, s.db, contestID, page, mcqCutoff, true)
+	var queryer rankingQueryer
+	if s.db != nil {
+		queryer = s.db
+	}
+	return s.getLeaderboardUsing(ctx, queryer, contestID, page, mcqCutoff, true)
 }
 
 func (s *RankingStore) getLeaderboardUsing(ctx context.Context, queryer rankingQueryer, contestID string, page int, mcqCutoff *int64, useCache bool) (*dto.GetLeaderboardResponse, error) {
