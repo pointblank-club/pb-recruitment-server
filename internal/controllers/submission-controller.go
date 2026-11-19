@@ -133,7 +133,7 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 		Status:          sub.Status,
 		Score:           sub.Score,
 		MaxScore:        sub.MaxScore,
-		PassedTestCases: passedTestCases,
+		TestCasesPassed: passedTestCases,
 		TotalTestCases:  totalTestCases,
 	})
 }

@@ -4068,9 +4068,6 @@ const docTemplate = `{
                         "type": "integer"
                     }
                 },
-                "passed_test_cases": {
-                    "type": "integer"
-                },
                 "problem_id": {
                     "type": "string"
                 },
@@ -4094,6 +4091,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/app_internal_models.TestCaseResult"
                     }
                 },
+                "test_cases_passed": {
+                    "type": "integer"
+                },
                 "total_test_cases": {
                     "type": "integer"
                 },
@@ -4111,14 +4111,14 @@ const docTemplate = `{
                 "max_score": {
                     "type": "number"
                 },
-                "passed_test_cases": {
-                    "type": "integer"
-                },
                 "score": {
                     "type": "number"
                 },
                 "status": {
                     "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                },
+                "test_cases_passed": {
+                    "type": "integer"
                 },
                 "total_test_cases": {
                     "type": "integer"

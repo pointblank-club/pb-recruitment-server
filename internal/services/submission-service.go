@@ -67,6 +67,9 @@ func (ss *SubmissionService) GetSubmissionDetailsByID(ctx context.Context, id st
 		}
 	}
 	maskMCQVerdict(&sub.Submission)
+	if sub.Type == models.MCQ && sub.ContestEndTime >= time.Now().UnixMilli() {
+		sub.TestCasesPassed = 0
+	}
 	return sub, nil
 }
 

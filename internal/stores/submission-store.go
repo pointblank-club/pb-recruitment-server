@@ -149,12 +149,12 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 				passed++
 			}
 		}
-		sub.PassedTestCases = passed
+		sub.TestCasesPassed = passed
 		sub.TotalTestCases = len(sub.TestCaseResults)
 	} else if sub.Type == models.MCQ {
 		sub.TotalTestCases = 1
-		if sub.Status == models.Accepted {
-			sub.PassedTestCases = 1
+		if sub.ContestEndTime < time.Now().UnixMilli() && sub.Status == models.Accepted {
+			sub.TestCasesPassed = 1
 		}
 	}
 

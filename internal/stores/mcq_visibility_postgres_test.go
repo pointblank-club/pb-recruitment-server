@@ -168,12 +168,42 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 				t.Fatalf("ended=%v history=%+v err=%v", ended, history, err)
 			}
 			wantScore := 0.0
+			wantPassedCount := 0
 			if ended && tc.verdict == models.Accepted {
 				wantScore = 20.0
+				wantPassedCount = 1
 			}
 			if status.Score != wantScore || detail.Score != wantScore || history.Submissions[0].Score != wantScore {
 				t.Fatalf("ended=%v tc=%+v score leak: status=%v detail=%v history=%v want=%v",
 					ended, tc, status.Score, detail.Score, history.Submissions[0].Score, wantScore)
+			}
+			if status.TestCasesPassed != wantPassedCount || detail.TestCasesPassed != wantPassedCount {
+				t.Fatalf("ended=%v tc=%+v count leak: status=%v detail=%v want=%v",
+					ended, tc, status.TestCasesPassed, detail.TestCasesPassed, wantPassedCount)
+			}
+
+			// Cross-contract verification for frontend #85: expect test_cases_passed, never passed_test_cases.
+			var rawDetailMap map[string]interface{}
+			if err := json.Unmarshal(data, &rawDetailMap); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := rawDetailMap["passed_test_cases"]; exists {
+				t.Fatalf("cross-contract violation: GetSubmissionDetails returned legacy 'passed_test_cases' key")
+			}
+			if _, exists := rawDetailMap["test_cases_passed"]; !exists {
+				t.Fatalf("cross-contract violation: GetSubmissionDetails missing expected 'test_cases_passed' key")
+			}
+
+			statusData := request(sc.GetSubmissionStatus, tc.uid, tc.id, nil)
+			var rawStatusMap map[string]interface{}
+			if err := json.Unmarshal(statusData, &rawStatusMap); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := rawStatusMap["passed_test_cases"]; exists {
+				t.Fatalf("cross-contract violation: GetSubmissionStatus returned legacy 'passed_test_cases' key")
+			}
+			if _, exists := rawStatusMap["test_cases_passed"]; !exists {
+				t.Fatalf("cross-contract violation: GetSubmissionStatus missing expected 'test_cases_passed' key")
 			}
 			var problems []dto.ProblemOverview
 			if err := json.Unmarshal(request(cc.GetContestProblemsList, tc.uid, contest, nil), &problems); err != nil {

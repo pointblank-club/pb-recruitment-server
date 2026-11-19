@@ -29,14 +29,14 @@ type GetSubmissionStatusResponse struct {
 	Status          models.SubmissionStatus `json:"status"`
 	Score           float64                 `json:"score"`
 	MaxScore        float64                 `json:"max_score"`
-	PassedTestCases int                     `json:"passed_test_cases"`
+	TestCasesPassed int                     `json:"test_cases_passed"`
 	TotalTestCases  int                     `json:"total_test_cases"`
 }
 
 type GetSubmissionDetailsResponse struct {
 	models.Submission
 	Code            string `json:"code"`
-	PassedTestCases int    `json:"passed_test_cases"`
+	TestCasesPassed int    `json:"test_cases_passed"`
 	TotalTestCases  int    `json:"total_test_cases"`
 }
 
