@@ -709,7 +709,7 @@ func isCandidateFeedbackEligible(contest *dto.GetContestResponse, sessionStatus 
 	if contest == nil || sessionStatus == nil {
 		return false
 	}
-	return (contest.EndTime <= now) || sessionStatus.IsSessionEnded || sessionStatus.IsTabSwitchTerminated || sessionStatus.IsBrowserSessionTerminated
+	return (now > contest.EndTime) || sessionStatus.IsSessionEnded || sessionStatus.IsTabSwitchTerminated || sessionStatus.IsBrowserSessionTerminated
 }
 
 func (cs *ContestService) GetFeedbackStatus(ctx context.Context, contestID string, userID string) (*dto.FeedbackStatusResponse, error) {
@@ -746,32 +746,5 @@ func (cs *ContestService) SubmitFeedback(ctx context.Context, contestID string, 
 		return fmt.Errorf("contest service: contest store not initialized")
 	}
 
-	sessionStatus, err := cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
-	if err != nil {
-		return err
-	}
-
-	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now().UnixMilli()
-	if !isCandidateFeedbackEligible(contest, sessionStatus, now) {
-		return common.ErrContestSessionNotEnded
-	}
-
-	hasSubmitted, err := cs.stores.Contests.HasSubmittedFeedback(ctx, contestID, userID)
-	if err != nil {
-		return err
-	}
-	if hasSubmitted {
-		return common.ErrFeedbackAlreadySubmitted
-	}
-
-	if err := cs.stores.Contests.CreateFeedback(ctx, contestID, userID, fb); err != nil {
-		return err
-	}
-
-	return nil
+	return cs.stores.Contests.SubmitFeedback(ctx, contestID, userID, fb)
 }

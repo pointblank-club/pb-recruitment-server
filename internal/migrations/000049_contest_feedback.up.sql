@@ -21,5 +21,3 @@ CREATE TABLE IF NOT EXISTS contest_feedback (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT uq_contest_user_feedback UNIQUE (contest_id, user_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_contest_feedback_contest_id ON contest_feedback(contest_id);

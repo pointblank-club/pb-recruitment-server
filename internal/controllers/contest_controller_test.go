@@ -901,7 +901,22 @@ func TestEndContestSessionController(t *testing.T) {
 func TestFeedbackEndpointProtection(t *testing.T) {
 	now := time.Now().UnixMilli()
 
-	validBody := `{"platform_smoothness": 5, "thoughts_during_event": "Fun test"}`
+	validBody := `{
+		"platform_smoothness": 5,
+		"atmosphere_rating": 4,
+		"difficulty_rating": 3,
+		"responsiveness_rating": 4,
+		"time_rating": 5,
+		"thoughts_during_event": "Fun test",
+		"final_feedback": "Great contest overall",
+		"logistics_clarity": "Clear",
+		"logistics_punctuality": "On time",
+		"logistics_venue": "Good venue",
+		"best_thing": "Challenging problems",
+		"recommend_likelihood": "Highly likely",
+		"convinced_reasons": ["Good problems", "Great platform"],
+		"suggestions": "Keep it up"
+	}`
 
 	t.Run("rejects with 403 when candidate contest session is still active and contest is running", func(t *testing.T) {
 		storage := &stores.Storage{
@@ -1007,17 +1022,10 @@ func TestFeedbackEndpointProtection(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 400 when platform_smoothness is invalid", func(t *testing.T) {
-		storage := &stores.Storage{
-			Contests: submissionContestStore{
-				contest:        models.Contest{ID: "c1", StartTime: now - 7200, EndTime: now - 100},
-				registered:     true,
-				isSessionEnded: true,
-			},
-		}
-		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+	t.Run("returns 400 when payload is incomplete", func(t *testing.T) {
+		ctrl := NewContestController(services.NewContestService(&stores.Storage{Contests: submissionContestStore{}}, nil), nil)
 		e := echo.New()
-		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(`{"platform_smoothness": 10}`))
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(`{"platform_smoothness": 5}`))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		rec := httptest.NewRecorder()
 		ctx := e.NewContext(req, rec)
@@ -1033,17 +1041,51 @@ func TestFeedbackEndpointProtection(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 400 when optional rating is out of bounds", func(t *testing.T) {
-		storage := &stores.Storage{
-			Contests: submissionContestStore{
-				contest:        models.Contest{ID: "c1", StartTime: now - 7200000, EndTime: now - 100000},
-				registered:     true,
-				isSessionEnded: true,
-			},
-		}
-		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+	t.Run("returns 400 when text fields are whitespace only", func(t *testing.T) {
+		ctrl := NewContestController(services.NewContestService(&stores.Storage{Contests: submissionContestStore{}}, nil), nil)
 		e := echo.New()
-		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(`{"platform_smoothness": 5, "atmosphere_rating": 99}`))
+		body := strings.Replace(validBody, `"Fun test"`, `"   "`, 1)
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.SubmitFeedback(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected HTTP 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("returns 400 when other is selected without meaningful description", func(t *testing.T) {
+		ctrl := NewContestController(services.NewContestService(&stores.Storage{Contests: submissionContestStore{}}, nil), nil)
+		e := echo.New()
+		body := strings.Replace(validBody, `"Fun test"`, `"Other"`, 1)
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.SubmitFeedback(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected HTTP 400 Bad Request, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("returns 400 when reasons contain duplicate entries", func(t *testing.T) {
+		ctrl := NewContestController(services.NewContestService(&stores.Storage{Contests: submissionContestStore{}}, nil), nil)
+		e := echo.New()
+		body := strings.Replace(validBody, `["Good problems", "Great platform"]`, `["Good problems", "Good problems"]`, 1)
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(body))
 		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 		rec := httptest.NewRecorder()
 		ctx := e.NewContext(req, rec)

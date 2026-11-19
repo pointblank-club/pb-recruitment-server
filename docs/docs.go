@@ -5125,7 +5125,20 @@ const docTemplate = `{
         "app_internal_models_dto.SubmitFeedbackRequest": {
             "type": "object",
             "required": [
-                "platform_smoothness"
+                "atmosphere_rating",
+                "best_thing",
+                "convinced_reasons",
+                "difficulty_rating",
+                "final_feedback",
+                "logistics_clarity",
+                "logistics_punctuality",
+                "logistics_venue",
+                "platform_smoothness",
+                "recommend_likelihood",
+                "responsiveness_rating",
+                "suggestions",
+                "thoughts_during_event",
+                "time_rating"
             ],
             "properties": {
                 "atmosphere_rating": {
@@ -5134,13 +5147,17 @@ const docTemplate = `{
                     "minimum": 1
                 },
                 "best_thing": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 2000
                 },
                 "convinced_other": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1000
                 },
                 "convinced_reasons": {
                     "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
                     "items": {
                         "type": "string"
                     }
@@ -5151,16 +5168,20 @@ const docTemplate = `{
                     "minimum": 1
                 },
                 "final_feedback": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 5000
                 },
                 "logistics_clarity": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "logistics_punctuality": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "logistics_venue": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "platform_smoothness": {
                     "type": "integer",
@@ -5168,7 +5189,8 @@ const docTemplate = `{
                     "minimum": 1
                 },
                 "recommend_likelihood": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 200
                 },
                 "responsiveness_rating": {
                     "type": "integer",
@@ -5176,13 +5198,16 @@ const docTemplate = `{
                     "minimum": 1
                 },
                 "suggestions": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 5000
                 },
                 "thoughts_during_event": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1000
                 },
                 "thoughts_other": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 1000
                 },
                 "time_rating": {
                     "type": "integer",

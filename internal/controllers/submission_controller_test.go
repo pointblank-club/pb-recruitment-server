@@ -75,6 +75,23 @@ func (s submissionContestStore) HasSubmittedFeedback(context.Context, string, st
 	return s.hasSubmittedFeedback, s.err
 }
 
+func (s submissionContestStore) SubmitFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error {
+	if s.err != nil {
+		return s.err
+	}
+	if !s.registered {
+		return common.UserNotRegisteredError
+	}
+	if s.hasSubmittedFeedback {
+		return common.ErrFeedbackAlreadySubmitted
+	}
+	now := time.Now().UnixMilli()
+	if !s.isSessionEnded && now <= s.contest.EndTime {
+		return common.ErrContestSessionNotEnded
+	}
+	return nil
+}
+
 func (s submissionContestStore) CreateFeedback(context.Context, string, string, *dto.SubmitFeedbackRequest) error {
 	return s.err
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/gommon/log"
 	"github.com/lib/pq"
 )
@@ -757,12 +758,66 @@ func (s *ContestStore) HasSubmittedFeedback(ctx context.Context, contestID strin
 	return exists, nil
 }
 
-func (s *ContestStore) CreateFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error {
+func (s *ContestStore) SubmitFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("contest store: db is not initialized")
 	}
 
-	q := `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin submit feedback tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	// 1. Lock candidate registration row to serialize against concurrent resets/session changes
+	const lockRegQ = `
+		SELECT ended_at, COALESCE(is_tab_switch_terminated, FALSE), COALESCE(is_browser_session_terminated, FALSE)
+		FROM contest_registrations
+		WHERE contest_id = $1 AND user_id = $2
+		FOR UPDATE
+	`
+	var (
+		endedAt                    sql.NullInt64
+		isTabSwitchTerminated      bool
+		isBrowserSessionTerminated bool
+	)
+	if err := tx.QueryRowContext(ctx, lockRegQ, contestID, userID).Scan(&endedAt, &isTabSwitchTerminated, &isBrowserSessionTerminated); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			exists, existsErr := s.contestExists(ctx, tx, contestID)
+			if existsErr != nil {
+				return fmt.Errorf("check contest existence: %w", existsErr)
+			}
+			if !exists {
+				return common.ContestNotFoundError
+			}
+			return common.UserNotRegisteredError
+		}
+		return fmt.Errorf("lock registration for feedback: %w", err)
+	}
+
+	// 2. Validate contest timing inside the store transaction
+	const contestTimingQ = `
+		SELECT end_time
+		FROM contests
+		WHERE id = $1
+	`
+	var endTime int64
+	if err := tx.QueryRowContext(ctx, contestTimingQ, contestID).Scan(&endTime); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return common.ContestNotFoundError
+		}
+		return fmt.Errorf("check contest timing: %w", err)
+	}
+
+	// 3. Candidate is eligible only after contest ends (now > endTime) or after their session terminated
+	now := time.Now().UnixMilli()
+	isEligible := (now > endTime) || endedAt.Valid || isTabSwitchTerminated || isBrowserSessionTerminated
+	if !isEligible {
+		return common.ErrContestSessionNotEnded
+	}
+
+	// 4. Insert feedback. Both pgx (*pgconn.PgError) and lib/pq (*pq.Error) are checked for SQLSTATE 23505.
+	const insertQ = `
 		INSERT INTO contest_feedback (
 			contest_id, user_id, platform_smoothness,
 			atmosphere_rating, difficulty_rating, responsiveness_rating, time_rating,
@@ -780,7 +835,7 @@ func (s *ContestStore) CreateFeedback(ctx context.Context, contestID string, use
 		)
 	`
 
-	_, err := s.db.ExecContext(ctx, q,
+	_, err = tx.ExecContext(ctx, insertQ,
 		contestID, userID, fb.PlatformSmoothness,
 		fb.AtmosphereRating, fb.DifficultyRating, fb.ResponsivenessRating, fb.TimeRating,
 		fb.ThoughtsDuringEvent, fb.ThoughtsOther, fb.FinalFeedback,
@@ -789,11 +844,17 @@ func (s *ContestStore) CreateFeedback(ctx context.Context, contestID string, use
 		fb.Suggestions,
 	)
 	if err != nil {
+		var pgErr *pgconn.PgError
 		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+		if (errors.As(err, &pgErr) && pgErr.Code == "23505") || (errors.As(err, &pqErr) && pqErr.Code == "23505") {
 			return common.ErrFeedbackAlreadySubmitted
 		}
 		return fmt.Errorf("create feedback: %w", err)
 	}
-	return nil
+
+	return tx.Commit()
+}
+
+func (s *ContestStore) CreateFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error {
+	return s.SubmitFeedback(ctx, contestID, userID, fb)
 }

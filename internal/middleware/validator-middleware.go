@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"app/internal/common"
+	"app/internal/models/dto"
 	"errors"
 	"net/http"
 	"reflect"
@@ -37,6 +38,8 @@ func NewValidator() *CustomValidator {
 		return name
 	})
 
+	v.RegisterStructValidation(dto.ValidateSubmitFeedbackRequest, dto.SubmitFeedbackRequest{})
+
 	return &CustomValidator{
 		validator: v,
 	}
@@ -63,6 +66,10 @@ func ValidateRequest(i interface{}) echo.MiddlewareFunc {
 				return c.JSON(http.StatusBadRequest, map[string]string{
 					"error": "Invalid request format",
 				})
+			}
+
+			if trimmer, ok := req.(interface{ Trim() }); ok {
+				trimmer.Trim()
 			}
 
 			// Validate the struct
@@ -101,6 +108,10 @@ func Validate(c echo.Context, i interface{}) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "Invalid request format")
 	}
 
+	if trimmer, ok := i.(interface{ Trim() }); ok {
+		trimmer.Trim()
+	}
+
 	v := NewValidator()
 	if err := v.Validate(i); err != nil {
 		validationErrors := ValidationErrors{
@@ -125,6 +136,8 @@ func formatValidationError(err validator.FieldError) string {
 	switch err.Tag() {
 	case "required":
 		return "This field is required"
+	case "unique":
+		return "Field cannot contain duplicates"
 	case "email":
 		return "Invalid email address"
 	case "min":

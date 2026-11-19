@@ -1388,17 +1388,14 @@ func (cc *ContestController) SubmitFeedback(ctx echo.Context) error {
 	var req dto.SubmitFeedbackRequest
 	if reqBody, ok := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.SubmitFeedbackRequest); ok && reqBody != nil {
 		req = *reqBody
-	} else if err := ctx.Bind(&req); err != nil {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if req.PlatformSmoothness < 1 || req.PlatformSmoothness > 5 {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "platform_smoothness must be between 1 and 5"})
-	}
-	if (req.AtmosphereRating != nil && (*req.AtmosphereRating < 1 || *req.AtmosphereRating > 5)) ||
-		(req.DifficultyRating != nil && (*req.DifficultyRating < 1 || *req.DifficultyRating > 5)) ||
-		(req.ResponsivenessRating != nil && (*req.ResponsivenessRating < 1 || *req.ResponsivenessRating > 5)) ||
-		(req.TimeRating != nil && (*req.TimeRating < 1 || *req.TimeRating > 5)) {
-		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "ratings must be between 1 and 5"})
+	} else {
+		if err := ctx.Bind(&req); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		}
+		req.Trim()
+		if err := middleware.NewValidator().Validate(&req); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		}
 	}
 
 	err := cc.contestService.SubmitFeedback(ctx.Request().Context(), contestID, userID, &req)
