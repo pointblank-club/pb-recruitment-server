@@ -87,7 +87,7 @@ func waitForFreezeInsertLock(t *testing.T, db *sql.DB, ctx context.Context) {
 				WHERE datname = current_database()
 				  AND state = 'active'
 				  AND wait_event_type = 'Lock'
-				  AND ltrim(query) LIKE 'INSERT INTO leaderboard_freezes%'
+			  AND query ~ '^[[:space:]]*INSERT INTO leaderboard_freezes'
 			)
 		`).Scan(&waiting); err != nil {
 			t.Fatal(err)
