@@ -96,8 +96,8 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 	}
 
 	const q = `
-		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.choices,
-		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0),
+		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, COALESCE(sub.language, ''), sub.choices,
+		       sub.status, sub.created_at, COALESCE(sub.runtime, 0), COALESCE(sub.memory, 0), c.end_time, COALESCE(sub.score, 0),
 		       COALESCE(p.score, 0)
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id

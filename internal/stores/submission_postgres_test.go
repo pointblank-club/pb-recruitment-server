@@ -406,7 +406,7 @@ func TestSubmissionExecutionDenominatorAndCompletedCount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score) VALUES($1,$2,$3,$4,'code','pending',100,0.00)`, subID, user, contest, problem); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score, language) VALUES($1,$2,$3,$4,'code','pending',100,0.00,'python')`, subID, user, contest, problem); err != nil {
 		t.Fatal(err)
 	}
 
@@ -478,7 +478,7 @@ func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
 	}
 
 	// Historical submission: 3/5 passed, but status is wrong_answer and score is 0.00
-	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score) VALUES($1,$2,$3,$4,'code','wrong_answer',100,0.00)`, subID, user, contest, problem); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score, language) VALUES($1,$2,$3,$4,'code','wrong_answer',100,0.00,'python')`, subID, user, contest, problem); err != nil {
 		t.Fatal(err)
 	}
 
