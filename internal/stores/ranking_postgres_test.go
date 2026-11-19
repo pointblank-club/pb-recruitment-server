@@ -603,3 +603,87 @@ func TestCodeLeaderboardFinishTimeTieBreakPostgres(t *testing.T) {
 
 	assertCodeOrder("after repeat submission at 5000")
 }
+
+func TestPartialAttemptDoesNotStealAcceptedFinishTimePostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	userA, userB := uuid.NewString(), uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+
+	for _, u := range []struct {
+		id   string
+		name string
+	}{
+		{userA, "User A"},
+		{userB, "User B"},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id, name, email, usn, current_year, department) VALUES($1, $2, $3, $1, 1, 'CS')`, u.id, u.name, u.id+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id, name, description, registration_start_time, registration_end_time, start_time, end_time) VALUES($1, 'TieBreak Contest', '', 1, $2, $3, $2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Problem 1', 100, 'code')`, problem, contest); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, u := range []string{userA, userB} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1, $2, 100, 0, false, false)`, contest, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// User A has partial at 100 (score 50), and full solve at 300 (score 100)
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'wrong_answer', 50, 100)`, uuid.NewString(), userA, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 100, 300)`, uuid.NewString(), userA, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	// User B has full solve at 200 (score 100)
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 100, 200)`, uuid.NewString(), userB, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	rankingStore := stores.NewRankingStore(db)
+
+	// In live leaderboard, User B (solve time 200) must beat User A (solve time 300)
+	lb, err := rankingStore.GetLiveLeaderboard(ctx, contest, 0, 0)
+	if err != nil {
+		t.Fatalf("GetLiveLeaderboard failed: %v", err)
+	}
+	if len(lb.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(lb.Entries))
+	}
+	if lb.Entries[0].UserID != userB || lb.Entries[0].Rank != 1 {
+		t.Errorf("live leaderboard: expected User B rank 1, got user %s rank %d", lb.Entries[0].UserID, lb.Entries[0].Rank)
+	}
+	if lb.Entries[1].UserID != userA || lb.Entries[1].Rank != 2 {
+		t.Errorf("live leaderboard: expected User A rank 2, got user %s rank %d", lb.Entries[1].UserID, lb.Entries[1].Rank)
+	}
+
+	// Run consolidation
+	if _, err := rankingStore.ConsolidateContest(ctx, contest, false, true); err != nil {
+		t.Fatalf("ConsolidateContest failed: %v", err)
+	}
+	rankingStore.InvalidateCache(contest)
+
+	consLB, err := rankingStore.GetLiveLeaderboard(ctx, contest, 0, 0)
+	if err != nil {
+		t.Fatalf("GetLiveLeaderboard after consolidation failed: %v", err)
+	}
+	if consLB.Entries[0].UserID != userB || consLB.Entries[0].Rank != 1 {
+		t.Errorf("consolidated leaderboard: expected User B rank 1, got user %s rank %d", consLB.Entries[0].UserID, consLB.Entries[0].Rank)
+	}
+	if consLB.Entries[1].UserID != userA || consLB.Entries[1].Rank != 2 {
+		t.Errorf("consolidated leaderboard: expected User A rank 2, got user %s rank %d", consLB.Entries[1].UserID, consLB.Entries[1].Rank)
+	}
+}

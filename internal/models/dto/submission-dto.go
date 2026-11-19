@@ -25,9 +25,19 @@ type ListProblemSubmissionsResponse struct {
 	Submissions []models.Submission `json:"submissions"`
 }
 
+type GetSubmissionStatusResponse struct {
+	Status          models.SubmissionStatus `json:"status"`
+	Score           float64                 `json:"score"`
+	MaxScore        float64                 `json:"max_score"`
+	PassedTestCases int                     `json:"passed_test_cases"`
+	TotalTestCases  int                     `json:"total_test_cases"`
+}
+
 type GetSubmissionDetailsResponse struct {
 	models.Submission
-	Code string `json:"code"`
+	Code            string `json:"code"`
+	PassedTestCases int    `json:"passed_test_cases"`
+	TotalTestCases  int    `json:"total_test_cases"`
 }
 
 type AdminSubmissionItem struct {
@@ -42,6 +52,7 @@ type AdminSubmissionItem struct {
 	Language    string                  `json:"language"`
 	Status      models.SubmissionStatus `json:"status"`
 	Score       float64                 `json:"score"`
+	MaxScore    float64                 `json:"max_score"`
 	CreatedAt   int64                   `json:"created_at"`
 	Runtime     int64                   `json:"runtime"`
 	Memory      int64                   `json:"memory"`

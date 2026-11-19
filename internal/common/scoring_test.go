@@ -69,6 +69,10 @@ func TestCalculateCodePartialScore(t *testing.T) {
 		{"N=7 passed 5 score 33", 5, 7, 33, 11.0},
 		{"N=7 passed 6 score 33", 6, 7, 33, 16.5},
 		{"N=7 passed 7 score 33", 7, 7, 33, 33.0},
+
+		// Precision test from review: K=23, N=41, max=101
+		// 3 / 20 * 0.50 * 101 = 303 / 40 = 7.575 -> 7.58
+		{"N=41 passed 23 score 101 rational rounding", 23, 41, 101, 7.58},
 	}
 
 	for _, tt := range tests {

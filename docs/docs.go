@@ -3088,10 +3088,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Submission status",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/app_internal_models_dto.GetSubmissionStatusResponse"
                         }
                     },
                     "401": {
@@ -3439,6 +3436,9 @@ const docTemplate = `{
                     "description": "For code submissions",
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -3583,6 +3583,9 @@ const docTemplate = `{
                 "language": {
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -3641,6 +3644,9 @@ const docTemplate = `{
                 },
                 "language": {
                     "type": "string"
+                },
+                "max_score": {
+                    "type": "number"
                 },
                 "memory": {
                     "type": "integer"
@@ -3801,7 +3807,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "score": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "seb_not_detected": {
                     "type": "boolean"
@@ -4049,6 +4055,9 @@ const docTemplate = `{
                     "description": "For code submissions",
                     "type": "string"
                 },
+                "max_score": {
+                    "type": "number"
+                },
                 "memory": {
                     "type": "integer"
                 },
@@ -4058,6 +4067,9 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
+                },
+                "passed_test_cases": {
+                    "type": "integer"
                 },
                 "problem_id": {
                     "type": "string"
@@ -4082,11 +4094,34 @@ const docTemplate = `{
                         "$ref": "#/definitions/app_internal_models.TestCaseResult"
                     }
                 },
+                "total_test_cases": {
+                    "type": "integer"
+                },
                 "type": {
                     "$ref": "#/definitions/app_internal_models.SubmissionType"
                 },
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.GetSubmissionStatusResponse": {
+            "type": "object",
+            "properties": {
+                "max_score": {
+                    "type": "number"
+                },
+                "passed_test_cases": {
+                    "type": "integer"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "status": {
+                    "$ref": "#/definitions/app_internal_models.SubmissionStatus"
+                },
+                "total_test_cases": {
+                    "type": "integer"
                 }
             }
         },

@@ -375,7 +375,7 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.EndedAt, &reg.SEBNotDetected, &reg.IsBrowserSessionTerminated, &reg.BrowserSessionCount, &reg.BrowserSessionGeneration,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
-			continue
+			return nil, fmt.Errorf("scan registration row: %w", err)
 		}
 		registrations = append(registrations, reg)
 	}

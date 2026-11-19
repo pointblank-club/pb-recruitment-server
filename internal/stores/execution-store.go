@@ -210,6 +210,9 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 			verdict = "accepted"
 		}
 		subScore := common.CalculateCodePartialScore(passedCount, totalCount, problemScore)
+		if verdict == string(models.JudgeError) {
+			subScore = 0.0
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE submissions SET status=$2,runtime=$3,memory=$4,score=$5 WHERE id=$1 AND status='pending'`, subID, verdict, totalRuntime, totalMemory, subScore)
 		if err != nil {
 			return err

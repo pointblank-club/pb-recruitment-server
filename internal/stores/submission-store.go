@@ -68,16 +68,18 @@ func (s *SubmissionStore) GetSubmissionStatusByID(ctx context.Context, id string
 	}
 
 	const q = `
-		SELECT sub.status, sub.user_id, sub.type, sub.contest_id, c.end_time
+		SELECT sub.status, sub.user_id, sub.type, sub.contest_id, c.end_time,
+		       sub.problem_id, COALESCE(sub.score, 0), COALESCE(p.score, 0)
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
+		LEFT JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 		WHERE sub.id = $1
 	`
 	var sub models.Submission
 	sub.ID = id
 
 	row := s.db.QueryRowContext(ctx, q, id)
-	if err := row.Scan(&sub.Status, &sub.UserID, &sub.Type, &sub.ContestID, &sub.ContestEndTime); err != nil {
+	if err := row.Scan(&sub.Status, &sub.UserID, &sub.Type, &sub.ContestID, &sub.ContestEndTime, &sub.ProblemID, &sub.Score, &sub.MaxScore); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
 		}
@@ -95,9 +97,11 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 
 	const q = `
 		SELECT sub.user_id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.choices,
-		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0)
+		       sub.status, sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0),
+		       COALESCE(p.score, 0)
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
+		LEFT JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 		WHERE sub.id = $1
 	`
 	var sub dto.GetSubmissionDetailsResponse
@@ -119,6 +123,7 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 		&sub.Memory,
 		&sub.ContestEndTime,
 		&sub.Score,
+		&sub.MaxScore,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, common.ErrNotFound
@@ -135,6 +140,22 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 		sub.TestCaseResults = []models.TestCaseResult{}
 	} else {
 		sub.TestCaseResults = testCaseResults
+	}
+
+	if sub.Type == models.Code {
+		passed := 0
+		for _, tc := range sub.TestCaseResults {
+			if tc.Status == "pass" || tc.Status == "accepted" {
+				passed++
+			}
+		}
+		sub.PassedTestCases = passed
+		sub.TotalTestCases = len(sub.TestCaseResults)
+	} else if sub.Type == models.MCQ {
+		sub.TotalTestCases = 1
+		if sub.Status == models.Accepted {
+			sub.PassedTestCases = 1
+		}
 	}
 
 	return &sub, nil
@@ -193,9 +214,11 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 
 	const q = `
 		SELECT sub.id, sub.contest_id, sub.problem_id, sub.type, sub.language, sub.status,
-		       sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0)
+		       sub.created_at, sub.runtime, sub.memory, c.end_time, COALESCE(sub.score, 0),
+		       COALESCE(p.score, 0)
 		FROM submissions sub
 		JOIN contests c ON c.id = sub.contest_id
+		LEFT JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 		WHERE sub.user_id = $1 AND sub.problem_id = $2
 		ORDER BY sub.created_at DESC
 		LIMIT $3 OFFSET $4
@@ -224,6 +247,7 @@ func (s *SubmissionStore) ListUserSubmissionsByProblemID(ctx context.Context, us
 			&sub.Memory,
 			&sub.ContestEndTime,
 			&sub.Score,
+			&sub.MaxScore,
 		); err != nil {
 			log.Printf("submission-store: failed to scan submission row: %v", err)
 			continue
@@ -733,6 +757,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			COALESCE(s.language, ''),
 			s.status,
 			COALESCE(s.score, 0),
+			COALESCE(p.score, 0),
 			s.created_at,
 			COALESCE(s.runtime, 0),
 			COALESCE(s.memory, 0),
@@ -771,6 +796,7 @@ func (s *SubmissionStore) ListAdminSubmissions(ctx context.Context, contestID, u
 			&item.Language,
 			&item.Status,
 			&item.Score,
+			&item.MaxScore,
 			&item.CreatedAt,
 			&item.Runtime,
 			&item.Memory,
@@ -808,6 +834,7 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 			COALESCE(s.language, ''),
 			s.status,
 			COALESCE(s.score, 0),
+			COALESCE(p.score, 0),
 			s.created_at,
 			COALESCE(s.runtime, 0),
 			COALESCE(s.memory, 0),
@@ -833,6 +860,7 @@ func (s *SubmissionStore) GetAdminSubmissionDetails(ctx context.Context, submiss
 		&details.Language,
 		&details.Status,
 		&details.Score,
+		&details.MaxScore,
 		&details.CreatedAt,
 		&details.Runtime,
 		&details.Memory,

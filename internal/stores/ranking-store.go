@@ -230,11 +230,29 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	entriesQ := `
-		WITH first_solves AS (
-			SELECT user_id, problem_id, MIN(created_at) AS solved_at
-			FROM submissions
-			WHERE contest_id = $1 AND (status = 'accepted' OR score > 0)
-			GROUP BY user_id, problem_id
+		WITH problem_summary AS (
+			SELECT sub.user_id, sub.problem_id,
+			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS max_score,
+			       MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at END) AS earliest_accepted
+			FROM submissions sub
+			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
+			WHERE sub.contest_id = $1 AND (sub.status = 'accepted' OR sub.score > 0)
+			GROUP BY sub.user_id, sub.problem_id
+		),
+		first_solves AS (
+			SELECT ps.user_id, ps.problem_id,
+			       COALESCE(
+			           ps.earliest_accepted,
+			           (
+			               SELECT MIN(s2.created_at)
+			               FROM submissions s2
+			               WHERE s2.contest_id = $1
+			                 AND s2.user_id = ps.user_id
+			                 AND s2.problem_id = ps.problem_id
+			                 AND s2.score = ps.max_score
+			           )
+			       ) AS solved_at
+			FROM problem_summary ps
 		),
 		user_solve_time AS (
 			SELECT user_id, MAX(solved_at) AS last_solve_time
@@ -270,14 +288,29 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	if mcqCutoff != nil {
 		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
-		WITH first_solves AS (
+		WITH problem_summary AS (
 			SELECT sub.user_id, sub.problem_id,
-			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS score,
-			       MIN(sub.created_at) AS solved_at
+			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS max_score,
+			       MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at END) AS earliest_accepted
 			FROM submissions sub
 			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 			WHERE sub.contest_id = $1 AND sub.type = 'code' AND (sub.status = 'accepted' OR sub.score > 0)
 			GROUP BY sub.user_id, sub.problem_id
+		),
+		first_solves AS (
+			SELECT ps.user_id, ps.problem_id, ps.max_score AS score,
+			       COALESCE(
+			           ps.earliest_accepted,
+			           (
+			               SELECT MIN(s2.created_at)
+			               FROM submissions s2
+			               WHERE s2.contest_id = $1
+			                 AND s2.user_id = ps.user_id
+			                 AND s2.problem_id = ps.problem_id
+			                 AND s2.score = ps.max_score
+			           )
+			       ) AS solved_at
+			FROM problem_summary ps
 		),
 		user_scores AS (
 			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time

@@ -46,6 +46,7 @@ type Submission struct {
 	Status          SubmissionStatus `json:"status,omitempty"`   // e.g., "Pending", "Accepted", "Wrong Answer", etc.
 	CreatedAt       int64            `json:"created_at"`         // Unix timestamp
 	Score           float64          `json:"score"`
+	MaxScore        float64          `json:"max_score,omitempty"`
 	Runtime         int64            `json:"runtime,omitempty"`
 	Memory          int64            `json:"memory,omitempty"`
 	TestCaseResults []TestCaseResult `json:"test_case_results,omitempty"`

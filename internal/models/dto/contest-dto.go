@@ -35,24 +35,24 @@ const (
 )
 
 type ContestRegistration struct {
-	UserID                     string `json:"user_id"`
-	Name                       string `json:"name"`
-	Email                      string `json:"email"`
-	USN                        string `json:"usn"`
-	Department                 string `json:"department"`
-	CurrentYear                int    `json:"current_year"`
-	RegisteredAt               int64  `json:"registered_at"`
-	Score                      int    `json:"score"`
-	Hidden                     bool   `json:"hidden"`
-	Disqualified               bool   `json:"disqualified"`
-	TabSwitchCount             int    `json:"tab_switch_count"`
-	IsTabSwitchTerminated      bool   `json:"is_tab_switch_terminated"`
-	ResetGeneration            int    `json:"reset_generation"`
-	EndedAt                    *int64 `json:"ended_at,omitempty"`
-	SEBNotDetected             bool   `json:"seb_not_detected"`
-	BrowserSessionCount        int    `json:"browser_session_count"`
-	BrowserSessionGeneration   int    `json:"browser_session_generation"`
-	IsBrowserSessionTerminated bool   `json:"is_browser_session_terminated"`
+	UserID                     string  `json:"user_id"`
+	Name                       string  `json:"name"`
+	Email                      string  `json:"email"`
+	USN                        string  `json:"usn"`
+	Department                 string  `json:"department"`
+	CurrentYear                int     `json:"current_year"`
+	RegisteredAt               int64   `json:"registered_at"`
+	Score                      float64 `json:"score"`
+	Hidden                     bool    `json:"hidden"`
+	Disqualified               bool    `json:"disqualified"`
+	TabSwitchCount             int     `json:"tab_switch_count"`
+	IsTabSwitchTerminated      bool    `json:"is_tab_switch_terminated"`
+	ResetGeneration            int     `json:"reset_generation"`
+	EndedAt                    *int64  `json:"ended_at,omitempty"`
+	SEBNotDetected             bool    `json:"seb_not_detected"`
+	BrowserSessionCount        int     `json:"browser_session_count"`
+	BrowserSessionGeneration   int     `json:"browser_session_generation"`
+	IsBrowserSessionTerminated bool    `json:"is_browser_session_terminated"`
 }
 
 // TabSwitchRequest represents the payload for reporting a tab switch event.

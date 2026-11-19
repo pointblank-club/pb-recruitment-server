@@ -154,9 +154,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			if ended {
 				wantStatus, wantProgress = tc.verdict, tc.progress
 			}
-			var status struct {
-				Status models.SubmissionStatus `json:"status"`
-			}
+			var status dto.GetSubmissionStatusResponse
 			if err := json.Unmarshal(request(sc.GetSubmissionStatus, tc.uid, tc.id, nil), &status); err != nil || status.Status != wantStatus {
 				t.Fatalf("ended=%v status=%+v err=%v", ended, status, err)
 			}
@@ -168,6 +166,14 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			var history dto.ListProblemSubmissionsResponse
 			if err := json.Unmarshal(request(sc.ListUserSubmissions, tc.uid, "", &dto.ListProblemSubmissionsRequest{ProblemID: mcqProblem}), &history); err != nil || len(history.Submissions) != 1 || history.Submissions[0].Status != wantStatus {
 				t.Fatalf("ended=%v history=%+v err=%v", ended, history, err)
+			}
+			wantScore := 0.0
+			if ended && tc.verdict == models.Accepted {
+				wantScore = 10.0
+			}
+			if status.Score != wantScore || detail.Score != wantScore || history.Submissions[0].Score != wantScore {
+				t.Fatalf("ended=%v tc=%+v score leak: status=%v detail=%v history=%v want=%v",
+					ended, tc, status.Score, detail.Score, history.Submissions[0].Score, wantScore)
 			}
 			var problems []dto.ProblemOverview
 			if err := json.Unmarshal(request(cc.GetContestProblemsList, tc.uid, contest, nil), &problems); err != nil {

@@ -86,7 +86,7 @@ func (sc *SubmissionController) Judge0Callback(c echo.Context) error {
 // @Produce      json
 // @Security     BearerAuth
 // @Param        id path string true "Submission ID"
-// @Success      200 {object} map[string]string "Submission status"
+// @Success      200 {object} dto.GetSubmissionStatusResponse "Submission status"
 // @Failure      401 {object} map[string]string "Unauthorized"
 // @Failure      403 "Forbidden"
 // @Failure      404 "Submission not found"
@@ -112,8 +112,29 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusForbidden)
 	}
 
-	return ctx.JSON(http.StatusOK, map[string]string{
-		"status": string(sub.Status),
+	passedTestCases := 0
+	totalTestCases := 0
+	if sub.Type == models.Code {
+		tcResults, _ := sc.submissionService.GetTestCaseResultsBySubmissionID(ctx.Request().Context(), sub.ID)
+		for _, tc := range tcResults {
+			if tc.Status == "pass" || tc.Status == "accepted" {
+				passedTestCases++
+			}
+		}
+		totalTestCases = len(tcResults)
+	} else if sub.Type == models.MCQ {
+		totalTestCases = 1
+		if sub.Status == models.Accepted {
+			passedTestCases = 1
+		}
+	}
+
+	return ctx.JSON(http.StatusOK, dto.GetSubmissionStatusResponse{
+		Status:          sub.Status,
+		Score:           sub.Score,
+		MaxScore:        sub.MaxScore,
+		PassedTestCases: passedTestCases,
+		TotalTestCases:  totalTestCases,
 	})
 }
 
