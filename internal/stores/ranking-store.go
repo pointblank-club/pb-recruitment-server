@@ -155,6 +155,8 @@ func (s *RankingStore) UpdateLeaderboardUser(ctx context.Context, contestID stri
 }
 
 const leaderboardPageSize = 20
+const leaderboardFreezeMaxAttempts = 4
+const leaderboardFreezeRetryDelay = 10 * time.Millisecond
 
 func (s *RankingStore) GetLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
 	return s.getLeaderboard(ctx, contestID, page, nil)
@@ -497,6 +499,29 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 			return false, err
 		}
 	}
+	for attempt := 0; attempt < leaderboardFreezeMaxAttempts; attempt++ {
+		result, err := s.setLeaderboardFrozenTransaction(ctx, contestID, frozen, mcqCutoff)
+		if err == nil || !isSerializationFailure(err) {
+			return result, err
+		}
+		if attempt == leaderboardFreezeMaxAttempts-1 {
+			return false, err
+		}
+		delay := leaderboardFreezeRetryDelay * time.Duration(1<<attempt)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false, fmt.Errorf("retry leaderboard freeze transaction: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+	return false, fmt.Errorf("leaderboard freeze transaction exhausted retries")
+}
+
+// Each attempt captures every leaderboard page in one repeatable-read transaction.
+// A serialization failure discards the entire capture and starts with a fresh snapshot.
+func (s *RankingStore) setLeaderboardFrozenTransaction(ctx context.Context, contestID string, frozen bool, mcqCutoff *int64) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return false, fmt.Errorf("begin leaderboard freeze transaction: %w", err)
@@ -542,11 +567,6 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 		return false, nil
 	}
 
-	if mcqCutoff != nil {
-		if err := s.freezeMCQBatchUsing(ctx, tx, contestID, *mcqCutoff); err != nil {
-			return false, err
-		}
-	}
 	firstPage, err := s.getLeaderboardUsing(ctx, tx, contestID, 0, mcqCutoff, false)
 	if err != nil {
 		return false, fmt.Errorf("capture leaderboard snapshot: %w", err)
@@ -587,6 +607,15 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 func isMissingRelation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
+}
+
+func isSerializationFailure(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "40001"
+	}
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == "40001"
 }
 
 // summarizeSolves reports how many problems the user solved and the time at

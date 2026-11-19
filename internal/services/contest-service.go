@@ -8,6 +8,7 @@ import (
 	"app/internal/stores"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -299,6 +300,7 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 		return nil, common.ErrContestNotStarted
 	}
 	var res *dto.GetLeaderboardResponse
+	shouldRecheckFreeze := false
 	if !isAdmin {
 		frozen, err := cs.stores.Rankings.GetLeaderboardFreezeStatus(ctx, contestID)
 		if err != nil && err != common.ErrLeaderboardFreezeUnavailable {
@@ -315,13 +317,25 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 		}
 	}
 	if res == nil && !isAdmin && contest.GetRunningStatus() == models.ContestRunningOpen {
+		shouldRecheckFreeze = true
 		cutoff := mcqLeaderboardCutoff(contest.StartTime, time.Now().UnixMilli())
 		res, err = cs.stores.Rankings.GetLiveLeaderboard(ctx, contestID, page, cutoff)
 	} else if res == nil {
+		shouldRecheckFreeze = !isAdmin
 		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
 	}
 	if err != nil {
 		return nil, err
+	}
+	if shouldRecheckFreeze {
+		frozenResult, frozen, freezeErr := cs.stores.Rankings.GetFrozenLeaderboard(ctx, contestID, page)
+		if freezeErr != nil && !errors.Is(freezeErr, common.ErrLeaderboardFreezeUnavailable) {
+			return nil, freezeErr
+		}
+		if frozen && frozenResult != nil {
+			frozenResult.Frozen = true
+			res = frozenResult
+		}
 	}
 	if !isAdmin {
 		sanitizedEntries := make([]dto.LeaderboardEntry, len(res.Entries))

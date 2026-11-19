@@ -6,13 +6,104 @@ import (
 	"app/internal/models/dto"
 	"app/internal/stores"
 	"context"
+	"database/sql"
 	"errors"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 )
+
+type freezeLockTraceKey struct{}
+
+type freezeTransactionGate struct {
+	entered        chan struct{}
+	release        chan struct{}
+	lockOnce       sync.Once
+	mu             sync.Mutex
+	insertAttempts int
+}
+
+func (g *freezeTransactionGate) TraceQueryStart(ctx context.Context, _ *pgx.Conn, query pgx.TraceQueryStartData) context.Context {
+	sql := strings.ToLower(strings.TrimSpace(query.SQL))
+	if strings.HasPrefix(sql, "insert into leaderboard_freezes") {
+		g.mu.Lock()
+		g.insertAttempts++
+		g.mu.Unlock()
+	}
+	if strings.Contains(sql, "select frozen, version") && strings.Contains(sql, "for update") {
+		return context.WithValue(ctx, freezeLockTraceKey{}, true)
+	}
+	return ctx
+}
+
+func (g *freezeTransactionGate) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryEndData) {
+	if gated, _ := ctx.Value(freezeLockTraceKey{}).(bool); gated {
+		g.lockOnce.Do(func() {
+			close(g.entered)
+			<-g.release
+		})
+	}
+}
+
+func freezeConcurrencyDB(t *testing.T, baseDB *sql.DB, gate *freezeTransactionGate) *sql.DB {
+	t.Helper()
+	config, err := pgx.ParseConfig(os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema string
+	if err := baseDB.QueryRow(`SHOW search_path`).Scan(&schema); err != nil {
+		t.Fatal(err)
+	}
+	config.RuntimeParams["search_path"] = schema
+	config.Tracer = gate
+	db := stdlib.OpenDB(*config)
+	db.SetMaxOpenConns(40)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close freeze concurrency database: %v", err)
+		}
+	})
+	return db
+}
+
+func waitForFreezeInsertLock(t *testing.T, db *sql.DB, ctx context.Context) {
+	t.Helper()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var waiting bool
+		if err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND state = 'active'
+				  AND wait_event_type = 'Lock'
+				  AND ltrim(query) LIKE 'INSERT INTO leaderboard_freezes%'
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-timer.C:
+			t.Fatal("second freeze request did not wait on the first transaction")
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for the concurrent freeze lock: %v", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
 
 func TestConsolidationRepeatedPostgres(t *testing.T) {
 	db := postgresTestDB(t)
@@ -597,4 +688,139 @@ func TestCodeLeaderboardFinishTimeTieBreakPostgres(t *testing.T) {
 	rankingStore.InvalidateCache(contest)
 
 	assertCodeOrder("after repeat submission at 5000")
+}
+
+func TestSetLeaderboardFrozenRetriesConcurrentSerializationPostgres(t *testing.T) {
+	t.Run("simultaneous first-use freezes and repeated freeze preserve snapshot", func(t *testing.T) {
+		db := postgresTestDB(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		contest, user := createFreezeTestContest(t, db)
+
+		gate := &freezeTransactionGate{entered: make(chan struct{}), release: make(chan struct{})}
+		tracedDB := freezeConcurrencyDB(t, db, gate)
+		defer func() {
+			select {
+			case <-gate.release:
+			default:
+				close(gate.release)
+			}
+		}()
+		store := stores.NewRankingStore(tracedDB)
+		firstResult, secondResult := overlapFreezeRequests(t, ctx, db, gate, store, contest, true, true)
+		if firstResult.err != nil || !firstResult.frozen {
+			t.Fatalf("first freeze result = (%v, %v), want (true, nil)", firstResult.frozen, firstResult.err)
+		}
+		if secondResult.err != nil || !secondResult.frozen {
+			t.Fatalf("simultaneous first-use freeze result = (%v, %v), want (true, nil)", secondResult.frozen, secondResult.err)
+		}
+		gate.mu.Lock()
+		insertAttempts := gate.insertAttempts
+		gate.mu.Unlock()
+		if insertAttempts < 3 {
+			t.Fatalf("freeze row insert attempts = %d, want the losing transaction retry", insertAttempts)
+		}
+
+		if _, err := db.ExecContext(ctx, `UPDATE rankings SET score = 20 WHERE contest_id = $1 AND user_id = $2`, contest, user); err != nil {
+			t.Fatal(err)
+		}
+		if frozen, err := store.SetLeaderboardFrozen(ctx, contest, true, nil); err != nil || !frozen {
+			t.Fatalf("repeated freeze result = (%v, %v), want (true, nil)", frozen, err)
+		}
+		snapshot, frozen, err := store.GetFrozenLeaderboard(ctx, contest, 0)
+		if err != nil || !frozen || len(snapshot.Entries) != 1 || snapshot.Entries[0].TotalScore != 10 {
+			t.Fatalf("repeated freeze replaced or lost the original snapshot: frozen=%v result=%+v err=%v", frozen, snapshot, err)
+		}
+	})
+
+	t.Run("freeze followed by unfreeze", func(t *testing.T) {
+		db := postgresTestDB(t)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		contest, _ := createFreezeTestContest(t, db)
+
+		gate := &freezeTransactionGate{entered: make(chan struct{}), release: make(chan struct{})}
+		tracedDB := freezeConcurrencyDB(t, db, gate)
+		defer func() {
+			select {
+			case <-gate.release:
+			default:
+				close(gate.release)
+			}
+		}()
+		store := stores.NewRankingStore(tracedDB)
+		firstResult, secondResult := overlapFreezeRequests(t, ctx, db, gate, store, contest, true, false)
+		if firstResult.err != nil || !firstResult.frozen {
+			t.Fatalf("freeze result = (%v, %v), want (true, nil)", firstResult.frozen, firstResult.err)
+		}
+		if secondResult.err != nil || secondResult.frozen {
+			t.Fatalf("unfreeze result = (%v, %v), want (false, nil)", secondResult.frozen, secondResult.err)
+		}
+		frozen, err := store.GetLeaderboardFreezeStatus(ctx, contest)
+		if err != nil || frozen {
+			t.Fatalf("freeze status after concurrent unfreeze = (%v, %v), want (false, nil)", frozen, err)
+		}
+		var version int64
+		if err := db.QueryRowContext(ctx, `SELECT version FROM leaderboard_freezes WHERE contest_id = $1`, contest).Scan(&version); err != nil {
+			t.Fatal(err)
+		}
+		if version != 2 {
+			t.Fatalf("freeze version = %d, want 2 after freeze and unfreeze", version)
+		}
+	})
+}
+
+type freezeCallResult struct {
+	frozen bool
+	err    error
+}
+
+func createFreezeTestContest(t *testing.T, db *sql.DB) (contest, user string) {
+	t.Helper()
+	contest, user = uuid.NewString(), uuid.NewString()
+	now := time.Now().UnixMilli()
+	if _, err := db.Exec(`INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Freeze Test','',1,$2,$3,$4)`, contest, now+60_000, now-60_000, now+60_000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Freeze User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO rankings(contest_id,user_id,score,rank,hidden,disqualified) VALUES($1,$2,10,1,false,false)`, contest, user); err != nil {
+		t.Fatal(err)
+	}
+	return contest, user
+}
+
+func overlapFreezeRequests(t *testing.T, ctx context.Context, db *sql.DB, gate *freezeTransactionGate, store *stores.RankingStore, contest string, firstFrozen, secondFrozen bool) (freezeCallResult, freezeCallResult) {
+	t.Helper()
+	firstResult := make(chan freezeCallResult, 1)
+	secondResult := make(chan freezeCallResult, 1)
+	go func() {
+		frozen, err := store.SetLeaderboardFrozen(ctx, contest, firstFrozen, nil)
+		firstResult <- freezeCallResult{frozen: frozen, err: err}
+	}()
+	select {
+	case <-gate.entered:
+	case <-ctx.Done():
+		t.Fatalf("first freeze did not reach its locked row: %v", ctx.Err())
+	}
+	go func() {
+		frozen, err := store.SetLeaderboardFrozen(ctx, contest, secondFrozen, nil)
+		secondResult <- freezeCallResult{frozen: frozen, err: err}
+	}()
+	waitForFreezeInsertLock(t, db, ctx)
+	close(gate.release)
+
+	var first, second freezeCallResult
+	select {
+	case first = <-firstResult:
+	case <-ctx.Done():
+		t.Fatalf("first freeze request did not complete: %v", ctx.Err())
+	}
+	select {
+	case second = <-secondResult:
+	case <-ctx.Done():
+		t.Fatalf("second freeze request did not complete: %v", ctx.Err())
+	}
+	return first, second
 }
