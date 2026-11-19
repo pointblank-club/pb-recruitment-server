@@ -84,6 +84,13 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 	return sub, nil
 }
 
+func (ss *SubmissionService) GetSubmissionTestCaseCounts(ctx context.Context, sub *models.Submission) (int, int, error) {
+	if sub == nil {
+		return 0, 0, nil
+	}
+	return ss.stores.Submissions.GetSubmissionTestCaseCounts(ctx, sub.ID, sub.Type, sub.ContestEndTime, sub.Status)
+}
+
 func (ss *SubmissionService) GetTestCaseResultsBySubmissionID(ctx context.Context, submissionID string) ([]models.TestCaseResult, error) {
 	return ss.stores.Submissions.GetTestCaseResultsBySubmissionID(ctx, submissionID)
 }

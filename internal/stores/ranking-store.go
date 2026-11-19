@@ -230,29 +230,11 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	entriesQ := `
-		WITH problem_summary AS (
-			SELECT sub.user_id, sub.problem_id,
-			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS max_score,
-			       MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at END) AS earliest_accepted
-			FROM submissions sub
-			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
-			WHERE sub.contest_id = $1 AND (sub.status = 'accepted' OR sub.score > 0)
-			GROUP BY sub.user_id, sub.problem_id
-		),
-		first_solves AS (
-			SELECT ps.user_id, ps.problem_id,
-			       COALESCE(
-			           ps.earliest_accepted,
-			           (
-			               SELECT MIN(s2.created_at)
-			               FROM submissions s2
-			               WHERE s2.contest_id = $1
-			                 AND s2.user_id = ps.user_id
-			                 AND s2.problem_id = ps.problem_id
-			                 AND s2.score = ps.max_score
-			           )
-			       ) AS solved_at
-			FROM problem_summary ps
+		WITH first_solves AS (
+			SELECT user_id, problem_id, MIN(created_at) AS solved_at
+			FROM submissions
+			WHERE contest_id = $1 AND status = 'accepted'
+			GROUP BY user_id, problem_id
 		),
 		user_solve_time AS (
 			SELECT user_id, MAX(solved_at) AS last_solve_time
@@ -288,40 +270,31 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	if mcqCutoff != nil {
 		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
-		WITH problem_summary AS (
+		WITH code_first_solves AS (
+			SELECT user_id, problem_id, MIN(created_at) AS solved_at
+			FROM submissions
+			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
+			GROUP BY user_id, problem_id
+		),
+		code_scores AS (
 			SELECT sub.user_id, sub.problem_id,
-			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS max_score,
-			       MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at END) AS earliest_accepted
+			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS score
 			FROM submissions sub
 			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
 			WHERE sub.contest_id = $1 AND sub.type = 'code' AND (sub.status = 'accepted' OR sub.score > 0)
 			GROUP BY sub.user_id, sub.problem_id
 		),
-		first_solves AS (
-			SELECT ps.user_id, ps.problem_id, ps.max_score AS score,
-			       COALESCE(
-			           ps.earliest_accepted,
-			           (
-			               SELECT MIN(s2.created_at)
-			               FROM submissions s2
-			               WHERE s2.contest_id = $1
-			                 AND s2.user_id = ps.user_id
-			                 AND s2.problem_id = ps.problem_id
-			                 AND s2.score = ps.max_score
-			           )
-			       ) AS solved_at
-			FROM problem_summary ps
-		),
 		user_scores AS (
 			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time
-            FROM (
-                SELECT fs.user_id, fs.score, fs.solved_at
-                FROM first_solves fs
-                UNION ALL
-                SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
-                WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
-            ) solves
-            GROUP BY user_id
+			FROM (
+				SELECT cs.user_id, cs.score, cfs.solved_at
+				FROM code_scores cs
+				LEFT JOIN code_first_solves cfs ON cfs.user_id = cs.user_id AND cfs.problem_id = cs.problem_id
+				UNION ALL
+				SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
+				WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
+			) solves
+			GROUP BY user_id
 		)
 		SELECT RANK() OVER (ORDER BY COALESCE(us.score, 0) DESC, us.last_solve_time ASC NULLS LAST) AS rank,
 		       r.user_id, u.name, u.usn, COALESCE(us.score, 0)
@@ -797,7 +770,6 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	type userSolveData struct {
 		earliestAccepted map[string]int64
 		maxProblemScore  map[string]float64
-		earliestMaxScore map[string]int64
 		totalAttempts    int
 	}
 
@@ -806,7 +778,6 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 		userStats[uid] = &userSolveData{
 			earliestAccepted: make(map[string]int64),
 			maxProblemScore:  make(map[string]float64),
-			earliestMaxScore: make(map[string]int64),
 		}
 	}
 
@@ -822,7 +793,6 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 			data = &userSolveData{
 				earliestAccepted: make(map[string]int64),
 				maxProblemScore:  make(map[string]float64),
-				earliestMaxScore: make(map[string]int64),
 			}
 			userStats[uid] = data
 			participantSet[uid] = true
@@ -843,7 +813,6 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 			prevScore := data.maxProblemScore[pid]
 			if effectiveScore > prevScore {
 				data.maxProblemScore[pid] = effectiveScore
-				data.earliestMaxScore[pid] = createdAt
 			}
 		}
 	}
@@ -897,12 +866,6 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 		for pid, pScore := range data.maxProblemScore {
 			if _, ok := problemScores[pid]; ok {
 				score += pScore
-				if data.earliestAccepted[pid] == 0 {
-					firstTime := data.earliestMaxScore[pid]
-					if firstTime > maxSolveTime {
-						maxSolveTime = firstTime
-					}
-				}
 			}
 		}
 		score = common.RoundTo2Decimals(score)

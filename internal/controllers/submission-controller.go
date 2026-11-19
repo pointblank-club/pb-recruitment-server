@@ -112,21 +112,11 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusForbidden)
 	}
 
-	passedTestCases := 0
-	totalTestCases := 0
-	if sub.Type == models.Code {
-		tcResults, _ := sc.submissionService.GetTestCaseResultsBySubmissionID(ctx.Request().Context(), sub.ID)
-		for _, tc := range tcResults {
-			if tc.Status == "pass" || tc.Status == "accepted" {
-				passedTestCases++
-			}
-		}
-		totalTestCases = len(tcResults)
-	} else if sub.Type == models.MCQ {
-		totalTestCases = 1
-		if sub.Status == models.Accepted {
-			passedTestCases = 1
-		}
+	passedTestCases, totalTestCases, err := sc.submissionService.GetSubmissionTestCaseCounts(ctx.Request().Context(), sub)
+	if err != nil {
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "failed to get submission test case counts",
+		})
 	}
 
 	return ctx.JSON(http.StatusOK, dto.GetSubmissionStatusResponse{

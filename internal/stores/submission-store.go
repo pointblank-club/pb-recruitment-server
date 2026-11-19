@@ -137,28 +137,59 @@ func (s *SubmissionStore) GetSubmissionDetailsByID(ctx context.Context, id strin
 	testCaseResults, err := s.GetTestCaseResultsBySubmissionID(ctx, id)
 	if err != nil {
 		log.Printf("submission-store: failed to get test case results for submission ID %s: %v", id, err)
-		sub.TestCaseResults = []models.TestCaseResult{}
-	} else {
-		sub.TestCaseResults = testCaseResults
+		return nil, fmt.Errorf("get test case results: %w", err)
 	}
+	sub.TestCaseResults = testCaseResults
 
-	if sub.Type == models.Code {
-		passed := 0
-		for _, tc := range sub.TestCaseResults {
-			if tc.Status == "pass" || tc.Status == "accepted" {
-				passed++
-			}
-		}
-		sub.TestCasesPassed = passed
-		sub.TotalTestCases = len(sub.TestCaseResults)
-	} else if sub.Type == models.MCQ {
-		sub.TotalTestCases = 1
-		if sub.ContestEndTime < time.Now().UnixMilli() && sub.Status == models.Accepted {
-			sub.TestCasesPassed = 1
-		}
+	passed, total, err := s.GetSubmissionTestCaseCounts(ctx, id, sub.Type, sub.ContestEndTime, sub.Status)
+	if err != nil {
+		return nil, fmt.Errorf("get submission test case counts: %w", err)
 	}
+	sub.TestCasesPassed = passed
+	sub.TotalTestCases = total
 
 	return &sub, nil
+}
+
+func (s *SubmissionStore) GetSubmissionTestCaseCounts(ctx context.Context, submissionID string, subType models.SubmissionType, contestEndTime int64, status models.SubmissionStatus) (int, int, error) {
+	if s == nil || s.db == nil {
+		return 0, 0, fmt.Errorf("submission store: db is not initialized")
+	}
+
+	if subType == models.MCQ {
+		total := 1
+		passed := 0
+		if contestEndTime < time.Now().UnixMilli() && status == models.Accepted {
+			passed = 1
+		}
+		return passed, total, nil
+	}
+
+	const q = `
+		WITH se AS (
+			SELECT 
+				COUNT(*)::int AS total,
+				COUNT(*) FILTER (WHERE status = 'accepted')::int AS passed
+			FROM submission_executions
+			WHERE submission_id = $1
+		),
+		tcr AS (
+			SELECT 
+				COUNT(*)::int AS total,
+				COUNT(*) FILTER (WHERE status = 'pass' OR status = 'accepted')::int AS passed
+			FROM test_case_results
+			WHERE submission_id = $1
+		)
+		SELECT 
+			CASE WHEN se.total > 0 THEN se.passed ELSE tcr.passed END,
+			CASE WHEN se.total > 0 THEN se.total ELSE tcr.total END
+		FROM se, tcr;
+	`
+	var passed, total int
+	if err := s.db.QueryRowContext(ctx, q, submissionID).Scan(&passed, &total); err != nil {
+		return 0, 0, fmt.Errorf("query submission test case counts: %w", err)
+	}
+	return passed, total, nil
 }
 
 func (s *SubmissionStore) GetTestCaseResultsBySubmissionID(ctx context.Context, submissionID string) ([]models.TestCaseResult, error) {

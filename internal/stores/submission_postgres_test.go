@@ -385,3 +385,200 @@ func TestMCQHistoricalSurplusPreservedPostgres(t *testing.T) {
 		t.Fatalf("expected ErrSubmissionAlreadyExists for problem with surplus history, got %v", err)
 	}
 }
+
+func TestSubmissionExecutionDenominatorAndCompletedCount(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+
+	user := uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+	subID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Exec Denom User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Exec Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{
+		ID: problem, ContestID: contest, Name: "Exec Problem", Type: models.Code, Score: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score) VALUES($1,$2,$3,$4,'code','pending',100,0.00)`, subID, user, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5 execution rows: 1 accepted, 4 pending
+	for i := 0; i < 5; i++ {
+		execStatus := "pending"
+		if i == 0 {
+			execStatus = "accepted"
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO submission_executions(id, submission_id, test_case_index, status, created_at) VALUES($1,$2,$3,$4,100)`, uuid.NewString(), subID, i, execStatus); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1 completed callback result in test_case_results
+	if _, err := db.ExecContext(ctx, `INSERT INTO test_case_results(id, submission_id, test_case_id, status, runtime, memory, created_at) VALUES($1,$2,'0','pass',10,10,100)`, uuid.NewString(), subID); err != nil {
+		t.Fatal(err)
+	}
+
+	submissionStore := stores.NewSubmissionStore(db)
+
+	passed, total, err := submissionStore.GetSubmissionTestCaseCounts(ctx, subID, models.Code, now+3_600_000, models.Pending)
+	if err != nil {
+		t.Fatalf("GetSubmissionTestCaseCounts failed: %v", err)
+	}
+	if total != 5 {
+		t.Errorf("expected total_test_cases=5, got %d", total)
+	}
+	if passed != 1 {
+		t.Errorf("expected test_cases_passed=1, got %d", passed)
+	}
+
+	details, err := submissionStore.GetSubmissionDetailsByID(ctx, subID)
+	if err != nil {
+		t.Fatalf("GetSubmissionDetailsByID failed: %v", err)
+	}
+	if details.TotalTestCases != 5 {
+		t.Errorf("expected details.TotalTestCases=5, got %d", details.TotalTestCases)
+	}
+	if details.TestCasesPassed != 1 {
+		t.Errorf("expected details.TestCasesPassed=1, got %d", details.TestCasesPassed)
+	}
+	if len(details.TestCaseResults) != 1 {
+		t.Errorf("expected len(details.TestCaseResults)=1, got %d", len(details.TestCaseResults))
+	}
+}
+
+func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+
+	user := uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+	subID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Backfill User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Backfill Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{
+		ID: problem, ContestID: contest, Name: "Backfill Problem", Type: models.Code, Score: 10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1,$2,0.00,0,false,false)`, contest, user); err != nil {
+		t.Fatal(err)
+	}
+
+	// Historical submission: 3/5 passed, but status is wrong_answer and score is 0.00
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score) VALUES($1,$2,$3,$4,'code','wrong_answer',100,0.00)`, subID, user, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 5; i++ {
+		execStatus := "wrong_answer"
+		if i < 3 {
+			execStatus = "accepted"
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO submission_executions(id, submission_id, test_case_index, status, created_at) VALUES($1,$2,$3,$4,100)`, uuid.NewString(), subID, i, execStatus); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Execute the backfill logic from migration 000048
+	const backfillSQL = `
+		WITH exec_counts AS (
+			SELECT 
+				submission_id,
+				count(*)::int AS total,
+				count(*) FILTER (WHERE status = 'accepted')::int AS passed
+			FROM submission_executions
+			GROUP BY submission_id
+			UNION ALL
+			SELECT 
+				submission_id,
+				count(*)::int AS total,
+				count(*) FILTER (WHERE status = 'pass')::int AS passed
+			FROM test_case_results
+			WHERE submission_id NOT IN (SELECT submission_id FROM submission_executions)
+			GROUP BY submission_id
+		),
+		combined_counts AS (
+			SELECT submission_id, MAX(total) AS total, MAX(passed) AS passed
+			FROM exec_counts
+			GROUP BY submission_id
+		),
+		scored_submissions AS (
+			SELECT 
+				s.id,
+				p.score AS problem_score,
+				ec.passed,
+				ec.total,
+				ec.total / 2 AS half,
+				ec.total - (ec.total / 2) - 1 AS intermediate_steps,
+				ec.passed - (ec.total / 2) AS passed_above_half
+			FROM submissions s
+			JOIN problems p ON p.id = s.problem_id AND p.contest_id = s.contest_id
+			JOIN combined_counts ec ON ec.submission_id = s.id
+			WHERE s.type = 'code'
+			  AND s.status <> 'accepted'
+			  AND s.status <> 'pending'
+			  AND s.status <> 'judge_error'
+			  AND ec.total > 0
+			  AND ec.passed > (ec.total / 2)
+			  AND ec.passed < ec.total
+		)
+		UPDATE submissions s
+		SET score = CASE
+			WHEN ss.intermediate_steps <= 0 THEN 0.00
+			ELSE (
+				(
+					2 * (ss.passed_above_half * ROUND(ss.problem_score * 100)::bigint) + (2 * ss.intermediate_steps)
+				) / (4 * ss.intermediate_steps)
+			)::numeric(20, 2) / 100.00
+		END
+		FROM scored_submissions ss
+		WHERE s.id = ss.id;
+
+		UPDATE rankings r
+		SET score = COALESCE((
+			SELECT SUM(ps.max_score)
+			FROM (
+				SELECT sub.problem_id, MAX(sub.score) AS max_score
+				FROM submissions sub
+				WHERE sub.contest_id = r.contest_id
+				  AND sub.user_id = r.user_id
+				GROUP BY sub.problem_id
+			) ps
+		), 0.00);
+	`
+	if _, err := db.ExecContext(ctx, backfillSQL); err != nil {
+		t.Fatalf("backfill SQL execution failed: %v", err)
+	}
+
+	var subScore, rankScore float64
+	if err := db.QueryRowContext(ctx, `SELECT score FROM submissions WHERE id=$1`, subID).Scan(&subScore); err != nil {
+		t.Fatalf("query submission score: %v", err)
+	}
+	if subScore != 2.50 {
+		t.Errorf("expected submission score 2.50, got %.2f", subScore)
+	}
+
+	if err := db.QueryRowContext(ctx, `SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&rankScore); err != nil {
+		t.Fatalf("query ranking score: %v", err)
+	}
+	if rankScore != 2.50 {
+		t.Errorf("expected ranking score 2.50, got %.2f", rankScore)
+	}
+}
