@@ -43,6 +43,7 @@ func maskMCQVerdict(sub *models.Submission) {
 		sub.Status = models.Attempted
 		sub.TestCaseResults = nil
 		sub.Score = 0.0
+		sub.TestCasesPassed = 0
 	}
 }
 
@@ -79,13 +80,6 @@ func (ss *SubmissionService) ListUserSubmissionsByProblemID(ctx context.Context,
 		maskMCQVerdict(&sub[i])
 	}
 	return sub, nil
-}
-
-func (ss *SubmissionService) GetSubmissionTestCaseCounts(ctx context.Context, sub *models.Submission) (int, int, error) {
-	if sub == nil {
-		return 0, 0, nil
-	}
-	return ss.stores.Submissions.GetSubmissionTestCaseCounts(ctx, sub.ID, sub.Type, sub.ContestEndTime, sub.Status)
 }
 
 func (ss *SubmissionService) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict, submissionType string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {

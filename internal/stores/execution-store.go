@@ -85,6 +85,17 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 	return executions, nil
 }
 
+// recomputeRankingScoreQ sums each problem's best score; callers hold the ranking row lock.
+// Accepted uses the current problem score, matching the leaderboard and consolidation.
+const recomputeRankingScoreQ = `UPDATE rankings SET score=COALESCE((
+	SELECT SUM(max_p_score) FROM (
+		SELECT MAX(CASE WHEN s.status='accepted' THEN p.score ELSE s.score END) AS max_p_score
+		FROM submissions s JOIN problems p ON p.id=s.problem_id AND p.contest_id=s.contest_id
+		WHERE s.contest_id=$1 AND s.user_id=$2
+		GROUP BY s.problem_id
+	) sub
+), 0) WHERE contest_id=$1 AND user_id=$2`
+
 func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResult) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -229,15 +240,7 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 		if err != nil {
 			return err
 		}
-		// Accepted uses the current problem score, matching the leaderboard and consolidation.
-		_, err = tx.ExecContext(ctx, `UPDATE rankings SET score=COALESCE((
-			SELECT SUM(max_p_score) FROM (
-				SELECT MAX(CASE WHEN s.status='accepted' THEN p.score ELSE s.score END) AS max_p_score
-				FROM submissions s JOIN problems p ON p.id=s.problem_id AND p.contest_id=s.contest_id
-				WHERE s.contest_id=$1 AND s.user_id=$2
-				GROUP BY s.problem_id
-			) sub
-		), 0) WHERE contest_id=$1 AND user_id=$2`, contestID, userID)
+		_, err = tx.ExecContext(ctx, recomputeRankingScoreQ, contestID, userID)
 		if err != nil {
 			return err
 		}

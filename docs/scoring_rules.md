@@ -41,7 +41,8 @@ Each coding problem has a configured score (`Score`) and a set of $N$ test cases
   - **Full Solve ($K = N$)**: Passing all $N$ test cases awards the remaining 50%, for **100% of the problem score**.
   - **Precision**: Scores support decimal precision rounded to **2 decimal places** (e.g. `1.25`, `12.50`).
   - **Judge Errors**: A submission with any test case ending in `judge_error` earns **0 points**, regardless of how many other test cases passed.
-  - **Score Edits**: Accepted submissions always use the problem's current score; partial scores keep the score in effect when they were judged.
+  - **Score Edits**: Problem scores cannot change once the contest starts, so every submission is scored against the same maximum.
+  - **Historical Contests**: Contests consolidated before partial credit was introduced keep their published all-or-nothing results.
   - **Edge-Cases**:
     - $N = 2$: Passing 1 test case awards 0%; passing 2 test cases awards 100% (all-or-nothing).
     - $N = 3$: Passing 1 awards 0%; passing 2 awards 50%; passing 3 awards 100%.
@@ -77,9 +78,9 @@ When two or more candidates achieve the same total score, ties are broken strict
 2. **Problems Solved Count (Descending)**:
    - Candidates who solved a greater number of distinct problems rank higher (e.g. 5 problems of 20 pts > 2 problems of 50 pts).
 3. **Finish Time / Last Submission Time (Ascending)**:
-   - The time of reaching the final score, defined as the maximum of per-problem earliest solve timestamps across all solved problems:
+   - The time of the last full solve, defined as the maximum of per-problem earliest solve timestamps across all solved problems. Partial credit never sets or moves the finish time:
      $$\text{FinishTime} = \max_{p \in \text{SolvedProblems}} (\text{FirstSolveTime}(p))$$
-   - Candidates who achieved their score earlier rank higher.
+   - Candidates who finished their full solves earlier rank higher.
    - Candidates who solved $\ge 1$ problems rank ahead of candidates who solved 0 problems.
 4. **Total Submission Attempts (Ascending)**:
    - Candidates with fewer submission attempts across the contest rank higher (penalizing brute-force attempts). Submissions with the final verdict `judge_error` are excluded: infrastructure failures must not penalize contestants.

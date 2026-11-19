@@ -38,7 +38,6 @@ type Storage struct {
 	Submissions interface {
 		GetSubmissionStatusByID(context.Context, string) (*models.Submission, error)
 		GetSubmissionDetailsByID(context.Context, string) (*dto.GetSubmissionDetailsResponse, error)
-		GetSubmissionTestCaseCounts(ctx context.Context, submissionID string, subType models.SubmissionType, contestEndTime int64, status models.SubmissionStatus) (int, int, error)
 		GetTestCaseResultsBySubmissionID(context.Context, string) ([]models.TestCaseResult, error)
 		ListUserSubmissionsByProblemID(context.Context, string, string, int) ([]models.Submission, error)
 		GetUserProblemProgress(context.Context, string, string) (map[string]string, error)

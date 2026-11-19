@@ -429,15 +429,12 @@ func TestSubmissionExecutionDenominatorAndCompletedCount(t *testing.T) {
 
 	submissionStore := stores.NewSubmissionStore(db)
 
-	passed, total, err := submissionStore.GetSubmissionTestCaseCounts(ctx, subID, models.Code, now+3_600_000, models.Pending)
+	status, err := submissionStore.GetSubmissionStatusByID(ctx, subID)
 	if err != nil {
-		t.Fatalf("GetSubmissionTestCaseCounts failed: %v", err)
+		t.Fatalf("GetSubmissionStatusByID failed: %v", err)
 	}
-	if total != 5 {
-		t.Errorf("expected total_test_cases=5, got %d", total)
-	}
-	if passed != 1 {
-		t.Errorf("expected test_cases_passed=1, got %d", passed)
+	if status.TotalTestCases != 5 || status.TestCasesPassed != 1 {
+		t.Errorf("status counts = %d/%d, want 1/5", status.TestCasesPassed, status.TotalTestCases)
 	}
 
 	details, err := submissionStore.GetSubmissionDetailsByID(ctx, subID)
@@ -461,17 +458,21 @@ func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
 	seed := `
 		INSERT INTO users(id,name,email,usn,current_year,department) VALUES
 			('u1','U1','u1@x','u1',1,'CS'),('u2','U2','u2@x','u2',1,'CS');
-		INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES('c','C','',1,2,1,2);
-		INSERT INTO problems(id,contest_id,name,score,type) VALUES('p','c','P',10,'code'),('q','c','Q',100,'code');
+		INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES
+			('c','C','',1,2,1,2),('final','F','',1,2,1,2);
+		INSERT INTO problems(id,contest_id,name,score,type) VALUES('p','c','P',10,'code'),('q','c','Q',100,'code'),('fp','final','FP',10,'code');
 		INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at,language) VALUES
 			('partial','u1','c','p','code','wrong_answer',1,'py'),
 			('solved','u1','c','q','code','accepted',2,'py'),
-			('judge_err','u2','c','p','code','wrong_answer',3,'py');
+			('judge_err','u2','c','p','code','wrong_answer',3,'py'),
+			('published','u1','final','fp','code','wrong_answer',4,'py');
 		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
 			SELECT gen_random_uuid(),'partial',i,CASE WHEN i<3 THEN 'accepted' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
 		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
 			SELECT gen_random_uuid(),'judge_err',i,CASE WHEN i<3 THEN 'accepted' WHEN i=3 THEN 'judge_error' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
-		INSERT INTO rankings(contest_id,user_id,score,rank) VALUES('c','u1',100,1),('c','u2',0,2);`
+		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
+			SELECT gen_random_uuid(),'published',i,CASE WHEN i<3 THEN 'accepted' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
+		INSERT INTO rankings(contest_id,user_id,score,rank) VALUES('c','u1',100,0),('c','u2',0,0),('final','u1',0,1);`
 	if _, err := db.ExecContext(ctx, seed); err != nil {
 		t.Fatal(err)
 	}
@@ -483,20 +484,22 @@ func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for id, want := range map[string]float64{"partial": 2.50, "solved": 100, "judge_err": 0} {
+	// Consolidated contests keep their published all-or-nothing results.
+	for id, want := range map[string]float64{"partial": 2.50, "solved": 100, "judge_err": 0, "published": 0} {
 		var got float64
 		if err := db.QueryRowContext(ctx, `SELECT score FROM submissions WHERE id=$1`, id).Scan(&got); err != nil || got != want {
 			t.Errorf("submission %s score = %.2f (err %v), want %.2f", id, got, err, want)
 		}
 	}
-	for user, want := range map[string]float64{"u1": 102.50, "u2": 0} {
+	for _, tc := range []struct {
+		contest, user string
+		score         float64
+		rank          int
+	}{{"c", "u1", 102.50, 0}, {"c", "u2", 0, 0}, {"final", "u1", 0, 1}} {
 		var got float64
 		var rank int
-		if err := db.QueryRowContext(ctx, `SELECT score,rank FROM rankings WHERE user_id=$1`, user).Scan(&got, &rank); err != nil || got != want {
-			t.Errorf("ranking %s score = %.2f (err %v), want %.2f", user, got, err, want)
-		}
-		if wantRank := map[string]int{"u1": 1, "u2": 2}[user]; rank != wantRank {
-			t.Errorf("ranking %s rank = %d, want %d (migration must not rerank)", user, rank, wantRank)
+		if err := db.QueryRowContext(ctx, `SELECT score,rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, tc.contest, tc.user).Scan(&got, &rank); err != nil || got != tc.score || rank != tc.rank {
+			t.Errorf("ranking %s/%s = %.2f rank %d (err %v), want %.2f rank %d", tc.contest, tc.user, got, rank, err, tc.score, tc.rank)
 		}
 	}
 }

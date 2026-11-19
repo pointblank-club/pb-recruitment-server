@@ -112,19 +112,12 @@ func (sc *SubmissionController) GetSubmissionStatus(ctx echo.Context) error {
 		return ctx.NoContent(http.StatusForbidden)
 	}
 
-	passedTestCases, totalTestCases, err := sc.submissionService.GetSubmissionTestCaseCounts(ctx.Request().Context(), sub)
-	if err != nil {
-		return ctx.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "failed to get submission test case counts",
-		})
-	}
-
 	return ctx.JSON(http.StatusOK, dto.GetSubmissionStatusResponse{
 		Status:          sub.Status,
 		Score:           sub.Score,
 		MaxScore:        sub.MaxScore,
-		TestCasesPassed: passedTestCases,
-		TotalTestCases:  totalTestCases,
+		TestCasesPassed: sub.TestCasesPassed,
+		TotalTestCases:  sub.TotalTestCases,
 	})
 }
 

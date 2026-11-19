@@ -3472,6 +3472,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/app_internal_models.TestCaseResult"
                     }
                 },
+                "test_cases_passed": {
+                    "type": "integer"
+                },
+                "total_test_cases": {
+                    "type": "integer"
+                },
                 "type": {
                     "$ref": "#/definitions/app_internal_models.SubmissionType"
                 },

@@ -35,9 +35,7 @@ type GetSubmissionStatusResponse struct {
 
 type GetSubmissionDetailsResponse struct {
 	models.Submission
-	Code            string `json:"code"`
-	TestCasesPassed int    `json:"test_cases_passed"`
-	TotalTestCases  int    `json:"total_test_cases"`
+	Code string `json:"code"`
 }
 
 type AdminSubmissionItem struct {
