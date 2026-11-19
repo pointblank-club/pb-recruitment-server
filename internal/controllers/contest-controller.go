@@ -1124,7 +1124,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 
 // GetLeaderboard godoc
 // @Summary      Get contest leaderboard
-// @Description  Get ranked participants with pagination. Public coding results update immediately; MCQ scores, solves, and ranks update in five-minute batches from contest start. All results are visible to admins and after contest end. Problem breakdowns are admin-only.
+// @Description  Get ranked participants with pagination. Public coding results update immediately; MCQ scores, solves, and ranks update in five-minute batches from contest start. Admins may freeze the public ranking display while scoring continues. Admins always see current results; public viewers see all results after contest end once any freeze is released. Problem breakdowns are admin-only.
 // @Tags         Contests
 // @Produce      json
 // @Param        id path string true "Contest ID"
@@ -1133,6 +1133,7 @@ func (cc *ContestController) GetProblemAnswers(ctx echo.Context) error {
 // @Header       200 {string} X-Total-Count "Total count of leaderboard entries"
 // @Header       200 {string} X-Total-Pages "Total pages"
 // @Header       200 {string} X-Current-Page "Current page"
+// @Header       200 {string} X-Leaderboard-Frozen "Whether the public leaderboard is showing a frozen snapshot"
 // @Failure      403 {object} map[string]string "Contest has not started yet"
 // @Failure      404 {object} map[string]string "Contest not found"
 // @Failure      500 {object} map[string]string "Internal server error"
@@ -1180,10 +1181,15 @@ func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
 	totalCountStr := strconv.Itoa(totalCount)
 	totalPagesStr := strconv.Itoa(totalPages)
 	currentPageStr := strconv.Itoa(leaderboard.Page)
+	frozenHeader := "false"
+	if leaderboard.Frozen {
+		frozenHeader = "true"
+	}
 
 	ctx.Response().Header().Set("X-Total-Count", totalCountStr)
 	ctx.Response().Header().Set("X-Total-Pages", totalPagesStr)
 	ctx.Response().Header().Set("X-Current-Page", currentPageStr)
+	ctx.Response().Header().Set("X-Leaderboard-Frozen", frozenHeader)
 
 	entries := leaderboard.Entries
 	if entries == nil {
@@ -1191,6 +1197,77 @@ func (cc *ContestController) GetLeaderboard(ctx echo.Context) error {
 	}
 
 	return ctx.JSON(http.StatusOK, entries)
+}
+
+// GetLeaderboardFreezeStatus godoc
+// @Summary      Get contest leaderboard freeze status (Admin)
+// @Tags         Admin - Leaderboard
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Contest ID"
+// @Success      200 {object} dto.LeaderboardFreezeStatus
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      503 {object} map[string]string "Leaderboard freeze migration is not applied"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/contest/{id}/leaderboard-freeze [get]
+func (cc *ContestController) GetLeaderboardFreezeStatus(ctx echo.Context) error {
+	contestID := ctx.Param("id")
+	if contestID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "contest ID is required"})
+	}
+	status, err := cc.contestService.GetLeaderboardFreezeStatus(ctx.Request().Context(), contestID)
+	if err != nil {
+		if errors.Is(err, common.ErrLeaderboardFreezeUnavailable) {
+			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.ContestNotFoundError.Error()})
+		}
+		log.Errorf("failed to get leaderboard freeze status for contest %s: %v", contestID, err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get leaderboard freeze status"})
+	}
+	return ctx.JSON(http.StatusOK, status)
+}
+
+// SetLeaderboardFreezeStatus godoc
+// @Summary      Freeze or unfreeze contest leaderboard (Admin)
+// @Tags         Admin - Leaderboard
+// @Accept       json
+// @Produce      json
+// @Security     BearerAuth
+// @Param        id path string true "Contest ID"
+// @Param        request body dto.SetLeaderboardFreezeRequest true "Freeze state"
+// @Success      200 {object} dto.LeaderboardFreezeStatus
+// @Failure      400 {object} map[string]string "Invalid input"
+// @Failure      403 {object} map[string]string "Contest has not started yet"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      503 {object} map[string]string "Leaderboard freeze migration is not applied"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /admin/contest/{id}/leaderboard-freeze [put]
+func (cc *ContestController) SetLeaderboardFreezeStatus(ctx echo.Context) error {
+	contestID := ctx.Param("id")
+	if contestID == "" {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "contest ID is required"})
+	}
+	req, ok := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.SetLeaderboardFreezeRequest)
+	if !ok || req == nil || req.Frozen == nil {
+		return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "frozen is required"})
+	}
+	status, err := cc.contestService.SetLeaderboardFrozen(ctx.Request().Context(), contestID, *req.Frozen)
+	if err != nil {
+		if errors.Is(err, common.ErrLeaderboardFreezeUnavailable) {
+			return ctx.JSON(http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": common.ContestNotFoundError.Error()})
+		}
+		if errors.Is(err, common.ErrContestNotStarted) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("failed to update leaderboard freeze status for contest %s: %v", contestID, err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to update leaderboard freeze status"})
+	}
+	return ctx.JSON(http.StatusOK, status)
 }
 
 // HandleConsolidateContest godoc

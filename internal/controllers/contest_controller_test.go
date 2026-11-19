@@ -121,9 +121,12 @@ func TestProblemInvalidAnswerResponse(t *testing.T) {
 }
 
 type mockRankingStore struct {
-	consolidateFunc func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
-	updateFunc      func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
-	leaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	consolidateFunc      func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
+	updateFunc           func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
+	leaderboardFunc      func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	freezeStatusFunc     func(ctx context.Context, contestID string) (bool, error)
+	frozenLeaderboardFn  func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, bool, error)
+	setLeaderboardFrozen func(ctx context.Context, contestID string, frozen bool, cutoff *int64) (bool, error)
 }
 
 func (m *mockRankingStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -151,6 +154,27 @@ func (m *mockRankingStore) InvalidateCache(contestID string) {}
 
 func (m *mockRankingStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
 	return m.GetLeaderboard(ctx, contestID, page)
+}
+
+func (m *mockRankingStore) GetLeaderboardFreezeStatus(ctx context.Context, contestID string) (bool, error) {
+	if m.freezeStatusFunc != nil {
+		return m.freezeStatusFunc(ctx, contestID)
+	}
+	return false, nil
+}
+
+func (m *mockRankingStore) GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, bool, error) {
+	if m.frozenLeaderboardFn != nil {
+		return m.frozenLeaderboardFn(ctx, contestID, page)
+	}
+	return nil, false, nil
+}
+
+func (m *mockRankingStore) SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool, mcqCutoff *int64) (bool, error) {
+	if m.setLeaderboardFrozen != nil {
+		return m.setLeaderboardFrozen(ctx, contestID, frozen, mcqCutoff)
+	}
+	return frozen, nil
 }
 
 func TestHandleConsolidateContest(t *testing.T) {

@@ -220,6 +220,7 @@ func NewEchoServer(
 			"X-Total-Count",
 			"X-Total-Pages",
 			"X-Current-Page",
+			"X-Leaderboard-Frozen",
 			"X-Truncated",
 			"X-Max-Pairs-Per-Report",
 			"X-Min-Similarity",

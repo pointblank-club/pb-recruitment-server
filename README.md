@@ -56,7 +56,7 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000047`: submission cooldowns
+- The current schema requires migrations through `000048`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
@@ -65,9 +65,10 @@ make swagger
   tab-switching enforcement & observation deduplication (`000038`), code request
   replay (`000039`), shared HTTP budgets (`000040`), pending admission slots (`000041`),
   removal of per-question time/memory settings (`000042`), session endings (`000043`),
-  MCQ verdict history (`000044`), leaderboard batches (`000045`), and coding-only
-  resource settings (`000046`).
-  Stop old API writers and drain in-flight preparation, apply through `000046`, then
+  MCQ verdict history (`000044`), leaderboard batches (`000045`), coding-only
+  resource settings (`000046`), SEB sessions (`000047`), and public leaderboard
+  freeze snapshots (`000048`).
+  Stop old API writers and drain in-flight preparation, apply through `000048`, then
   start the new API with the same `SUBMISSION_MAX_PENDING` on every replica. Do not mix
   old and new writers. See [rollout and rollback requirements](SECURITY_LIMITS.md#code-submission-admission-and-retries).
   `make migrate-up`
@@ -245,6 +246,11 @@ its MCQ problem totals in PostgreSQL; subsequent pages and replicas reuse them,
 even after cache expiry. A grading transaction that commits after this snapshot
 waits for the next batch. Code results continue to update independently.
 Snapshots are retained for viewed batches until the contest is deleted.
+Admins can separately freeze the public leaderboard at its current snapshot for
+suspense. Submissions and score processing continue normally, admin leaderboard
+views remain live, and unfreezing reveals the current ranking.
+If a freeze remains active after the contest ends, public viewers continue to see
+the saved snapshot until an admin releases it.
 Existing verdicts first publish at the next boundary after
 the history migration. Submission times retain their existing one-second precision.
 Batch aggregate changes can still reveal MCQ correctness, even while individual

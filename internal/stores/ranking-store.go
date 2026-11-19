@@ -6,6 +6,7 @@ import (
 	"app/internal/models/dto"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -24,6 +25,12 @@ type leaderboardCacheEntry struct {
 	data      *dto.GetLeaderboardResponse
 	expiresAt time.Time
 	mcqCutoff int64
+}
+
+type rankingQueryer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 type RankingStore struct {
@@ -162,14 +169,34 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	if s == nil {
 		return nil, fmt.Errorf("ranking store: not initialized")
 	}
+	return s.getLeaderboardUsing(ctx, s.db, contestID, page, mcqCutoff, true)
+}
+
+func (s *RankingStore) getLeaderboardUsing(ctx context.Context, queryer rankingQueryer, contestID string, page int, mcqCutoff *int64, useCache bool) (*dto.GetLeaderboardResponse, error) {
+	if s == nil {
+		return nil, fmt.Errorf("ranking store: not initialized")
+	}
 
 	page = max(0, page)
+	cacheVersion := int64(0)
+	if useCache && queryer != nil {
+		if err := queryer.QueryRowContext(ctx, `
+			SELECT COALESCE((SELECT version FROM leaderboard_freezes WHERE contest_id = $1), 0)
+		`, contestID).Scan(&cacheVersion); err != nil {
+			if !isMissingRelation(err) {
+				return nil, fmt.Errorf("get leaderboard cache version: %w", err)
+			}
+		}
+	}
 	cacheKey := fmt.Sprintf("%s:%d", contestID, page)
+	if cacheVersion > 0 {
+		cacheKey += fmt.Sprintf(":v%d", cacheVersion)
+	}
 	if mcqCutoff != nil {
 		cacheKey += ":live"
 	}
 
-	if s.cacheTTL > 0 {
+	if useCache && s.cacheTTL > 0 {
 		s.cacheMu.RLock()
 		entry, ok := s.cache[cacheKey]
 		s.cacheMu.RUnlock()
@@ -178,13 +205,13 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		}
 	}
 
-	if s.db == nil {
+	if queryer == nil {
 		return nil, fmt.Errorf("ranking store: db is not initialized")
 	}
 
 	const checkContestQ = `SELECT EXISTS(SELECT 1 FROM contests WHERE id = $1)`
 	var exists bool
-	if err := s.db.QueryRowContext(ctx, checkContestQ, contestID).Scan(&exists); err != nil {
+	if err := queryer.QueryRowContext(ctx, checkContestQ, contestID).Scan(&exists); err != nil {
 		log.Printf("ranking-store: check contest query failed: %v", err)
 		return nil, fmt.Errorf("check contest: %w", err)
 	}
@@ -193,7 +220,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	if mcqCutoff != nil {
-		if err := s.freezeMCQBatch(ctx, contestID, *mcqCutoff); err != nil {
+		if err := s.freezeMCQBatchUsing(ctx, queryer, contestID, *mcqCutoff); err != nil {
 			return nil, err
 		}
 	}
@@ -209,7 +236,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		  AND r.disqualified = false
 	`
 	var totalCount int
-	err := s.db.QueryRowContext(ctx, countQ, contestID).Scan(&totalCount)
+	err := queryer.QueryRowContext(ctx, countQ, contestID).Scan(&totalCount)
 	if err != nil {
 		log.Printf("ranking-store: count query failed: %v", err)
 		return nil, fmt.Errorf("count rankings: %w", err)
@@ -222,7 +249,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 
 	var isConsolidated bool
 	if mcqCutoff == nil {
-		if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
+		if err := queryer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM rankings WHERE contest_id = $1 AND rank > 0)`, contestID).Scan(&isConsolidated); err != nil {
 			log.Printf("ranking-store: check consolidated query failed: %v", err)
 			return nil, fmt.Errorf("check consolidated rankings: %w", err)
 		}
@@ -298,7 +325,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		args = append(args, *mcqCutoff)
 	}
 
-	rows, err := s.db.QueryContext(ctx, entriesQ, args...)
+	rows, err := queryer.QueryContext(ctx, entriesQ, args...)
 	if err != nil {
 		log.Printf("ranking-store: leaderboard query failed: %v", err)
 		return nil, fmt.Errorf("query leaderboard: %w", err)
@@ -322,7 +349,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 
-	problemScores, err := s.getProblemScores(ctx, contestID, userIDs, mcqCutoff)
+	problemScores, err := s.getProblemScores(ctx, queryer, contestID, userIDs, mcqCutoff)
 	if err != nil {
 		log.Printf("ranking-store: problem scores query failed : %v", err)
 		return nil, err
@@ -344,7 +371,7 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 		TotalCount: totalCount,
 	}
 
-	if s.cacheTTL > 0 && page < max(totalPages, 1) {
+	if useCache && s.cacheTTL > 0 && page < max(totalPages, 1) {
 		entry := leaderboardCacheEntry{data: resp, expiresAt: time.Now().Add(s.cacheTTL)}
 		if mcqCutoff != nil {
 			entry.mcqCutoff = *mcqCutoff
@@ -355,6 +382,207 @@ func (s *RankingStore) getLeaderboard(ctx context.Context, contestID string, pag
 	}
 
 	return cloneLeaderboardResponse(resp), nil
+}
+
+func (s *RankingStore) GetLeaderboardFreezeStatus(ctx context.Context, contestID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("ranking store: db is not initialized")
+	}
+	var frozen bool
+	err := s.db.QueryRowContext(ctx, `SELECT frozen FROM leaderboard_freezes WHERE contest_id = $1`, contestID).Scan(&frozen)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if isMissingRelation(err) {
+		return false, common.ErrLeaderboardFreezeUnavailable
+	}
+	if err != nil {
+		return false, fmt.Errorf("get leaderboard freeze status: %w", err)
+	}
+	return frozen, nil
+}
+
+func (s *RankingStore) GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, bool, error) {
+	if s == nil || s.db == nil {
+		return nil, false, fmt.Errorf("ranking store: db is not initialized")
+	}
+	page = max(0, page)
+	var frozen bool
+	var snapshot []byte
+	var snapshotCount int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT frozen, snapshot, total_count
+		FROM leaderboard_freezes
+		WHERE contest_id = $1
+	`, contestID).Scan(&frozen, &snapshot, &snapshotCount)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !frozen) {
+		return nil, false, nil
+	}
+	if err != nil {
+		if isMissingRelation(err) {
+			return nil, false, common.ErrLeaderboardFreezeUnavailable
+		}
+		return nil, false, fmt.Errorf("get frozen leaderboard: %w", err)
+	}
+
+	var entries []dto.LeaderboardEntry
+	if err := json.Unmarshal(snapshot, &entries); err != nil {
+		return nil, false, fmt.Errorf("decode frozen leaderboard: %w", err)
+	}
+	// Moderation changes still take effect during a freeze; remove hidden or
+	// disqualified users while preserving the ranks captured in the snapshot.
+	visibleRows, err := s.db.QueryContext(ctx, `
+		SELECT user_id FROM rankings
+		WHERE contest_id = $1 AND hidden = false AND disqualified = false
+	`, contestID)
+	if err != nil {
+		return nil, false, fmt.Errorf("check frozen leaderboard visibility: %w", err)
+	}
+	visibleUsers := make(map[string]struct{})
+	for visibleRows.Next() {
+		var userID string
+		if err := visibleRows.Scan(&userID); err != nil {
+			visibleRows.Close()
+			return nil, false, fmt.Errorf("scan frozen leaderboard visibility: %w", err)
+		}
+		visibleUsers[userID] = struct{}{}
+	}
+	if err := visibleRows.Err(); err != nil {
+		visibleRows.Close()
+		return nil, false, fmt.Errorf("read frozen leaderboard visibility: %w", err)
+	}
+	if err := visibleRows.Close(); err != nil {
+		return nil, false, fmt.Errorf("close frozen leaderboard visibility: %w", err)
+	}
+	visibleEntries := make([]dto.LeaderboardEntry, 0, min(snapshotCount, len(entries)))
+	for _, entry := range entries {
+		if _, visible := visibleUsers[entry.UserID]; visible {
+			visibleEntries = append(visibleEntries, entry)
+		}
+	}
+	entries = visibleEntries
+	totalCount := len(entries)
+	totalPages := (totalCount + leaderboardPageSize - 1) / leaderboardPageSize
+	if totalPages < 1 {
+		totalPages = 1
+	}
+	safePage := min(page, totalPages)
+	start := safePage * leaderboardPageSize
+	if start > len(entries) {
+		start = len(entries)
+	}
+	end := min(start+leaderboardPageSize, len(entries))
+	pageEntries := append([]dto.LeaderboardEntry(nil), entries[start:end]...)
+	return &dto.GetLeaderboardResponse{
+		Entries:    pageEntries,
+		Page:       page,
+		TotalPages: totalPages,
+		TotalCount: totalCount,
+		Frozen:     true,
+	}, true, nil
+}
+
+func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool, mcqCutoff *int64) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("ranking store: db is not initialized")
+	}
+	if frozen && mcqCutoff != nil {
+		// Publish the cutoff batch before opening the repeatable-read snapshot so a
+		// concurrent first public read cannot leave this snapshot without its MCQ rows.
+		if err := s.freezeMCQBatchUsing(ctx, s.db, contestID, *mcqCutoff); err != nil {
+			return false, err
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return false, fmt.Errorf("begin leaderboard freeze transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO leaderboard_freezes(contest_id, frozen, version)
+		VALUES ($1, false, 0)
+		ON CONFLICT (contest_id) DO NOTHING
+	`, contestID); err != nil {
+		if isMissingRelation(err) {
+			return false, common.ErrLeaderboardFreezeUnavailable
+		}
+		return false, fmt.Errorf("initialize leaderboard freeze state: %w", err)
+	}
+	var current bool
+	var version int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT frozen, version FROM leaderboard_freezes WHERE contest_id = $1 FOR UPDATE
+	`, contestID).Scan(&current, &version); err != nil {
+		return false, fmt.Errorf("lock leaderboard freeze state: %w", err)
+	}
+	if current == frozen {
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("finish leaderboard freeze transaction: %w", err)
+		}
+		return current, nil
+	}
+
+	if !frozen {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE leaderboard_freezes
+			SET frozen = false, frozen_at = NULL, snapshot = NULL, total_count = 0, version = $2
+			WHERE contest_id = $1
+		`, contestID, version+1); err != nil {
+			return false, fmt.Errorf("unfreeze leaderboard: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("finish leaderboard unfreeze transaction: %w", err)
+		}
+		s.InvalidateCache(contestID)
+		return false, nil
+	}
+
+	if mcqCutoff != nil {
+		if err := s.freezeMCQBatchUsing(ctx, tx, contestID, *mcqCutoff); err != nil {
+			return false, err
+		}
+	}
+	firstPage, err := s.getLeaderboardUsing(ctx, tx, contestID, 0, mcqCutoff, false)
+	if err != nil {
+		return false, fmt.Errorf("capture leaderboard snapshot: %w", err)
+	}
+	entries := append([]dto.LeaderboardEntry(nil), firstPage.Entries...)
+	for page := 1; page < firstPage.TotalPages; page++ {
+		pageResult, err := s.getLeaderboardUsing(ctx, tx, contestID, page, mcqCutoff, false)
+		if err != nil {
+			return false, fmt.Errorf("capture leaderboard snapshot page %d: %w", page, err)
+		}
+		entries = append(entries, pageResult.Entries...)
+	}
+	for i := range entries {
+		entries[i].ProblemScores = nil
+	}
+	snapshot, err := json.Marshal(entries)
+	if err != nil {
+		return false, fmt.Errorf("encode leaderboard snapshot: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE leaderboard_freezes
+		SET frozen = true,
+		    frozen_at = (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT,
+		    snapshot = $2::JSONB,
+		    total_count = $3,
+		    version = $4
+		WHERE contest_id = $1
+	`, contestID, string(snapshot), firstPage.TotalCount, version+1); err != nil {
+		return false, fmt.Errorf("save frozen leaderboard snapshot: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("finish leaderboard freeze transaction: %w", err)
+	}
+	s.InvalidateCache(contestID)
+	return true, nil
+}
+
+func isMissingRelation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42P01"
 }
 
 // summarizeSolves reports how many problems the user solved and the time at
@@ -377,7 +605,7 @@ func summarizeSolves(scores []dto.ProblemScore) (solved int, lastSolve int64) {
 }
 
 // Attempts counts all submissions for display; the final-ranking penalty excludes judge errors.
-func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, userIDs []string, mcqCutoff *int64) (map[string][]dto.ProblemScore, error) {
+func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQueryer, contestID string, userIDs []string, mcqCutoff *int64) (map[string][]dto.ProblemScore, error) {
 	if len(userIDs) == 0 {
 		return nil, nil
 	}
@@ -420,7 +648,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, contestID string, u
         ORDER BY 1, 3
 	`, strings.Join(placeholders, ", "), typeFilter, batchQuery)
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query problem scores: %w", err)
 	}
@@ -905,8 +1133,8 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 }
 
 // The first reader freezes the batch atomically; all replicas reuse it after expiry.
-func (s *RankingStore) freezeMCQBatch(ctx context.Context, contestID string, cutoff int64) error {
-	_, err := s.db.ExecContext(ctx, `
+func (s *RankingStore) freezeMCQBatchUsing(ctx context.Context, queryer rankingQueryer, contestID string, cutoff int64) error {
+	_, err := queryer.ExecContext(ctx, `
  WITH new_batch AS (
      INSERT INTO leaderboard_mcq_batches(contest_id, cutoff) VALUES($1, $2)
      ON CONFLICT DO NOTHING RETURNING contest_id

@@ -81,6 +81,8 @@ type serviceRankingTestStore struct {
 	updateFunc          func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
 	leaderboardFunc     func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
 	liveLeaderboardFunc func(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error)
+	freezeStatus        bool
+	setFrozenFunc       func(ctx context.Context, contestID string, frozen bool, cutoff *int64) (bool, error)
 }
 
 func (s serviceRankingTestStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -111,6 +113,21 @@ func (s serviceRankingTestStore) GetLiveLeaderboard(ctx context.Context, contest
 		return s.liveLeaderboardFunc(ctx, contestID, page, mcqCutoff)
 	}
 	return s.GetLeaderboard(ctx, contestID, page)
+}
+
+func (s serviceRankingTestStore) GetLeaderboardFreezeStatus(context.Context, string) (bool, error) {
+	return s.freezeStatus, nil
+}
+
+func (s serviceRankingTestStore) GetFrozenLeaderboard(context.Context, string, int) (*dto.GetLeaderboardResponse, bool, error) {
+	return nil, false, nil
+}
+
+func (s serviceRankingTestStore) SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool, cutoff *int64) (bool, error) {
+	if s.setFrozenFunc != nil {
+		return s.setFrozenFunc(ctx, contestID, frozen, cutoff)
+	}
+	return frozen, nil
 }
 
 func TestConsolidateContestService(t *testing.T) {
