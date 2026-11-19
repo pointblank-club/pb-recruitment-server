@@ -58,6 +58,8 @@ var (
 	ErrYandexInvalidCode           = errors.New("Yandex did not accept this sign-in; connect again")
 	ErrYandexAccountTaken          = errors.New("this Yandex account is already connected to another Point Blank account")
 	ErrYandexUnavailable           = errors.New("could not reach Yandex; try again shortly")
+	ErrContestSessionNotEnded      = errors.New("feedback form is only accessible after your contest session has ended")
+	ErrFeedbackAlreadySubmitted    = errors.New("feedback has already been submitted for this contest")
 )
 
 var ErrLeaderboardFreezeUnavailable = errors.New("leaderboard freeze is unavailable until migration 000049 is applied")

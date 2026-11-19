@@ -29,6 +29,8 @@ type Storage struct {
 		GetCandidateSessionStatus(ctx context.Context, contestID string, userID string) (*dto.CandidateSessionStatusResponse, error)
 		ResetContestantTabSwitches(ctx context.Context, contestID string, userID string, adminID string) (int, error)
 		EndContestSession(ctx context.Context, contestID string, userID string) error
+		CreateFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error
+		HasSubmittedFeedback(ctx context.Context, contestID string, userID string) (bool, error)
 	}
 	Users interface {
 		CreateUser(context.Context, *auth.UserRecord, *dto.CreateUserRequest) error

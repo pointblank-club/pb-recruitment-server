@@ -704,3 +704,74 @@ func (cs *ContestService) ConsolidateContest(ctx context.Context, contestID stri
 
 	return cs.stores.Rankings.ConsolidateContest(ctx, contestID, regradeMCQs, force)
 }
+
+func isCandidateFeedbackEligible(contest *dto.GetContestResponse, sessionStatus *dto.CandidateSessionStatusResponse, now int64) bool {
+	if contest == nil || sessionStatus == nil {
+		return false
+	}
+	return (contest.EndTime <= now) || sessionStatus.IsSessionEnded || sessionStatus.IsTabSwitchTerminated || sessionStatus.IsBrowserSessionTerminated
+}
+
+func (cs *ContestService) GetFeedbackStatus(ctx context.Context, contestID string, userID string) (*dto.FeedbackStatusResponse, error) {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return nil, fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	sessionStatus, err := cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
+	if err != nil {
+		return nil, err
+	}
+
+	hasSubmitted, err := cs.stores.Contests.HasSubmittedFeedback(ctx, contestID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UnixMilli()
+	contestEnded := isCandidateFeedbackEligible(contest, sessionStatus, now)
+
+	return &dto.FeedbackStatusResponse{
+		CanSubmit:    contestEnded && !hasSubmitted,
+		HasSubmitted: hasSubmitted,
+	}, nil
+}
+
+func (cs *ContestService) SubmitFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error {
+	if cs == nil || cs.stores == nil || cs.stores.Contests == nil {
+		return fmt.Errorf("contest service: contest store not initialized")
+	}
+
+	sessionStatus, err := cs.stores.Contests.GetCandidateSessionStatus(ctx, contestID, userID)
+	if err != nil {
+		return err
+	}
+
+	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UnixMilli()
+	if !isCandidateFeedbackEligible(contest, sessionStatus, now) {
+		return common.ErrContestSessionNotEnded
+	}
+
+	hasSubmitted, err := cs.stores.Contests.HasSubmittedFeedback(ctx, contestID, userID)
+	if err != nil {
+		return err
+	}
+	if hasSubmitted {
+		return common.ErrFeedbackAlreadySubmitted
+	}
+
+	if err := cs.stores.Contests.CreateFeedback(ctx, contestID, userID, fb); err != nil {
+		return err
+	}
+
+	return nil
+}

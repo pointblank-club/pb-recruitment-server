@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/labstack/gommon/log"
+	"github.com/lib/pq"
 )
 
 type ContestStore struct {
@@ -740,4 +741,59 @@ func (s *ContestStore) EndContestSession(ctx context.Context, contestID string, 
 	}
 
 	return tx.Commit()
+}
+
+func (s *ContestStore) HasSubmittedFeedback(ctx context.Context, contestID string, userID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("contest store: db is not initialized")
+	}
+
+	var exists bool
+	q := `SELECT EXISTS(SELECT 1 FROM contest_feedback WHERE contest_id = $1 AND user_id = $2)`
+	err := s.db.QueryRowContext(ctx, q, contestID, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("check feedback exists: %w", err)
+	}
+	return exists, nil
+}
+
+func (s *ContestStore) CreateFeedback(ctx context.Context, contestID string, userID string, fb *dto.SubmitFeedbackRequest) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("contest store: db is not initialized")
+	}
+
+	q := `
+		INSERT INTO contest_feedback (
+			contest_id, user_id, platform_smoothness,
+			atmosphere_rating, difficulty_rating, responsiveness_rating, time_rating,
+			thoughts_during_event, thoughts_other, final_feedback,
+			logistics_clarity, logistics_punctuality, logistics_venue,
+			best_thing, recommend_likelihood, convinced_reasons, convinced_other,
+			suggestions
+		) VALUES (
+			$1, $2, $3,
+			$4, $5, $6, $7,
+			$8, $9, $10,
+			$11, $12, $13,
+			$14, $15, $16, $17,
+			$18
+		)
+	`
+
+	_, err := s.db.ExecContext(ctx, q,
+		contestID, userID, fb.PlatformSmoothness,
+		fb.AtmosphereRating, fb.DifficultyRating, fb.ResponsivenessRating, fb.TimeRating,
+		fb.ThoughtsDuringEvent, fb.ThoughtsOther, fb.FinalFeedback,
+		fb.LogisticsClarity, fb.LogisticsPunctuality, fb.LogisticsVenue,
+		fb.BestThing, fb.RecommendLikelihood, pq.Array(fb.ConvincedReasons), fb.ConvincedOther,
+		fb.Suggestions,
+	)
+	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			return common.ErrFeedbackAlreadySubmitted
+		}
+		return fmt.Errorf("create feedback: %w", err)
+	}
+	return nil
 }

@@ -31,6 +31,8 @@ type submissionContestStore struct {
 	err                   error
 	tabSwitchCount        int
 	isTabSwitchTerminated bool
+	isSessionEnded        bool
+	hasSubmittedFeedback  bool
 }
 
 func (s submissionContestStore) GetContest(context.Context, string) (*dto.GetContestResponse, error) {
@@ -56,10 +58,25 @@ func (s submissionContestStore) EndContestSession(_ context.Context, contestID s
 }
 
 func (s submissionContestStore) GetCandidateSessionStatus(context.Context, string, string) (*dto.CandidateSessionStatusResponse, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if !s.registered {
+		return nil, common.UserNotRegisteredError
+	}
 	return &dto.CandidateSessionStatusResponse{
 		TabSwitchCount:        s.tabSwitchCount,
 		IsTabSwitchTerminated: s.isTabSwitchTerminated,
+		IsSessionEnded:        s.isSessionEnded,
 	}, nil
+}
+
+func (s submissionContestStore) HasSubmittedFeedback(context.Context, string, string) (bool, error) {
+	return s.hasSubmittedFeedback, s.err
+}
+
+func (s submissionContestStore) CreateFeedback(context.Context, string, string, *dto.SubmitFeedbackRequest) error {
+	return s.err
 }
 
 func TestSubmitSolutionMissingContest(t *testing.T) {
