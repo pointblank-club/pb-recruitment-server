@@ -187,3 +187,38 @@ func TestLeaderboardFreezeWithoutMigrationPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An unfreeze sent while a freeze is capturing waits for it and then wins.
+func TestLeaderboardUnfreezeDuringCapturePostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	contest, _, _ := seedFreezeContest(t, db, 600)
+	store := stores.NewRankingStore(db)
+	cutoff := time.Now().UnixMilli()
+	freezeDone := make(chan error, 1)
+	go func() { freezeDone <- store.SetLeaderboardFrozen(ctx, contest, true, &cutoff) }()
+
+	for held := false; !held; {
+		if err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted AND objsubid = 1
+			  AND ((classid::bigint << 32) | objid::bigint) = hashtextextended('leaderboard_freeze:' || $1, 0))
+		`, contest).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-freezeDone:
+			t.Fatalf("freeze finished (%v) before the unfreeze could overlap it", err)
+		default:
+		}
+	}
+	if err := store.SetLeaderboardFrozen(ctx, contest, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-freezeDone; err != nil {
+		t.Fatal(err)
+	}
+	if frozen, err := store.GetLeaderboardFreezeStatus(ctx, contest); err != nil || frozen {
+		t.Fatalf("leaderboard frozen=%v err=%v after the later unfreeze", frozen, err)
+	}
+}

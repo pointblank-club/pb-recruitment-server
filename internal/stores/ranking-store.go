@@ -473,9 +473,25 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 	if s == nil || s.db == nil {
 		return fmt.Errorf("ranking store: db is not initialized")
 	}
+	// The per-contest lock serializes freeze and unfreeze, so an unfreeze sent
+	// while a snapshot is being captured waits for it and then wins.
+	lock, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin leaderboard freeze: %w", err)
+	}
+	defer lock.Rollback()
+	if _, err := lock.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('leaderboard_freeze:' || $1, 0))`, contestID); err != nil {
+		return fmt.Errorf("lock leaderboard freeze: %w", err)
+	}
 	if !frozen {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM leaderboard_freezes WHERE contest_id = $1`, contestID)
-		return freezeTableError("unfreeze leaderboard", err)
+		if _, err := lock.ExecContext(ctx, `DELETE FROM leaderboard_freezes WHERE contest_id = $1`, contestID); err != nil {
+			return freezeTableError("unfreeze leaderboard", err)
+		}
+		if err := lock.Commit(); err != nil {
+			return fmt.Errorf("commit leaderboard unfreeze: %w", err)
+		}
+		s.InvalidateCache(contestID) // Drops this snapshot's cached pages.
+		return nil
 	}
 	if _, already, err := s.leaderboardFrozenAt(ctx, contestID); err != nil || already {
 		return err
@@ -486,8 +502,8 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 			return err
 		}
 	}
-	// One repeatable-read snapshot keeps entries and their solve summaries consistent
-	// while scoring continues. It only reads, so it needs no serialization retries.
+	// One repeatable-read snapshot, started after the lock, keeps entries and their
+	// solve summaries consistent while scoring continues. It only reads.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return fmt.Errorf("begin leaderboard snapshot: %w", err)
@@ -504,13 +520,16 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 	if err != nil {
 		return fmt.Errorf("encode leaderboard snapshot: %w", err)
 	}
-	// A concurrent freeze that saved first wins; this one keeps its snapshot.
-	_, err = s.db.ExecContext(ctx, `
+	if _, err := lock.ExecContext(ctx, `
 		INSERT INTO leaderboard_freezes(contest_id, frozen_at, snapshot)
 		VALUES ($1, (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT, $2::JSONB)
-		ON CONFLICT (contest_id) DO NOTHING
-	`, contestID, string(snapshot))
-	return freezeTableError("save frozen leaderboard snapshot", err)
+	`, contestID, string(snapshot)); err != nil {
+		return freezeTableError("save frozen leaderboard snapshot", err)
+	}
+	if err := lock.Commit(); err != nil {
+		return fmt.Errorf("commit leaderboard freeze: %w", err)
+	}
+	return nil
 }
 
 func freezeTableError(action string, err error) error {

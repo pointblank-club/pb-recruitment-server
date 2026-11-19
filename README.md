@@ -253,8 +253,9 @@ the original snapshot. Freeze before the contest ends to hide final results: the
 public sees full results as soon as an unfrozen contest ends.
 If a freeze remains active after the contest ends, public viewers continue to see
 the saved snapshot until an admin releases it. Hiding or disqualifying a user during
-a freeze removes them from the snapshot and closes the rank gap (ties stay tied);
-a user unhidden during a freeze reappears when it is released.
+a freeze removes them from the snapshot and closes the rank gap (ties stay tied).
+Unhiding restores them only if they were visible when the freeze began; users hidden
+at that moment reappear when the freeze is released.
 Existing verdicts first publish at the next boundary after
 the history migration. Submission times retain their existing one-second precision.
 Batch aggregate changes can still reveal MCQ correctness, even while individual
