@@ -85,13 +85,14 @@ func TestBlankExpectedOutputFinalizationPostgres(t *testing.T) {
 				runtime, memory = 0, 0
 			}
 			assertSubmission(t, db, sub, tc.want, runtime, memory)
-			var score, count int
+			var score float64
+			var count int
 			if err := db.QueryRow(`SELECT coalesce(sum(score),0) FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil {
 				t.Fatal(err)
 			}
-			wantScore := 0
+			wantScore := 0.0
 			if tc.want == "accepted" {
-				wantScore = 10
+				wantScore = 10.0
 			}
 			if score != wantScore {
 				t.Fatal("score", score, wantScore)

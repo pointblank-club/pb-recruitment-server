@@ -157,16 +157,17 @@ func testLiveJudge0Finalization(t *testing.T, callbacks bool) {
 			if err != nil || string(result.Status) != tc.want {
 				t.Fatal(result, tc.want, err)
 			}
-			var score, count int
+			var score float64
+			var count int
 			if err := db.QueryRow(`SELECT coalesce(sum(score),0) FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil {
 				t.Fatal(err)
 			}
 			if err := db.QueryRow(`SELECT count(*) FROM test_case_results WHERE submission_id=$1`, sub).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
-			wantScore := 0
+			wantScore := 0.0
 			if tc.want == "accepted" {
-				wantScore = 10
+				wantScore = 10.0
 			}
 			if count != 1 || score != wantScore {
 				t.Fatal("score/results", score, count)

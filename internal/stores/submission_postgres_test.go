@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -161,12 +162,12 @@ func TestJudgeMCQPostgres(t *testing.T) {
 			t.Fatalf("entries=%d", len(leaderboard.Entries))
 		}
 		entry := leaderboard.Entries[0]
-		sum := 0
+		sum := 0.0
 		for _, score := range entry.ProblemScores {
 			sum += score.Score
 		}
 		if entry.TotalScore != 10 || sum != entry.TotalScore {
-			t.Fatalf("total=%d breakdown=%d", entry.TotalScore, sum)
+			t.Fatalf("total=%v breakdown=%v", entry.TotalScore, sum)
 		}
 	}
 	assertScore()
@@ -383,5 +384,122 @@ func TestMCQHistoricalSurplusPreservedPostgres(t *testing.T) {
 	}, 0)
 	if !errors.Is(err, common.ErrSubmissionAlreadyExists) {
 		t.Fatalf("expected ErrSubmissionAlreadyExists for problem with surplus history, got %v", err)
+	}
+}
+
+func TestSubmissionExecutionDenominatorAndCompletedCount(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+
+	user := uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
+	subID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Exec Denom User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Exec Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Exec Problem', 10, 'code')`, problem, contest); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score, language) VALUES($1,$2,$3,$4,'code','pending',100,0.00,'python')`, subID, user, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5 execution rows: 1 accepted, 4 pending
+	for i := 0; i < 5; i++ {
+		execStatus := "pending"
+		if i == 0 {
+			execStatus = "accepted"
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO submission_executions(id, submission_id, test_case_index, status, created_at) VALUES($1,$2,$3,$4,100)`, uuid.NewString(), subID, i, execStatus); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1 completed callback result in test_case_results
+	if _, err := db.ExecContext(ctx, `INSERT INTO test_case_results(id, submission_id, test_case_id, status, runtime, memory, created_at) VALUES($1,$2,'0','pass',10,10,100)`, uuid.NewString(), subID); err != nil {
+		t.Fatal(err)
+	}
+
+	submissionStore := stores.NewSubmissionStore(db)
+
+	status, err := submissionStore.GetSubmissionStatusByID(ctx, subID)
+	if err != nil {
+		t.Fatalf("GetSubmissionStatusByID failed: %v", err)
+	}
+	if status.TotalTestCases != 5 || status.TestCasesPassed != 1 {
+		t.Errorf("status counts = %d/%d, want 1/5", status.TestCasesPassed, status.TotalTestCases)
+	}
+
+	details, err := submissionStore.GetSubmissionDetailsByID(ctx, subID)
+	if err != nil {
+		t.Fatalf("GetSubmissionDetailsByID failed: %v", err)
+	}
+	if details.TotalTestCases != 5 {
+		t.Errorf("expected details.TotalTestCases=5, got %d", details.TotalTestCases)
+	}
+	if details.TestCasesPassed != 1 {
+		t.Errorf("expected details.TestCasesPassed=1, got %d", details.TestCasesPassed)
+	}
+	if len(details.TestCaseResults) != 1 {
+		t.Errorf("expected len(details.TestCaseResults)=1, got %d", len(details.TestCaseResults))
+	}
+}
+
+func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
+	db := postgresTestDBBefore(t, "000048")
+	ctx := context.Background()
+	seed := `
+		INSERT INTO users(id,name,email,usn,current_year,department) VALUES
+			('u1','U1','u1@x','u1',1,'CS'),('u2','U2','u2@x','u2',1,'CS');
+		INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES
+			('c','C','',1,2,1,2),('final','F','',1,2,1,2);
+		INSERT INTO problems(id,contest_id,name,score,type) VALUES('p','c','P',10,'code'),('q','c','Q',100,'code'),('fp','final','FP',10,'code');
+		INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at,language) VALUES
+			('partial','u1','c','p','code','wrong_answer',1,'py'),
+			('solved','u1','c','q','code','accepted',2,'py'),
+			('judge_err','u2','c','p','code','wrong_answer',3,'py'),
+			('published','u1','final','fp','code','wrong_answer',4,'py');
+		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
+			SELECT gen_random_uuid(),'partial',i,CASE WHEN i<3 THEN 'accepted' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
+		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
+			SELECT gen_random_uuid(),'judge_err',i,CASE WHEN i<3 THEN 'accepted' WHEN i=3 THEN 'judge_error' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
+		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
+			SELECT gen_random_uuid(),'published',i,CASE WHEN i<3 THEN 'accepted' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
+		INSERT INTO rankings(contest_id,user_id,score,rank) VALUES('c','u1',100,0),('c','u2',0,0),('final','u1',0,1);`
+	if _, err := db.ExecContext(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../migrations/000048_code_partial_scoring.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Consolidated contests keep their published all-or-nothing results.
+	for id, want := range map[string]float64{"partial": 2.50, "solved": 100, "judge_err": 0, "published": 0} {
+		var got float64
+		if err := db.QueryRowContext(ctx, `SELECT score FROM submissions WHERE id=$1`, id).Scan(&got); err != nil || got != want {
+			t.Errorf("submission %s score = %.2f (err %v), want %.2f", id, got, err, want)
+		}
+	}
+	for _, tc := range []struct {
+		contest, user string
+		score         float64
+		rank          int
+	}{{"c", "u1", 102.50, 0}, {"c", "u2", 0, 0}, {"final", "u1", 0, 1}} {
+		var got float64
+		var rank int
+		if err := db.QueryRowContext(ctx, `SELECT score,rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, tc.contest, tc.user).Scan(&got, &rank); err != nil || got != tc.score || rank != tc.rank {
+			t.Errorf("ranking %s/%s = %.2f rank %d (err %v), want %.2f rank %d", tc.contest, tc.user, got, rank, err, tc.score, tc.rank)
+		}
 	}
 }

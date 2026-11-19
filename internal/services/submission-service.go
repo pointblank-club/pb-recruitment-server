@@ -42,6 +42,8 @@ func maskMCQVerdict(sub *models.Submission) {
 	if sub.Type == models.MCQ && sub.ContestEndTime >= time.Now().UnixMilli() {
 		sub.Status = models.Attempted
 		sub.TestCaseResults = nil
+		sub.Score = 0.0
+		sub.TestCasesPassed = 0
 	}
 }
 

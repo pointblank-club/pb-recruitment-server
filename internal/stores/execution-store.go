@@ -1,6 +1,7 @@
 package stores
 
 import (
+	"app/internal/common"
 	"app/internal/judge0"
 	"app/internal/models"
 	"bytes"
@@ -84,6 +85,17 @@ func (s *ExecutionStore) InsertBatch(ctx context.Context, submissionID string, i
 	return executions, nil
 }
 
+// recomputeRankingScoreQ sums each problem's best score; callers hold the ranking row lock.
+// Accepted uses the current problem score, matching the leaderboard and consolidation.
+const recomputeRankingScoreQ = `UPDATE rankings SET score=COALESCE((
+	SELECT SUM(max_p_score) FROM (
+		SELECT MAX(CASE WHEN s.status='accepted' THEN p.score ELSE s.score END) AS max_p_score
+		FROM submissions s JOIN problems p ON p.id=s.problem_id AND p.contest_id=s.contest_id
+		WHERE s.contest_id=$1 AND s.user_id=$2
+		GROUP BY s.problem_id
+	) sub
+), 0) WHERE contest_id=$1 AND user_id=$2`
+
 func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResult) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -91,7 +103,8 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 	}
 	defer tx.Rollback()
 	var subID, userID, contestID, problemID, subStatus string
-	if err = tx.QueryRowContext(ctx, `SELECT s.id,s.user_id,s.contest_id,s.problem_id,s.status FROM submissions s JOIN submission_executions e ON e.submission_id=s.id WHERE e.id=$1 FOR UPDATE OF s`, r.ExecutionID).Scan(&subID, &userID, &contestID, &problemID, &subStatus); err != nil {
+	var problemScore float64
+	if err = tx.QueryRowContext(ctx, `SELECT s.id,s.user_id,s.contest_id,s.problem_id,s.status,p.score FROM submissions s JOIN problems p ON p.id=s.problem_id AND p.contest_id=s.contest_id JOIN submission_executions e ON e.submission_id=s.id WHERE e.id=$1 FOR UPDATE OF s`, r.ExecutionID).Scan(&subID, &userID, &contestID, &problemID, &subStatus, &problemScore); err != nil {
 		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,status FROM submission_executions WHERE submission_id=$1 ORDER BY id FOR UPDATE`, subID)
@@ -197,10 +210,24 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 			return err
 		}
 		verdict := aggregateFailure(children)
+		passedCount, judgeErrored := 0, false
+		for _, c := range children {
+			switch c.status {
+			case "accepted":
+				passedCount++
+			case string(models.JudgeError):
+				judgeErrored = true
+			}
+		}
 		if accepted {
 			verdict = "accepted"
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE submissions SET status=$2,runtime=$3,memory=$4 WHERE id=$1 AND status='pending'`, subID, verdict, totalRuntime, totalMemory)
+		subScore := 0.0
+		// Any infrastructure failure voids partial credit, so a judge error never beats a cleaner run.
+		if !judgeErrored {
+			subScore = common.CalculateCodePartialScore(passedCount, len(children), problemScore)
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE submissions SET status=$2,runtime=$3,memory=$4,score=$5 WHERE id=$1 AND status='pending'`, subID, verdict, totalRuntime, totalMemory, subScore)
 		if err != nil {
 			return err
 		}
@@ -213,7 +240,7 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE rankings SET score=COALESCE((SELECT sum(p.score) FROM problems p WHERE p.contest_id=$1 AND EXISTS(SELECT 1 FROM submissions x WHERE x.contest_id=p.contest_id AND x.problem_id=p.id AND x.user_id=$2 AND x.status='accepted')),0) WHERE contest_id=$1 AND user_id=$2`, contestID, userID)
+		_, err = tx.ExecContext(ctx, recomputeRankingScoreQ, contestID, userID)
 		if err != nil {
 			return err
 		}

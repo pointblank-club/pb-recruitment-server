@@ -154,9 +154,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			if ended {
 				wantStatus, wantProgress = tc.verdict, tc.progress
 			}
-			var status struct {
-				Status models.SubmissionStatus `json:"status"`
-			}
+			var status dto.GetSubmissionStatusResponse
 			if err := json.Unmarshal(request(sc.GetSubmissionStatus, tc.uid, tc.id, nil), &status); err != nil || status.Status != wantStatus {
 				t.Fatalf("ended=%v status=%+v err=%v", ended, status, err)
 			}
@@ -168,6 +166,44 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			var history dto.ListProblemSubmissionsResponse
 			if err := json.Unmarshal(request(sc.ListUserSubmissions, tc.uid, "", &dto.ListProblemSubmissionsRequest{ProblemID: mcqProblem}), &history); err != nil || len(history.Submissions) != 1 || history.Submissions[0].Status != wantStatus {
 				t.Fatalf("ended=%v history=%+v err=%v", ended, history, err)
+			}
+			wantScore := 0.0
+			wantPassedCount := 0
+			if ended && tc.verdict == models.Accepted {
+				wantScore = 20.0
+				wantPassedCount = 1
+			}
+			if status.Score != wantScore || detail.Score != wantScore || history.Submissions[0].Score != wantScore {
+				t.Fatalf("ended=%v tc=%+v score leak: status=%v detail=%v history=%v want=%v",
+					ended, tc, status.Score, detail.Score, history.Submissions[0].Score, wantScore)
+			}
+			if status.TestCasesPassed != wantPassedCount || detail.TestCasesPassed != wantPassedCount {
+				t.Fatalf("ended=%v tc=%+v count leak: status=%v detail=%v want=%v",
+					ended, tc, status.TestCasesPassed, detail.TestCasesPassed, wantPassedCount)
+			}
+
+			// Cross-contract verification for frontend #85: expect test_cases_passed, never passed_test_cases.
+			var rawDetailMap map[string]interface{}
+			if err := json.Unmarshal(data, &rawDetailMap); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := rawDetailMap["passed_test_cases"]; exists {
+				t.Fatalf("cross-contract violation: GetSubmissionDetails returned legacy 'passed_test_cases' key")
+			}
+			if _, exists := rawDetailMap["test_cases_passed"]; !exists {
+				t.Fatalf("cross-contract violation: GetSubmissionDetails missing expected 'test_cases_passed' key")
+			}
+
+			statusData := request(sc.GetSubmissionStatus, tc.uid, tc.id, nil)
+			var rawStatusMap map[string]interface{}
+			if err := json.Unmarshal(statusData, &rawStatusMap); err != nil {
+				t.Fatal(err)
+			}
+			if _, exists := rawStatusMap["passed_test_cases"]; exists {
+				t.Fatalf("cross-contract violation: GetSubmissionStatus returned legacy 'passed_test_cases' key")
+			}
+			if _, exists := rawStatusMap["test_cases_passed"]; !exists {
+				t.Fatalf("cross-contract violation: GetSubmissionStatus missing expected 'test_cases_passed' key")
 			}
 			var problems []dto.ProblemOverview
 			if err := json.Unmarshal(request(cc.GetContestProblemsList, tc.uid, contest, nil), &problems); err != nil {
@@ -230,7 +266,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 						wantRank = 2
 					}
 				}
-				if entry.TotalScore != wantScore || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved || entry.LastSubmissionTime != wantTime {
+				if entry.TotalScore != float64(wantScore) || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved || entry.LastSubmissionTime != wantTime {
 					t.Fatalf("stage=%s viewer=%q entry=%+v, want score/rank/solves/time=%d/%d/%d/%d", stage, viewer, entry, wantScore, wantRank, wantSolved, wantTime)
 				}
 				if viewer != user && len(entry.ProblemScores) != 0 {
@@ -264,7 +300,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, entry := range res.Entries {
-			if entry.UserID == user && entry.TotalScore != tc.userScore || entry.UserID == mcqOnly && entry.TotalScore != tc.mcqOnlyScore {
+			if entry.UserID == user && entry.TotalScore != float64(tc.userScore) || entry.UserID == mcqOnly && entry.TotalScore != float64(tc.mcqOnlyScore) {
 				t.Fatalf("cutoff=%d unexpected cached totals: %+v", tc.cutoff, res.Entries)
 			}
 		}

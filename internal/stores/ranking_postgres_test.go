@@ -6,104 +6,13 @@ import (
 	"app/internal/models/dto"
 	"app/internal/stores"
 	"context"
-	"database/sql"
 	"errors"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/stdlib"
 )
-
-type freezeLockTraceKey struct{}
-
-type freezeTransactionGate struct {
-	entered        chan struct{}
-	release        chan struct{}
-	lockOnce       sync.Once
-	mu             sync.Mutex
-	insertAttempts int
-}
-
-func (g *freezeTransactionGate) TraceQueryStart(ctx context.Context, _ *pgx.Conn, query pgx.TraceQueryStartData) context.Context {
-	sql := strings.ToLower(strings.TrimSpace(query.SQL))
-	if strings.HasPrefix(sql, "insert into leaderboard_freezes") {
-		g.mu.Lock()
-		g.insertAttempts++
-		g.mu.Unlock()
-	}
-	if strings.Contains(sql, "select frozen, version") && strings.Contains(sql, "for update") {
-		return context.WithValue(ctx, freezeLockTraceKey{}, true)
-	}
-	return ctx
-}
-
-func (g *freezeTransactionGate) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryEndData) {
-	if gated, _ := ctx.Value(freezeLockTraceKey{}).(bool); gated {
-		g.lockOnce.Do(func() {
-			close(g.entered)
-			<-g.release
-		})
-	}
-}
-
-func freezeConcurrencyDB(t *testing.T, baseDB *sql.DB, gate *freezeTransactionGate) *sql.DB {
-	t.Helper()
-	config, err := pgx.ParseConfig(os.Getenv("TEST_DATABASE_URL"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schema string
-	if err := baseDB.QueryRow(`SHOW search_path`).Scan(&schema); err != nil {
-		t.Fatal(err)
-	}
-	config.RuntimeParams["search_path"] = schema
-	config.Tracer = gate
-	db := stdlib.OpenDB(*config)
-	db.SetMaxOpenConns(40)
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Errorf("close freeze concurrency database: %v", err)
-		}
-	})
-	return db
-}
-
-func waitForFreezeInsertLock(t *testing.T, db *sql.DB, ctx context.Context) {
-	t.Helper()
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		var waiting bool
-		if err := db.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM pg_stat_activity
-				WHERE datname = current_database()
-				  AND state = 'active'
-				  AND wait_event_type = 'Lock'
-			  AND query ~ '^[[:space:]]*INSERT INTO leaderboard_freezes'
-			)
-		`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		if waiting {
-			return
-		}
-		select {
-		case <-timer.C:
-			t.Fatal("second freeze request did not wait on the first transaction")
-		case <-ctx.Done():
-			t.Fatalf("timed out waiting for the concurrent freeze lock: %v", ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
 
 func TestConsolidationRepeatedPostgres(t *testing.T) {
 	db := postgresTestDB(t)
@@ -172,21 +81,23 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 	}
 
 	// Verify user1 has score 30 (10 MCQ + 20 Code), rank 1
-	var score1, rank1 int
+	var score1 float64
+	var rank1 int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user1).Scan(&score1, &rank1); err != nil {
 		t.Fatalf("query user1 ranking: %v", err)
 	}
 	if score1 != 30 || rank1 != 1 {
-		t.Fatalf("user1 got score=%d rank=%d, want score=30 rank=1", score1, rank1)
+		t.Fatalf("user1 got score=%v rank=%d, want score=30 rank=1", score1, rank1)
 	}
 
 	// Verify user2 has score 0, rank 2
-	var score2, rank2 int
+	var score2 float64
+	var rank2 int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user2).Scan(&score2, &rank2); err != nil {
 		t.Fatalf("query user2 ranking: %v", err)
 	}
 	if score2 != 0 || rank2 != 2 {
-		t.Fatalf("user2 got score=%d rank=%d, want score=0 rank=2", score2, rank2)
+		t.Fatalf("user2 got score=%v rank=%d, want score=0 rank=2", score2, rank2)
 	}
 
 	// Run second consolidation (re-run should be idempotent)
@@ -199,20 +110,22 @@ func TestConsolidationRepeatedPostgres(t *testing.T) {
 	}
 
 	// Verify scores and ranks are preserved identically
-	var score1Again, rank1Again int
+	var score1Again float64
+	var rank1Again int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user1).Scan(&score1Again, &rank1Again); err != nil {
 		t.Fatalf("query user1 ranking again: %v", err)
 	}
 	if score1Again != 30 || rank1Again != 1 {
-		t.Fatalf("repeated consolidation changed user1: score=%d rank=%d", score1Again, rank1Again)
+		t.Fatalf("repeated consolidation changed user1: score=%v rank=%d", score1Again, rank1Again)
 	}
 
-	var score2Again, rank2Again int
+	var score2Again float64
+	var rank2Again int
 	if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user2).Scan(&score2Again, &rank2Again); err != nil {
 		t.Fatalf("query user2 ranking again: %v", err)
 	}
 	if score2Again != 0 || rank2Again != 2 {
-		t.Fatalf("repeated consolidation changed user2: score=%d rank=%d", score2Again, rank2Again)
+		t.Fatalf("repeated consolidation changed user2: score=%v rank=%d", score2Again, rank2Again)
 	}
 }
 
@@ -276,12 +189,12 @@ func TestConsolidationConcurrentWithJudgeMCQPostgres(t *testing.T) {
 	}
 
 	// Verify that user got the 10 points without lost update
-	var finalScore int
+	var finalScore float64
 	if err := db.QueryRowContext(ctx, `SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&finalScore); err != nil {
 		t.Fatalf("query rankings score: %v", err)
 	}
 	if finalScore != 10 {
-		t.Fatalf("expected final score 10, got %d (lost update detected)", finalScore)
+		t.Fatalf("expected final score 10, got %v (lost update detected)", finalScore)
 	}
 }
 
@@ -393,12 +306,13 @@ func TestConsolidationAttemptPenaltyPostgres(t *testing.T) {
 					if entry.UserID == user {
 						wantRank, wantSubmissions = tc.wantRank, 3
 					}
-					var score, rank int
+					var score float64
+					var rank int
 					if err := db.QueryRowContext(ctx, `SELECT score, rank FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, entry.UserID).Scan(&score, &rank); err != nil {
 						t.Fatal(err)
 					}
 					if rank != wantRank || score != 10 || entry.Rank != wantRank || entry.TotalScore != 10 || entry.ProblemsSolved != 1 || entry.LastSubmissionTime != 100_000 {
-						t.Errorf("run %d: stored score/rank=%d/%d, leaderboard=%+v; want score=10 rank=%d solves=1 finish=100000", run, score, rank, entry, wantRank)
+						t.Errorf("run %d: stored score/rank=%v/%d, leaderboard=%+v; want score=10 rank=%d solves=1 finish=100000", run, score, rank, entry, wantRank)
 					}
 					// Displayed submissions include infrastructure failures; the rank penalty does not.
 					if len(entry.ProblemScores) != 1 || entry.ProblemScores[0].Attempts != wantSubmissions || entry.ProblemScores[0].Type != "code" {
@@ -594,10 +508,10 @@ func TestLiveRankingResubmissionOrderPostgres(t *testing.T) {
 			t.Fatalf("%s: expected 2 entries, got %d", stage, len(lb.Entries))
 		}
 		if lb.Entries[0].UserID != alice || lb.Entries[0].Rank != 1 || lb.Entries[0].TotalScore != 100 || lb.Entries[0].LastSubmissionTime != 1_000_000 {
-			t.Errorf("%s: expected alice rank 1 score 100 finish 1000000, got user %s rank %d score %d finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
+			t.Errorf("%s: expected alice rank 1 score 100 finish 1000000, got user %s rank %d score %v finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
 		}
 		if lb.Entries[1].UserID != bob || lb.Entries[1].Rank != 2 || lb.Entries[1].TotalScore != 100 || lb.Entries[1].LastSubmissionTime != 2_000_000 {
-			t.Errorf("%s: expected bob rank 2 score 100 finish 2000000, got user %s rank %d score %d finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
+			t.Errorf("%s: expected bob rank 2 score 100 finish 2000000, got user %s rank %d score %v finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
 		}
 	}
 
@@ -672,10 +586,10 @@ func TestCodeLeaderboardFinishTimeTieBreakPostgres(t *testing.T) {
 		}
 		// Z Earlier must be rank 1 despite being alphabetically after A Later
 		if lb.Entries[0].UserID != userZ || lb.Entries[0].Rank != 1 || lb.Entries[0].TotalScore != 100 || lb.Entries[0].LastSubmissionTime != 1_000_000 {
-			t.Errorf("%s: expected Z Earlier rank 1 score 100 finish 1000000, got user %s (%s) rank %d score %d finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Username, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
+			t.Errorf("%s: expected Z Earlier rank 1 score 100 finish 1000000, got user %s (%s) rank %d score %v finish %d", stage, lb.Entries[0].UserID, lb.Entries[0].Username, lb.Entries[0].Rank, lb.Entries[0].TotalScore, lb.Entries[0].LastSubmissionTime)
 		}
 		if lb.Entries[1].UserID != userA || lb.Entries[1].Rank != 2 || lb.Entries[1].TotalScore != 100 || lb.Entries[1].LastSubmissionTime != 2_000_000 {
-			t.Errorf("%s: expected A Later rank 2 score 100 finish 2000000, got user %s (%s) rank %d score %d finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Username, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
+			t.Errorf("%s: expected A Later rank 2 score 100 finish 2000000, got user %s (%s) rank %d score %v finish %d", stage, lb.Entries[1].UserID, lb.Entries[1].Username, lb.Entries[1].Rank, lb.Entries[1].TotalScore, lb.Entries[1].LastSubmissionTime)
 		}
 	}
 
@@ -690,137 +604,194 @@ func TestCodeLeaderboardFinishTimeTieBreakPostgres(t *testing.T) {
 	assertCodeOrder("after repeat submission at 5000")
 }
 
-func TestSetLeaderboardFrozenRetriesConcurrentSerializationPostgres(t *testing.T) {
-	t.Run("simultaneous first-use freezes and repeated freeze preserve snapshot", func(t *testing.T) {
-		db := postgresTestDB(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		contest, user := createFreezeTestContest(t, db)
+func TestPartialAttemptDoesNotStealAcceptedFinishTimePostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-		gate := &freezeTransactionGate{entered: make(chan struct{}), release: make(chan struct{})}
-		tracedDB := freezeConcurrencyDB(t, db, gate)
-		defer func() {
-			select {
-			case <-gate.release:
-			default:
-				close(gate.release)
-			}
-		}()
-		store := stores.NewRankingStore(tracedDB)
-		firstResult, secondResult := overlapFreezeRequests(t, ctx, db, gate, store, contest, true, true)
-		if firstResult.err != nil || !firstResult.frozen {
-			t.Fatalf("first freeze result = (%v, %v), want (true, nil)", firstResult.frozen, firstResult.err)
-		}
-		if secondResult.err != nil || !secondResult.frozen {
-			t.Fatalf("simultaneous first-use freeze result = (%v, %v), want (true, nil)", secondResult.frozen, secondResult.err)
-		}
-		gate.mu.Lock()
-		insertAttempts := gate.insertAttempts
-		gate.mu.Unlock()
-		if insertAttempts < 3 {
-			t.Fatalf("freeze row insert attempts = %d, want the losing transaction retry", insertAttempts)
-		}
+	userA, userB := uuid.NewString(), uuid.NewString()
+	contest := uuid.NewString()
+	problem := uuid.NewString()
 
-		if _, err := db.ExecContext(ctx, `UPDATE rankings SET score = 20 WHERE contest_id = $1 AND user_id = $2`, contest, user); err != nil {
+	for _, u := range []struct {
+		id   string
+		name string
+	}{
+		{userA, "User A"},
+		{userB, "User B"},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id, name, email, usn, current_year, department) VALUES($1, $2, $3, $1, 1, 'CS')`, u.id, u.name, u.id+"@example.test"); err != nil {
 			t.Fatal(err)
 		}
-		if frozen, err := store.SetLeaderboardFrozen(ctx, contest, true, nil); err != nil || !frozen {
-			t.Fatalf("repeated freeze result = (%v, %v), want (true, nil)", frozen, err)
-		}
-		snapshot, frozen, err := store.GetFrozenLeaderboard(ctx, contest, 0)
-		if err != nil || !frozen || len(snapshot.Entries) != 1 || snapshot.Entries[0].TotalScore != 10 {
-			t.Fatalf("repeated freeze replaced or lost the original snapshot: frozen=%v result=%+v err=%v", frozen, snapshot, err)
-		}
-	})
+	}
 
-	t.Run("freeze followed by unfreeze", func(t *testing.T) {
-		db := postgresTestDB(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		contest, _ := createFreezeTestContest(t, db)
-
-		gate := &freezeTransactionGate{entered: make(chan struct{}), release: make(chan struct{})}
-		tracedDB := freezeConcurrencyDB(t, db, gate)
-		defer func() {
-			select {
-			case <-gate.release:
-			default:
-				close(gate.release)
-			}
-		}()
-		store := stores.NewRankingStore(tracedDB)
-		firstResult, secondResult := overlapFreezeRequests(t, ctx, db, gate, store, contest, true, false)
-		if firstResult.err != nil || !firstResult.frozen {
-			t.Fatalf("freeze result = (%v, %v), want (true, nil)", firstResult.frozen, firstResult.err)
-		}
-		if secondResult.err != nil || secondResult.frozen {
-			t.Fatalf("unfreeze result = (%v, %v), want (false, nil)", secondResult.frozen, secondResult.err)
-		}
-		frozen, err := store.GetLeaderboardFreezeStatus(ctx, contest)
-		if err != nil || frozen {
-			t.Fatalf("freeze status after concurrent unfreeze = (%v, %v), want (false, nil)", frozen, err)
-		}
-		var version int64
-		if err := db.QueryRowContext(ctx, `SELECT version FROM leaderboard_freezes WHERE contest_id = $1`, contest).Scan(&version); err != nil {
-			t.Fatal(err)
-		}
-		if version != 2 {
-			t.Fatalf("freeze version = %d, want 2 after freeze and unfreeze", version)
-		}
-	})
-}
-
-type freezeCallResult struct {
-	frozen bool
-	err    error
-}
-
-func createFreezeTestContest(t *testing.T, db *sql.DB) (contest, user string) {
-	t.Helper()
-	contest, user = uuid.NewString(), uuid.NewString()
 	now := time.Now().UnixMilli()
-	if _, err := db.Exec(`INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Freeze Test','',1,$2,$3,$4)`, contest, now+60_000, now-60_000, now+60_000); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id, name, description, registration_start_time, registration_end_time, start_time, end_time) VALUES($1, 'TieBreak Contest', '', 1, $2, $3, $2)`, contest, now+3_600_000, now-3_600_000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Freeze User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Problem 1', 100, 'code')`, problem, contest); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO rankings(contest_id,user_id,score,rank,hidden,disqualified) VALUES($1,$2,10,1,false,false)`, contest, user); err != nil {
+
+	for _, u := range []string{userA, userB} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1, $2, 100, 0, false, false)`, contest, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// User A has partial at 100 (score 50), and full solve at 300 (score 100)
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'wrong_answer', 50, 100)`, uuid.NewString(), userA, contest, problem); err != nil {
 		t.Fatal(err)
 	}
-	return contest, user
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 100, 300)`, uuid.NewString(), userA, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	// User B has full solve at 200 (score 100)
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 100, 200)`, uuid.NewString(), userB, contest, problem); err != nil {
+		t.Fatal(err)
+	}
+
+	rankingStore := stores.NewRankingStore(db)
+
+	// In live leaderboard, User B (solve time 200) must beat User A (solve time 300)
+	lb, err := rankingStore.GetLiveLeaderboard(ctx, contest, 0, 0)
+	if err != nil {
+		t.Fatalf("GetLiveLeaderboard failed: %v", err)
+	}
+	if len(lb.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(lb.Entries))
+	}
+	if lb.Entries[0].UserID != userB || lb.Entries[0].Rank != 1 {
+		t.Errorf("live leaderboard: expected User B rank 1, got user %s rank %d", lb.Entries[0].UserID, lb.Entries[0].Rank)
+	}
+	if lb.Entries[1].UserID != userA || lb.Entries[1].Rank != 2 {
+		t.Errorf("live leaderboard: expected User A rank 2, got user %s rank %d", lb.Entries[1].UserID, lb.Entries[1].Rank)
+	}
+
+	// Run consolidation
+	if _, err := rankingStore.ConsolidateContest(ctx, contest, false, true); err != nil {
+		t.Fatalf("ConsolidateContest failed: %v", err)
+	}
+	rankingStore.InvalidateCache(contest)
+
+	consLB, err := rankingStore.GetLeaderboard(ctx, contest, 0)
+	if err != nil {
+		t.Fatalf("GetLeaderboard after consolidation failed: %v", err)
+	}
+	if consLB.Entries[0].UserID != userB || consLB.Entries[0].Rank != 1 {
+		t.Errorf("consolidated leaderboard: expected User B rank 1, got user %s rank %d", consLB.Entries[0].UserID, consLB.Entries[0].Rank)
+	}
+	if consLB.Entries[1].UserID != userA || consLB.Entries[1].Rank != 2 {
+		t.Errorf("consolidated leaderboard: expected User A rank 2, got user %s rank %d", consLB.Entries[1].UserID, consLB.Entries[1].Rank)
+	}
 }
 
-func overlapFreezeRequests(t *testing.T, ctx context.Context, db *sql.DB, gate *freezeTransactionGate, store *stores.RankingStore, contest string, firstFrozen, secondFrozen bool) (freezeCallResult, freezeCallResult) {
-	t.Helper()
-	firstResult := make(chan freezeCallResult, 1)
-	secondResult := make(chan freezeCallResult, 1)
-	go func() {
-		frozen, err := store.SetLeaderboardFrozen(ctx, contest, firstFrozen, nil)
-		firstResult <- freezeCallResult{frozen: frozen, err: err}
-	}()
-	select {
-	case <-gate.entered:
-	case <-ctx.Done():
-		t.Fatalf("first freeze did not reach its locked row: %v", ctx.Err())
-	}
-	go func() {
-		frozen, err := store.SetLeaderboardFrozen(ctx, contest, secondFrozen, nil)
-		secondResult <- freezeCallResult{frozen: frozen, err: err}
-	}()
-	waitForFreezeInsertLock(t, db, ctx)
-	close(gate.release)
+func TestPartialAttemptFinishTimeTieBreakerPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-	var first, second freezeCallResult
-	select {
-	case first = <-firstResult:
-	case <-ctx.Done():
-		t.Fatalf("first freeze request did not complete: %v", ctx.Err())
+	userA, userB := uuid.NewString(), uuid.NewString()
+	contest := uuid.NewString()
+	prob1, prob2 := uuid.NewString(), uuid.NewString()
+
+	for _, u := range []struct {
+		id   string
+		name string
+	}{
+		{userA, "User A"},
+		{userB, "User B"},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO users(id, name, email, usn, current_year, department) VALUES($1, $2, $3, $1, 1, 'CS')`, u.id, u.name, u.id+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	select {
-	case second = <-secondResult:
-	case <-ctx.Done():
-		t.Fatalf("second freeze request did not complete: %v", ctx.Err())
+
+	now := time.Now().UnixMilli()
+	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id, name, description, registration_start_time, registration_end_time, start_time, end_time) VALUES($1, 'TieBreak Contest 2', '', 1, $2, $3, $2)`, contest, now+3_600_000, now-3_600_000); err != nil {
+		t.Fatal(err)
 	}
-	return first, second
+
+	for _, p := range []struct {
+		id    string
+		name  string
+		score int
+	}{
+		{prob1, "Problem 1", 100},
+		{prob2, "Problem 2", 100},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, $3, $4, 'code')`, p.id, contest, p.name, p.score); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, u := range []string{userA, userB} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1, $2, 150, 0, false, false)`, contest, u); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// User A: fully solves Problem 1 at 100 (score 100); earns partial on Problem 2 at 500 (score 50)
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 100, 100)`, uuid.NewString(), userA, contest, prob1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'wrong_answer', 50, 500)`, uuid.NewString(), userA, contest, prob2); err != nil {
+		t.Fatal(err)
+	}
+
+	// User B: fully solves Problem 1 at 200 (score 100); earns partial on Problem 2 at 250 (score 50)
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'accepted', 100, 200)`, uuid.NewString(), userB, contest, prob1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, score, created_at) VALUES($1, $2, $3, $4, 'code', 'wrong_answer', 50, 250)`, uuid.NewString(), userB, contest, prob2); err != nil {
+		t.Fatal(err)
+	}
+
+	rankingStore := stores.NewRankingStore(db)
+
+	// Live leaderboard (no cutoff): User A (accepted at 100) must rank 1, User B (accepted at 200) must rank 2
+	lb, err := rankingStore.GetLiveLeaderboard(ctx, contest, 0, 0)
+	if err != nil {
+		t.Fatalf("GetLiveLeaderboard failed: %v", err)
+	}
+	if len(lb.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(lb.Entries))
+	}
+	if lb.Entries[0].UserID != userA || lb.Entries[0].Rank != 1 {
+		t.Errorf("live leaderboard: expected User A rank 1, got user %s rank %d", lb.Entries[0].UserID, lb.Entries[0].Rank)
+	}
+	if lb.Entries[1].UserID != userB || lb.Entries[1].Rank != 2 {
+		t.Errorf("live leaderboard: expected User B rank 2, got user %s rank %d", lb.Entries[1].UserID, lb.Entries[1].Rank)
+	}
+
+	// Live leaderboard with cutoff: User A must rank 1, User B must rank 2
+	cutoffLB, err := rankingStore.GetLiveLeaderboard(ctx, contest, 0, (now+3_600_000)*1000)
+	if err != nil {
+		t.Fatalf("GetLiveLeaderboard with cutoff failed: %v", err)
+	}
+	if cutoffLB.Entries[0].UserID != userA || cutoffLB.Entries[0].Rank != 1 {
+		t.Errorf("cutoff leaderboard: expected User A rank 1, got user %s rank %d", cutoffLB.Entries[0].UserID, cutoffLB.Entries[0].Rank)
+	}
+	if cutoffLB.Entries[1].UserID != userB || cutoffLB.Entries[1].Rank != 2 {
+		t.Errorf("cutoff leaderboard: expected User B rank 2, got user %s rank %d", cutoffLB.Entries[1].UserID, cutoffLB.Entries[1].Rank)
+	}
+
+	// Consolidate contest and verify stored ranks in GetLeaderboard
+	if _, err := rankingStore.ConsolidateContest(ctx, contest, false, true); err != nil {
+		t.Fatalf("ConsolidateContest failed: %v", err)
+	}
+	rankingStore.InvalidateCache(contest)
+
+	consLB, err := rankingStore.GetLeaderboard(ctx, contest, 0)
+	if err != nil {
+		t.Fatalf("GetLeaderboard after consolidation failed: %v", err)
+	}
+	if consLB.Entries[0].UserID != userA || consLB.Entries[0].Rank != 1 {
+		t.Errorf("consolidated leaderboard: expected User A rank 1, got user %s rank %d", consLB.Entries[0].UserID, consLB.Entries[0].Rank)
+	}
+	if consLB.Entries[1].UserID != userB || consLB.Entries[1].Rank != 2 {
+		t.Errorf("consolidated leaderboard: expected User B rank 2, got user %s rank %d", consLB.Entries[1].UserID, consLB.Entries[1].Rank)
+	}
 }

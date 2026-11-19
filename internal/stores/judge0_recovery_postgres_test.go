@@ -282,7 +282,8 @@ func TestRecoveryClaimsAndFencingPostgres(t *testing.T) {
 		}
 	}
 	assertSubmission(t, db, sub, "accepted", 24, 0)
-	var score, count int
+	var count int
+	var score float64
 	if err := db.QueryRow(`SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&score); err != nil || score != 10 {
 		t.Fatal(score, err)
 	}
@@ -422,7 +423,7 @@ func TestLostDispatchResponseCallbackDuringGracePostgres(t *testing.T) {
 		t.Fatal("callback completion was redispatched", posts.Load())
 	}
 	assertSubmission(t, db, sub, "accepted", 25, 0)
-	var score int
+	var score float64
 	if err := db.QueryRow(`SELECT score FROM rankings WHERE user_id=$1 AND contest_id=$2`, user, contest).Scan(&score); err != nil || score != 10 {
 		t.Fatal(score, err)
 	}
@@ -460,7 +461,7 @@ func TestRecoveryExhaustionAndReplicaSweepsPostgres(t *testing.T) {
 				}
 			}
 			assertSubmission(t, db, sub, "judge_error", 0, 0)
-			var score int
+			var score float64
 			if err := db.QueryRow(`SELECT coalesce(sum(score),0) FROM rankings`).Scan(&score); err != nil || score != 0 {
 				t.Fatal(score, err)
 			}
@@ -528,7 +529,8 @@ func TestCallbackAndRecoveryRacePostgres(t *testing.T) {
 		}
 	}
 	assertSubmission(t, db, sub, "accepted", 125, 1024)
-	var results, score int
+	var results int
+	var score float64
 	if err := db.QueryRow(`SELECT count(*) FROM test_case_results WHERE submission_id=$1`, sub).Scan(&results); err != nil || results != 1 {
 		t.Fatal(results, err)
 	}

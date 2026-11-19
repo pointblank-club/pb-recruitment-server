@@ -302,22 +302,24 @@ func (s *RankingStore) getLeaderboardUsing(ctx context.Context, queryer rankingQ
 	if mcqCutoff != nil {
 		// Apply the batch cutoff before ranking and pagination, including after forced consolidation.
 		entriesQ = `
-		WITH first_solves AS (
-			SELECT user_id, problem_id, MIN(created_at) AS solved_at
+		WITH code_scores AS (
+			SELECT sub.user_id, sub.problem_id,
+			       MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END) AS score,
+			       MIN(sub.created_at) FILTER (WHERE sub.status = 'accepted') AS solved_at
 			FROM submissions sub
-			WHERE contest_id = $1 AND type = 'code' AND status = 'accepted'
-			GROUP BY user_id, problem_id
+			JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
+			WHERE sub.contest_id = $1 AND sub.type = 'code' AND (sub.status = 'accepted' OR sub.score > 0)
+			GROUP BY sub.user_id, sub.problem_id
 		),
 		user_scores AS (
 			SELECT user_id, SUM(score) AS score, MAX(solved_at) AS last_solve_time
-            FROM (
-                SELECT fs.user_id, p.score, fs.solved_at
-                FROM first_solves fs JOIN problems p ON p.id = fs.problem_id AND p.contest_id = $1
-                UNION ALL
-                SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
-                WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
-            ) solves
-            GROUP BY user_id
+			FROM (
+				SELECT user_id, score, solved_at FROM code_scores
+				UNION ALL
+				SELECT user_id, score, solved_at FROM leaderboard_mcq_scores
+				WHERE contest_id = $1 AND cutoff = $4 AND solved_at IS NOT NULL
+			) solves
+			GROUP BY user_id
 		)
 		SELECT RANK() OVER (ORDER BY COALESCE(us.score, 0) DESC, us.last_solve_time ASC NULLS LAST) AS rank,
 		       r.user_id, u.name, u.usn, COALESCE(us.score, 0)
@@ -669,7 +671,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 			p.type::text AS problem_type,
 			p.score AS max_score,
 			COUNT(sub.id) AS attempts,
-			MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE 0 END) AS score,
+			COALESCE(MAX(CASE WHEN sub.status = 'accepted' THEN p.score ELSE sub.score END), 0) AS score,
 			MIN(CASE WHEN sub.status = 'accepted' THEN sub.created_at ELSE NULL END) AS solved_at
 		FROM submissions sub
 		INNER JOIN problems p ON sub.problem_id = p.id AND sub.contest_id = p.contest_id
@@ -723,7 +725,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 
 type participantSummary struct {
 	UserID             string
-	TotalScore         int
+	TotalScore         float64
 	ProblemsSolved     int
 	LastSubmissionTime int64
 	TotalAttempts      int // Ranking penalty, excluding judge errors.
@@ -734,7 +736,7 @@ type participantSummary struct {
 }
 
 func isTied(a, b participantSummary) bool {
-	return a.TotalScore == b.TotalScore &&
+	return a.TotalScore == b.TotalScore && // totals are rounded to cents, so equal totals are identical floats
 		a.ProblemsSolved == b.ProblemsSolved &&
 		a.LastSubmissionTime == b.LastSubmissionTime &&
 		a.TotalAttempts == b.TotalAttempts
@@ -911,9 +913,10 @@ func (s *RankingStore) gradeContestMCQsTx(ctx context.Context, tx *sql.Tx, conte
 
 	const batchUpdateMCQ = `
 		UPDATE submissions s
-		SET status = t.status::submission_status
-		FROM unnest($1::text[], $2::text[]) AS t(id, status)
-		WHERE s.id = t.id
+		SET status = t.status::submission_status,
+		    score = CASE WHEN t.status = 'accepted' THEN p.score ELSE 0.0 END
+		FROM unnest($1::text[], $2::text[]) AS t(id, status), problems p
+		WHERE s.id = t.id AND p.id = s.problem_id AND p.contest_id = s.contest_id
 	`
 	if _, err := tx.ExecContext(ctx, batchUpdateMCQ, pq.Array(subIDs), pq.Array(statuses)); err != nil {
 		return 0, fmt.Errorf("batch update MCQ submissions: %w", err)
@@ -1004,7 +1007,7 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	}
 
 	const submissionsQ = `
-		SELECT user_id, problem_id, status, created_at
+		SELECT user_id, problem_id, status, created_at, score
 		FROM submissions
 		WHERE contest_id = $1
 		ORDER BY created_at ASC
@@ -1017,6 +1020,7 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 
 	type userSolveData struct {
 		earliestAccepted map[string]int64
+		maxProblemScore  map[string]float64
 		totalAttempts    int
 	}
 
@@ -1024,18 +1028,23 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	for uid := range participantSet {
 		userStats[uid] = &userSolveData{
 			earliestAccepted: make(map[string]int64),
+			maxProblemScore:  make(map[string]float64),
 		}
 	}
 
 	for sRows.Next() {
 		var uid, pid, status string
 		var createdAt int64
-		if err := sRows.Scan(&uid, &pid, &status, &createdAt); err != nil {
+		var subScore float64
+		if err := sRows.Scan(&uid, &pid, &status, &createdAt, &subScore); err != nil {
 			return 0, fmt.Errorf("scan submission: %w", err)
 		}
 		data, ok := userStats[uid]
 		if !ok {
-			data = &userSolveData{earliestAccepted: make(map[string]int64)}
+			data = &userSolveData{
+				earliestAccepted: make(map[string]int64),
+				maxProblemScore:  make(map[string]float64),
+			}
 			userStats[uid] = data
 			participantSet[uid] = true
 		}
@@ -1046,6 +1055,13 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 			if prev, exists := data.earliestAccepted[pid]; !exists || createdAt < prev {
 				data.earliestAccepted[pid] = createdAt
 			}
+		}
+		// Accepted uses the current problem score, matching the live leaderboard.
+		if status == string(models.Accepted) {
+			subScore = float64(problemScores[pid])
+		}
+		if subScore > data.maxProblemScore[pid] {
+			data.maxProblemScore[pid] = subScore
 		}
 	}
 	if err := sRows.Err(); err != nil {
@@ -1083,19 +1099,24 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 	participants := make([]participantSummary, 0, len(participantSet))
 	for uid := range participantSet {
 		data := userStats[uid]
-		score := 0
+		score := 0.0
 		solvedCount := 0
 		var maxSolveTime int64
 
 		for pid, solveTime := range data.earliestAccepted {
-			if pts, ok := problemScores[pid]; ok {
-				score += pts
+			if _, ok := problemScores[pid]; ok {
 				solvedCount++
 				if solveTime > maxSolveTime {
 					maxSolveTime = solveTime
 				}
 			}
 		}
+		for pid, pScore := range data.maxProblemScore {
+			if _, ok := problemScores[pid]; ok {
+				score += pScore
+			}
+		}
+		score = common.RoundTo2Decimals(score)
 
 		flags := existingFlags[uid]
 		participants = append(participants, participantSummary{
@@ -1115,7 +1136,7 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 
 	n := len(participants)
 	userIDs := make([]string, n)
-	scores := make([]int, n)
+	scores := make([]float64, n)
 	ranks := make([]int, n)
 	hiddens := make([]bool, n)
 	disqualifieds := make([]bool, n)
@@ -1142,7 +1163,7 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 			t.shortlisted
 		FROM unnest(
 			$2::text[], 
-			$3::int[], 
+			$3::numeric[], 
 			$4::int[], 
 			$5::boolean[], 
 			$6::boolean[], 
