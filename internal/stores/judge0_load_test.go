@@ -198,7 +198,7 @@ func TestJudge0ContestLoadPostgres(t *testing.T) {
 					defer wg.Done()
 					<-start
 					at := time.Now()
-					_, err := service.CreateSubmission(context.Background(), user, models.Code, &dto.SubmitSubmissionRequest{ContestID: contest, ProblemID: problem, Language: "python", Code: base64.StdEncoding.EncodeToString([]byte("print('hello')\n"))})
+					_, err := service.CreateSubmission(context.Background(), user, models.Code, &dto.SubmitSubmissionRequest{ContestID: contest, ProblemID: problem, Language: "python", Code: base64.StdEncoding.EncodeToString([]byte("print('hello')\n"))}, nil)
 					latencies[i] = time.Since(at)
 					if err != nil {
 						errs <- fmt.Errorf("create %s: %w", user, err)

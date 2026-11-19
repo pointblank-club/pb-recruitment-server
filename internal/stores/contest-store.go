@@ -339,7 +339,8 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			COALESCE(cr.tab_switch_count, 0),
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
 			COALESCE(cr.reset_generation, 0),
-			cr.ended_at
+			cr.ended_at, cr.seb_not_detected, cr.is_browser_session_terminated,
+			(SELECT count(*) FROM contest_browser_sessions bs WHERE bs.contest_id=cr.contest_id AND bs.user_id=cr.user_id AND bs.generation=cr.browser_session_generation), COALESCE(cr.browser_session_generation,0)
 		FROM contest_registrations cr
 		INNER JOIN users u ON cr.user_id = u.id
 		LEFT JOIN rankings r ON r.contest_id = cr.contest_id AND r.user_id = cr.user_id
@@ -371,7 +372,7 @@ func (s *ContestStore) GetContestRegistrations(ctx context.Context, contestID st
 			&reg.TabSwitchCount,
 			&reg.IsTabSwitchTerminated,
 			&reg.ResetGeneration,
-			&reg.EndedAt,
+			&reg.EndedAt, &reg.SEBNotDetected, &reg.IsBrowserSessionTerminated, &reg.BrowserSessionCount, &reg.BrowserSessionGeneration,
 		); err != nil {
 			log.Printf("contest-store: failed to scan registration row: %v", err)
 			continue
@@ -562,7 +563,8 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 			COALESCE(cr.is_tab_switch_terminated, FALSE),
 			COALESCE(cr.reset_generation, 0),
 			COALESCE(cr.ended_at IS NOT NULL, FALSE),
-			cr.ended_at
+			cr.ended_at, COALESCE(cr.seb_not_detected,FALSE), COALESCE(cr.is_browser_session_terminated,FALSE),
+			(SELECT count(*) FROM contest_browser_sessions bs WHERE bs.contest_id=cr.contest_id AND bs.user_id=cr.user_id AND bs.generation=cr.browser_session_generation), COALESCE(cr.browser_session_generation,0)
 		FROM contests c
 		LEFT JOIN contest_registrations cr
 			ON cr.contest_id = c.id AND cr.user_id = $2
@@ -577,7 +579,7 @@ func (s *ContestStore) GetCandidateSessionStatus(ctx context.Context, contestID 
 		&res.IsTabSwitchTerminated,
 		&res.Generation,
 		&res.IsSessionEnded,
-		&res.EndedAt,
+		&res.EndedAt, &res.SEBNotDetected, &res.IsBrowserSessionTerminated, &res.BrowserSessionCount, &res.BrowserSessionGeneration,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

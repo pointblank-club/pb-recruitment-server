@@ -648,6 +648,7 @@ func (cc *ContestController) GetContest(ctx echo.Context) error {
 // @Failure      401 {object} map[string]string "Invalid or expired token"
 // @Failure      403 {object} map[string]string "Not registered or contest not running"
 // @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      428 {object} map[string]string "SEB cookie session must be started or resumed"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id}/problems [get]
 func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
@@ -671,6 +672,10 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": common.FetchContestFailedError.Error(),
 		})
+	}
+
+	if _, err := requireBrowserSession(ctx, cc.contestService, contestID, userID, false); err != nil {
+		return err
 	}
 
 	problems, err := cc.contestService.GetContestProblemsList(ctx.Request().Context(), contestID, userID)
@@ -699,6 +704,7 @@ func (cc *ContestController) GetContestProblemsList(ctx echo.Context) error {
 // @Failure      401 {object} map[string]string "Invalid or expired token"
 // @Failure      403 {object} map[string]string "Not registered or contest not running"
 // @Failure      404 {object} map[string]string "Contest or problem not found"
+// @Failure      428 {object} map[string]string "SEB cookie session must be started or resumed"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id}/problems/{problem_id} [get]
 func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
@@ -723,6 +729,10 @@ func (cc *ContestController) GetContestProblem(ctx echo.Context) error {
 		return ctx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": common.FetchContestFailedError.Error(),
 		})
+	}
+
+	if _, err := requireBrowserSession(ctx, cc.contestService, contestID, userID, false); err != nil {
+		return err
 	}
 
 	problem, err := cc.contestService.GetContestProblem(ctx.Request().Context(), contestID, problemID, false)

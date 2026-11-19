@@ -57,6 +57,7 @@ func AddAdminRoutes(
 
 	adminGroup.GET("/contests/:contestId/registrations", contestController.GetContestRegistrations)
 	adminGroup.POST("/contests/:contestId/contestants/:userId/reset-tab-switches", contestController.ResetContestantTabSwitches)
+	adminGroup.POST("/contests/:contestId/contestants/:userId/reset-browser-sessions", contestController.ResetBrowserSessions)
 
 	//Submissions / Code Management
 	adminGroup.GET("/contests/:contestId/submissions", submissionController.GetAdminSubmissions)

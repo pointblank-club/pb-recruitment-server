@@ -466,7 +466,7 @@ func TestSubmitSolutionTabSwitchLockout(t *testing.T) {
 			},
 			isTerminated: true,
 		}
-		storage := &stores.Storage{
+		storage := &stores.Storage{SEB: browserSessionTestStore{},
 			Contests:    mockContests,
 			Problems:    submissionProblemStore{},
 			Submissions: &controllerSubmissionStore{contests: mockContests},
@@ -497,7 +497,7 @@ func TestSubmitSolutionTabSwitchLockout(t *testing.T) {
 			isTerminated: false,
 		}
 		subStore := &controllerSubmissionStore{contests: mockContests}
-		storage := &stores.Storage{
+		storage := &stores.Storage{SEB: browserSessionTestStore{},
 			Contests:    mockContests,
 			Problems:    submissionProblemStore{},
 			Submissions: subStore,

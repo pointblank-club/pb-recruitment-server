@@ -76,6 +76,15 @@ func AddContestRoutes(
 	)
 
 	// Get candidate session status
+	e.POST("/contests/:id/browser-session",
+		contestController.StartBrowserSession,
+		echomdw.BodyLimit("4K"),
+		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "registration", 60, 60),
+		middleware.ValidateRequest(new(dto.StartBrowserSessionRequest)),
+	)
+
+	// Get candidate session status
 	e.GET("/contests/:id/session-status",
 		contestController.GetCandidateSessionStatus,
 		middleware.RequireFirebaseAuth(authClient),

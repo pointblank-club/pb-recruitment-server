@@ -2,9 +2,10 @@ package dto
 
 // Required tags describe Swagger; Run validates these fields before admission.
 type RunRequest struct {
-	Language string `json:"language" validate:"required"`
-	Code     string `json:"code" validate:"required"`
-	Stdin    string `json:"stdin"`
+	ContestID string `json:"contest_id" validate:"required"`
+	Language  string `json:"language" validate:"required"`
+	Code      string `json:"code" validate:"required"`
+	Stdin     string `json:"stdin"`
 }
 
 type RunResponse struct {

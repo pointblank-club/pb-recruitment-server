@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
@@ -17,16 +18,18 @@ import (
 
 // Run godoc
 // @Summary Run code with custom stdin
-// @Description Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.
+// @Description Requires contest_id identifying a live registration and a confirmed cookie for detected SEB clients. Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.
 // @Tags Submissions
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param request body dto.RunRequest true "Language, code (64 KiB), stdin (64 KiB)"
+// @Param request body dto.RunRequest true "Contest ID, language, code (64 KiB), stdin (64 KiB)"
 // @Success 200 {object} dto.RunResponse
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
+// @Failure 403 {object} map[string]string "Contest is not live, registration is missing, or participation is locked/ended"
 // @Failure 404 "Run is disabled"
+// @Failure 428 {object} map[string]string "SEB cookie session must be started or resumed"
 // @Failure 413 {object} map[string]string
 // @Failure 429 {object} map[string]string
 // @Failure 502 {object} map[string]string
@@ -57,11 +60,26 @@ func (sc *SubmissionController) Run(c echo.Context) error {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expected one JSON object"})
 	}
-	result, err := sc.submissionService.Run(c.Request().Context(), userID, req)
+	if strings.TrimSpace(req.ContestID) == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "contest_id is required"})
+	}
+	generation, err := requireBrowserSession(c, sc.contestService, req.ContestID, userID, true)
+	if err != nil {
+		return err
+	}
+	result, err := sc.submissionService.Run(c.Request().Context(), userID, req, generation)
 	if err != nil {
 		switch {
 		case errors.Is(err, services.ErrInvalidRun):
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case errors.Is(err, common.ErrBrowserSessionRequired):
+			return browserSessionError(err)
+		case errors.Is(err, common.ErrBrowserSessionTerminated), errors.Is(err, common.ErrTabSwitchTerminated),
+			errors.Is(err, common.ErrContestSessionEnded), errors.Is(err, common.UserNotRegisteredError),
+			errors.Is(err, common.ContestNotRunningError):
+			return c.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		case errors.Is(err, common.ContestNotFoundError):
+			return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 		case errors.Is(err, common.ErrRateLimitExceeded):
 			c.Response().Header().Set("Retry-After", "5")
 			return c.JSON(http.StatusTooManyRequests, map[string]string{"error": "run capacity busy; wait five seconds before trying again"})

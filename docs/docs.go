@@ -779,6 +779,73 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/contests/{contestId}/contestants/{userId}/reset-browser-sessions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Contests"
+                ],
+                "summary": "Reset contestant browser sessions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "contestId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Participant ID",
+                        "name": "userId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.ResetBrowserSessionsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/contests/{contestId}/contestants/{userId}/reset-tab-switches": {
             "post": {
                 "security": [
@@ -2167,6 +2234,87 @@ const docTemplate = `{
                 }
             }
         },
+        "/contests/{id}/browser-session": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Start or resume an exam browser session",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Startup attempt",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.StartBrowserSessionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.BrowserSessionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Stale reset generation or already-confirmed startup attempt",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/contests/{id}/end": {
             "post": {
                 "security": [
@@ -2372,6 +2520,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "428": {
+                        "description": "SEB cookie session must be started or resumed",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -2437,6 +2594,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Contest or problem not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "SEB cookie session must be started or resumed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2621,7 +2787,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
+                "description": "Requires contest_id identifying a live registration and a confirmed cookie for detected SEB clients. Available only with ENABLE_RUN=true; otherwise returns 404. Limited to one attempt per user per five seconds and one fleet admission per database clock second. Returns 429 while scored code submissions are pending or Judge0 rejects a full queue. Polls for up to 15 seconds. No contest submission or ranking changes. Code and stdin are plain UTF-8. Each output field is capped at 4096 UTF-8 bytes. Runtime is milliseconds; memory is KiB. A timeout does not cancel the Judge0 job; do not automatically retry.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2634,7 +2800,7 @@ const docTemplate = `{
                 "summary": "Run code with custom stdin",
                 "parameters": [
                     {
-                        "description": "Language, code (64 KiB), stdin (64 KiB)",
+                        "description": "Contest ID, language, code (64 KiB), stdin (64 KiB)",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -2668,11 +2834,29 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "403": {
+                        "description": "Contest is not live, registration is missing, or participation is locked/ended",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "404": {
                         "description": "Run is disabled"
                     },
                     "413": {
                         "description": "Request Entity Too Large",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "SEB cookie session must be started or resumed",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2775,6 +2959,15 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Submission already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "SEB cookie session must be resumed after an admin reset",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3478,19 +3671,54 @@ const docTemplate = `{
                 }
             }
         },
+        "app_internal_models_dto.BrowserSessionResponse": {
+            "type": "object",
+            "properties": {
+                "cookie_confirmed": {
+                    "type": "boolean"
+                },
+                "generation": {
+                    "type": "integer"
+                },
+                "is_seb": {
+                    "type": "boolean"
+                },
+                "is_terminated": {
+                    "type": "boolean"
+                },
+                "seb_not_detected": {
+                    "type": "boolean"
+                },
+                "session_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "app_internal_models_dto.CandidateSessionStatusResponse": {
             "type": "object",
             "properties": {
+                "browser_session_count": {
+                    "type": "integer"
+                },
+                "browser_session_generation": {
+                    "type": "integer"
+                },
                 "ended_at": {
                     "type": "integer"
                 },
                 "generation": {
                     "type": "integer"
                 },
+                "is_browser_session_terminated": {
+                    "type": "boolean"
+                },
                 "is_session_ended": {
                     "type": "boolean"
                 },
                 "is_tab_switch_terminated": {
+                    "type": "boolean"
+                },
+                "seb_not_detected": {
                     "type": "boolean"
                 },
                 "tab_switch_count": {
@@ -3524,6 +3752,12 @@ const docTemplate = `{
         "app_internal_models_dto.ContestRegistration": {
             "type": "object",
             "properties": {
+                "browser_session_count": {
+                    "type": "integer"
+                },
+                "browser_session_generation": {
+                    "type": "integer"
+                },
                 "current_year": {
                     "type": "integer"
                 },
@@ -3542,6 +3776,9 @@ const docTemplate = `{
                 "hidden": {
                     "type": "boolean"
                 },
+                "is_browser_session_terminated": {
+                    "type": "boolean"
+                },
                 "is_tab_switch_terminated": {
                     "type": "boolean"
                 },
@@ -3556,6 +3793,9 @@ const docTemplate = `{
                 },
                 "score": {
                     "type": "integer"
+                },
+                "seb_not_detected": {
+                    "type": "boolean"
                 },
                 "tab_switch_count": {
                     "type": "integer"
@@ -4051,6 +4291,14 @@ const docTemplate = `{
                 "UnregisterAction"
             ]
         },
+        "app_internal_models_dto.ResetBrowserSessionsResponse": {
+            "type": "object",
+            "properties": {
+                "generation": {
+                    "type": "integer"
+                }
+            }
+        },
         "app_internal_models_dto.ResetTabSwitchesResponse": {
             "type": "object",
             "properties": {
@@ -4069,10 +4317,14 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "code",
+                "contest_id",
                 "language"
             ],
             "properties": {
                 "code": {
+                    "type": "string"
+                },
+                "contest_id": {
                     "type": "string"
                 },
                 "language": {
@@ -4156,6 +4408,23 @@ const docTemplate = `{
             "properties": {
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.StartBrowserSessionRequest": {
+            "type": "object",
+            "required": [
+                "attempt_id",
+                "generation"
+            ],
+            "properties": {
+                "attempt_id": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 0
                 }
             }
         },

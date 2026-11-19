@@ -10,6 +10,10 @@ import (
 )
 
 type Storage struct {
+	SEB interface {
+		Observe(context.Context, string, string, string, string, bool, bool, *int) (*dto.BrowserSessionResponse, string, error)
+		Reset(context.Context, string, string, string) (int, error)
+	}
 	// Declarations of method extensions for each store go here
 	Contests interface {
 		ListContests(context.Context, int) ([]models.Contest, error)
@@ -44,7 +48,7 @@ type Storage struct {
 		MarkFailed(context.Context, string) error
 		PendingCodeWithoutExecutions(context.Context, int64, int) ([]string, error)
 		CheckSubmissionRateLimit(context.Context, string, int64) error
-		CheckRunCapacity(context.Context) error
+		CheckRunCapacity(context.Context, string, string, *int) error
 		ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict, submissionType string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error)
 		GetAdminSubmissionDetails(ctx context.Context, submissionID string) (*dto.AdminSubmissionDetails, error)
 	}
@@ -79,6 +83,7 @@ type Storage struct {
 
 func NewStorage(db *sql.DB) *Storage {
 	return &Storage{
+		SEB:         NewSEBStore(db),
 		Contests:    NewContestStore(db),
 		Users:       NewUserStore(db),
 		Submissions: NewSubmissionStore(db),

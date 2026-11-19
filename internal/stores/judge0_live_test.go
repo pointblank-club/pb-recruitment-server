@@ -30,7 +30,7 @@ func TestLiveJudge0Smoke(t *testing.T) {
 	client := judge0.NewClient()
 	db := postgresTestDB(t)
 	storage := stores.NewStorage(db)
-	controller := controllers.NewSubmissionController(services.NewSubmissionService(storage, nil, client), nil, client)
+	controller := controllers.NewSubmissionController(services.NewSubmissionService(storage, nil, client), services.NewContestService(storage, nil), client)
 	for _, tc := range []struct {
 		name, language, code, stdin, wantStatus, wantStdout string
 		bounded                                             bool
@@ -52,7 +52,8 @@ func TestLiveJudge0Smoke(t *testing.T) {
 			if _, err := db.Exec(`DELETE FROM submission_rate_limits WHERE user_id='run:capacity'`); err != nil {
 				t.Fatal(err)
 			}
-			body, _ := json.Marshal(dto.RunRequest{Language: tc.language, Code: tc.code, Stdin: tc.stdin})
+			contest := runContestFixture(t, db, "live-smoke-"+tc.name)
+			body, _ := json.Marshal(dto.RunRequest{ContestID: contest, Language: tc.language, Code: tc.code, Stdin: tc.stdin})
 			start := time.Now()
 			w := runRequest(t, controller, httptest.NewRequest(http.MethodPost, "/submission/run", strings.NewReader(string(body))), "live-smoke-"+tc.name)
 			if w.Code != 200 {

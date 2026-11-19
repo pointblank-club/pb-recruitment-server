@@ -203,6 +203,7 @@ func (sc *SubmissionController) ListUserSubmissions(ctx echo.Context) error {
 // @Failure      403 "Forbidden: empty body if not registered; JSON object with an error string if contest is not running"
 // @Failure      404 "Contest or problem not found"
 // @Failure      409 {object} map[string]string "Submission already exists"
+// @Failure      428 {object} map[string]string "SEB cookie session must be resumed after an admin reset"
 // @Failure      429 {object} map[string]string "Too many requests: rate limit exceeded"
 // @Failure      500 "Internal server error"
 // @Router       /submission/submit [post]
@@ -282,10 +283,18 @@ func (sc *SubmissionController) SubmitSolution(ctx echo.Context) error {
 		return ctx.JSON(http.StatusForbidden, map[string]string{"error": common.ContestNotRunningError.Error()})
 	}
 
+	generation, err := requireBrowserSession(ctx, sc.contestService, req.ContestID, userID, true)
+	if err != nil {
+		return err
+	}
+
 	submissionType := req.Type
 
-	submissionID, err := sc.submissionService.CreateSubmission(reqCtx, userID, submissionType, req)
+	submissionID, err := sc.submissionService.CreateSubmission(reqCtx, userID, submissionType, req, generation)
 	if err != nil {
+		if errors.Is(err, common.ErrBrowserSessionTerminated) || errors.Is(err, common.ErrBrowserSessionRequired) {
+			return browserSessionError(err)
+		}
 		if errors.Is(err, common.ErrNotFound) || errors.Is(err, common.ContestNotFoundError) {
 			return ctx.NoContent(http.StatusNotFound)
 		}

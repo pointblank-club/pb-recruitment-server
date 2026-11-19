@@ -268,7 +268,7 @@ func TestCreateSubmissionFailureBookkeeping(t *testing.T) {
 			id, err := service.CreateSubmission(ctx, "user", models.Code, &dto.SubmitSubmissionRequest{
 				ContestID: "contest", ProblemID: "problem", Language: "cpp",
 				Code: base64.StdEncoding.EncodeToString([]byte("int main(){}")),
-			})
+			}, nil)
 			wantMarked := !tc.timeoutSave && !tc.ambiguous
 			if marked != wantMarked {
 				t.Errorf("immediate failure bookkeeping = %v, want %v", marked, wantMarked)
@@ -377,7 +377,7 @@ func TestCreateSubmissionValidatesProblemBeforeInsert(t *testing.T) {
 					return "submission", nil
 				}},
 			}
-			id, err := NewSubmissionService(storage, nil, nil).CreateSubmission(context.Background(), "user", kind, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: kind, Option: []int{1}})
+			id, err := NewSubmissionService(storage, nil, nil).CreateSubmission(context.Background(), "user", kind, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Type: kind, Option: []int{1}}, nil)
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("error=%v, want %v", err, tc.wantErr)
 			}
@@ -415,13 +415,13 @@ func TestSubmissionServiceRateLimit(t *testing.T) {
 	req := &dto.SubmitSubmissionRequest{ContestID: "c1", ProblemID: "p1", Type: models.MCQ, Option: []int{1}}
 
 	t.Setenv("SUBMISSION_RATE_LIMIT_SECONDS", "7")
-	if _, err := svc.CreateSubmission(context.Background(), "bob", models.MCQ, req); err != nil {
+	if _, err := svc.CreateSubmission(context.Background(), "bob", models.MCQ, req, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if checkedUser != "bob" || checkedCooldown != 7 {
 		t.Errorf("checkedUser=%s, checkedCooldown=%d", checkedUser, checkedCooldown)
 	}
-	if _, err := svc.CreateSubmission(context.Background(), "spammer", models.MCQ, req); !errors.Is(err, common.ErrRateLimitExceeded) {
+	if _, err := svc.CreateSubmission(context.Background(), "spammer", models.MCQ, req, nil); !errors.Is(err, common.ErrRateLimitExceeded) {
 		t.Fatalf("expected ErrRateLimitExceeded, got %v", err)
 	}
 }
@@ -459,7 +459,7 @@ func TestCreateSubmissionValidationBeforeRateLimit(t *testing.T) {
 		Type:      models.Code,
 		Language:  "unsupported_lang",
 		Code:      base64.StdEncoding.EncodeToString([]byte("print(1)")),
-	})
+	}, nil)
 	if !errors.Is(err, common.ErrUnsupportedLanguage) {
 		t.Fatalf("expected ErrUnsupportedLanguage, got %v", err)
 	}
@@ -478,7 +478,7 @@ func TestCreateSubmissionValidationBeforeRateLimit(t *testing.T) {
 		ProblemID: "p1",
 		Type:      models.MCQ,
 		Option:    []int{0},
-	})
+	}, nil)
 	if !errors.Is(err, common.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for problem type mismatch, got %v", err)
 	}
@@ -512,7 +512,7 @@ func TestCreateSubmissionValidationBeforeRateLimit(t *testing.T) {
 		ProblemID: "p1",
 		Type:      models.MCQ,
 		Option:    []int{0},
-	})
+	}, nil)
 	if !errors.Is(err, common.ErrRateLimitExceeded) {
 		t.Fatalf("expected ErrRateLimitExceeded, got %v", err)
 	}
@@ -553,7 +553,7 @@ func TestCreateSubmissionRejectsInvalidUTF8BeforePreparation(t *testing.T) {
 	id, err := service.CreateSubmission(context.Background(), "user", models.Code, &dto.SubmitSubmissionRequest{
 		ContestID: "contest", ProblemID: "problem", Language: "cpp",
 		Code: base64.StdEncoding.EncodeToString([]byte{'/', '/', ' ', 0xff}),
-	})
+	}, nil)
 	if id != "" || !errors.Is(err, common.ErrInvalidCode) {
 		t.Fatal("invalid source reached preparation", id, err)
 	}
@@ -603,7 +603,7 @@ func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			id, err := svc.CreateSubmission(context.Background(), "user", models.MCQ, req)
+			id, err := svc.CreateSubmission(context.Background(), "user", models.MCQ, req, nil)
 			results <- res{id: id, err: err}
 		}()
 	}
@@ -627,7 +627,7 @@ func TestCreateSubmissionConcurrentMCQRejection(t *testing.T) {
 
 func TestCodeAdmissionRejectsBeforeObjectRead(t *testing.T) {
 	service := NewSubmissionService(&stores.Storage{Problems: problemTestStore{}, Submissions: submissionTestStore{checkRateLimit: func(context.Context, string, int64) error { return common.ErrRateLimitExceeded }}}, nil, nil)
-	_, err := service.CreateSubmission(context.Background(), "user", models.Code, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Language: "python", Code: "print(1)"})
+	_, err := service.CreateSubmission(context.Background(), "user", models.Code, &dto.SubmitSubmissionRequest{ContestID: "contest", ProblemID: "problem", Language: "python", Code: "print(1)"}, nil)
 	if !errors.Is(err, common.ErrRateLimitExceeded) {
 		t.Fatal(err)
 	}

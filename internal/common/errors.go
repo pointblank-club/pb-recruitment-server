@@ -46,7 +46,15 @@ var (
 	ErrInvalidTabSwitchRequest     = errors.New("invalid tab switch payload")
 	ErrCannotUnregisterAfterStart  = errors.New("cannot unregister after contest has started")
 	ErrContestSessionEnded         = errors.New("contest session already ended")
+	ErrBrowserSessionRequired      = errors.New("start your browser exam session before participating")
+	ErrBrowserSessionUnavailable   = errors.New("exam session service is unavailable")
+	ErrBrowserSessionTerminated    = errors.New("contest participation locked: maximum three browser sessions reached")
+	ErrBrowserSessionAttemptUsed   = errors.New("browser session startup was already confirmed; retry with a new attempt")
 )
+
+type BrowserSessionStaleError struct{ Generation int }
+
+func (e *BrowserSessionStaleError) Error() string { return "stale browser session reset generation" }
 
 // TabSwitchStaleGenerationError indicates that a tab-switch observation belongs
 // to an older reset generation and carries the authoritative registration state.
