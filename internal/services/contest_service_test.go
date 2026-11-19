@@ -77,10 +77,12 @@ func TestProblemEditWindow(t *testing.T) {
 }
 
 type serviceRankingTestStore struct {
-	consolidateFunc     func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
-	updateFunc          func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
-	leaderboardFunc     func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
-	liveLeaderboardFunc func(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error)
+	consolidateFunc       func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
+	updateFunc            func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
+	leaderboardFunc       func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	liveLeaderboardFunc   func(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error)
+	frozenLeaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	freezeStatus          bool
 }
 
 func (s serviceRankingTestStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -111,6 +113,21 @@ func (s serviceRankingTestStore) GetLiveLeaderboard(ctx context.Context, contest
 		return s.liveLeaderboardFunc(ctx, contestID, page, mcqCutoff)
 	}
 	return s.GetLeaderboard(ctx, contestID, page)
+}
+
+func (s serviceRankingTestStore) GetLeaderboardFreezeStatus(context.Context, string) (bool, error) {
+	return s.freezeStatus, nil
+}
+
+func (s serviceRankingTestStore) GetFrozenLeaderboard(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error) {
+	if s.frozenLeaderboardFunc != nil {
+		return s.frozenLeaderboardFunc(ctx, contestID, page)
+	}
+	return nil, nil
+}
+
+func (s serviceRankingTestStore) SetLeaderboardFrozen(context.Context, string, bool, *int64) error {
+	return nil
 }
 
 func TestConsolidateContestService(t *testing.T) {
@@ -249,6 +266,55 @@ func TestGetLeaderboard(t *testing.T) {
 		}
 	})
 
+}
+
+func TestGetLeaderboardRechecksFreezeAfterLiveFetch(t *testing.T) {
+	liveFetchStarted := make(chan struct{})
+	finishLiveFetch := make(chan struct{})
+	resultCh := make(chan struct {
+		result *dto.GetLeaderboardResponse
+		err    error
+	}, 1)
+	freezeCommitted := false
+
+	storage := &stores.Storage{
+		Contests: problemContestTestStore{start: time.Now().Add(-time.Minute).UnixMilli(), end: time.Now().Add(time.Minute).UnixMilli()},
+		Rankings: serviceRankingTestStore{
+			liveLeaderboardFunc: func(context.Context, string, int, int64) (*dto.GetLeaderboardResponse, error) {
+				close(liveFetchStarted)
+				<-finishLiveFetch
+				return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1", TotalScore: 10}}}, nil
+			},
+			frozenLeaderboardFunc: func(context.Context, string, int) (*dto.GetLeaderboardResponse, error) {
+				if freezeCommitted {
+					return &dto.GetLeaderboardResponse{Entries: []dto.LeaderboardEntry{{UserID: "u1", TotalScore: 0}}, Frozen: true}, nil
+				}
+				return nil, nil
+			},
+		},
+	}
+
+	go func() {
+		result, err := NewContestService(storage, nil).GetLeaderboard(context.Background(), "c1", 0, false)
+		resultCh <- struct {
+			result *dto.GetLeaderboardResponse
+			err    error
+		}{result, err}
+	}()
+
+	<-liveFetchStarted
+	// This is the freeze commit and score finalization happening while the public
+	// request is paused after its initial unfrozen check.
+	freezeCommitted = true
+	close(finishLiveFetch)
+
+	got := <-resultCh
+	if got.err != nil {
+		t.Fatalf("GetLeaderboard returned an error: %v", got.err)
+	}
+	if got.result == nil || !got.result.Frozen || len(got.result.Entries) != 1 || got.result.Entries[0].TotalScore != 0 {
+		t.Fatalf("expected the newly committed frozen snapshot, got %+v", got.result)
+	}
 }
 
 func TestMCQLeaderboardCutoff(t *testing.T) {

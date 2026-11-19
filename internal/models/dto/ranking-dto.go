@@ -31,6 +31,15 @@ type GetLeaderboardResponse struct {
 	Page       int                `json:"page"`
 	TotalPages int                `json:"total_pages"`
 	TotalCount int                `json:"total_count"`
+	Frozen     bool               `json:"-"`
+}
+
+type LeaderboardFreezeStatus struct {
+	Frozen bool `json:"frozen"`
+}
+
+type SetLeaderboardFreezeRequest struct {
+	Frozen *bool `json:"frozen" validate:"required"`
 }
 
 type ConsolidationResponse struct {

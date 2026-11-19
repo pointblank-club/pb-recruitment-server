@@ -50,6 +50,8 @@ func AddAdminRoutes(
 
 	//Leaderboard/User Management
 	adminGroup.PUT("/:contestid/leaderboard/:userid", contestController.HandleUpdateLeaderboardUser)
+	adminGroup.GET("/contest/:id/leaderboard-freeze", contestController.GetLeaderboardFreezeStatus)
+	adminGroup.PUT("/contest/:id/leaderboard-freeze", contestController.SetLeaderboardFreezeStatus, middleware.ValidateRequest(new(dto.SetLeaderboardFreezeRequest)))
 	adminGroup.POST("/contest/:id/consolidate", contestController.HandleConsolidateContest, middleware.LimitRequests(limiter, "admin-expensive", 6, 60))
 	adminGroup.GET("/contest/:id/plagiarism", contestController.GetDolosReport, middleware.LimitRequests(limiter, "admin-expensive", 6, 60))
 	adminGroup.GET("/contest/:id/plagiarism/pairs", contestController.GetDolosPairs, middleware.LimitRequests(limiter, "admin-expensive", 6, 60))

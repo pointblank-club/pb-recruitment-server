@@ -56,7 +56,7 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000047`: submission cooldowns
+- The current schema requires migrations through `000049`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
@@ -65,14 +65,18 @@ make swagger
   tab-switching enforcement & observation deduplication (`000038`), code request
   replay (`000039`), shared HTTP budgets (`000040`), pending admission slots (`000041`),
   removal of per-question time/memory settings (`000042`), session endings (`000043`),
-  MCQ verdict history (`000044`), leaderboard batches (`000045`), and coding-only
-  resource settings (`000046`).
-  Stop old API writers and drain in-flight preparation, apply through `000046`, then
+  MCQ verdict history (`000044`), leaderboard batches (`000045`), coding-only
+  resource settings (`000046`), SEB sessions (`000047`), partial code scoring
+  (`000048`), and public leaderboard freeze snapshots (`000049`).
+  Stop old API writers and drain in-flight preparation, apply through `000049`, then
   start the new API with the same `SUBMISSION_MAX_PENDING` on every replica. Do not mix
   old and new writers. See [rollout and rollback requirements](SECURITY_LIMITS.md#code-submission-admission-and-retries).
   `make migrate-up`
   applies only pending migrations; do not force the version or roll back a
   production database.
+
+On pushes to `main`, the deployment pipeline applies pending migrations before
+rolling out the ECS service. A separate manual migration deployment is not required.
 
 Coding questions accept `time_limit` in milliseconds (1–10000) and `memory_limit`
 in MiB (2–500). New coding questions default to 1000 ms / 256 MiB; omitted limits
@@ -245,6 +249,18 @@ its MCQ problem totals in PostgreSQL; subsequent pages and replicas reuse them,
 even after cache expiry. A grading transaction that commits after this snapshot
 waits for the next batch. Code results continue to update independently.
 Snapshots are retained for viewed batches until the contest is deleted.
+Admins can separately freeze the public leaderboard at its current snapshot for
+suspense. Submissions and score processing continue normally, admin leaderboard
+views remain live, and unfreezing reveals the current ranking. Freezing again keeps
+the original snapshot. Freeze before the contest ends to hide final results: the
+public sees full results as soon as an unfrozen contest ends.
+Overlapping freeze or unfreeze changes return `409 Conflict`; retry after the
+current change finishes.
+If a freeze remains active after the contest ends, public viewers continue to see
+the saved snapshot until an admin releases it. Hiding or disqualifying a user during
+a freeze removes them from the snapshot and closes the rank gap (ties stay tied).
+Unhiding restores them only if they were visible when the freeze began; users hidden
+at that moment reappear when the freeze is released.
 Existing verdicts first publish at the next boundary after
 the history migration. Submission times retain their existing one-second precision.
 Batch aggregate changes can still reveal MCQ correctness, even while individual

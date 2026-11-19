@@ -421,6 +421,163 @@ const docTemplate = `{
                 }
             }
         },
+        "/admin/contest/{id}/leaderboard-freeze": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Leaderboard"
+                ],
+                "summary": "Get contest leaderboard freeze status (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.LeaderboardFreezeStatus"
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Leaderboard freeze migration is not applied",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin - Leaderboard"
+                ],
+                "summary": "Freeze or unfreeze contest leaderboard (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Freeze state",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.SetLeaderboardFreezeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.LeaderboardFreezeStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Contest has not started yet",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Leaderboard freeze change in progress; retry",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Leaderboard freeze migration is not applied",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/admin/contest/{id}/plagiarism": {
             "get": {
                 "security": [
@@ -2387,7 +2544,7 @@ const docTemplate = `{
         },
         "/contests/{id}/leaderboard": {
             "get": {
-                "description": "Get ranked participants with pagination. Public coding results update immediately; MCQ scores, solves, and ranks update in five-minute batches from contest start. All results are visible to admins and after contest end. Problem breakdowns are admin-only.",
+                "description": "Get ranked participants with pagination. Public coding results update immediately; MCQ scores, solves, and ranks update in five-minute batches from contest start. Admins may freeze the public ranking display while scoring continues. Admins always see current results; public viewers see all results after contest end once any freeze is released. Problem breakdowns are admin-only.",
                 "produces": [
                     "application/json"
                 ],
@@ -2423,6 +2580,10 @@ const docTemplate = `{
                             "X-Current-Page": {
                                 "type": "string",
                                 "description": "Current page"
+                            },
+                            "X-Leaderboard-Frozen": {
+                                "type": "string",
+                                "description": "Whether this response is the frozen public snapshot (always false for admins)"
                             },
                             "X-Total-Count": {
                                 "type": "string",
@@ -4163,6 +4324,14 @@ const docTemplate = `{
                 }
             }
         },
+        "app_internal_models_dto.LeaderboardFreezeStatus": {
+            "type": "object",
+            "properties": {
+                "frozen": {
+                    "type": "boolean"
+                }
+            }
+        },
         "app_internal_models_dto.ListProblemSubmissionsResponse": {
             "type": "object",
             "properties": {
@@ -4410,6 +4579,17 @@ const docTemplate = `{
                 },
                 "stdout": {
                     "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.SetLeaderboardFreezeRequest": {
+            "type": "object",
+            "required": [
+                "frozen"
+            ],
+            "properties": {
+                "frozen": {
+                    "type": "boolean"
                 }
             }
         },

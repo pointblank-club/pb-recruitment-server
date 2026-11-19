@@ -124,6 +124,7 @@ type mockRankingStore struct {
 	consolidateFunc func(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error)
 	updateFunc      func(ctx context.Context, contestID, userID string, req *dto.UpdateLeaderboardUserRequest) error
 	leaderboardFunc func(ctx context.Context, contestID string, page int) (*dto.GetLeaderboardResponse, error)
+	setFrozenErr    error
 }
 
 func (m *mockRankingStore) ConsolidateContest(ctx context.Context, contestID string, regrade bool, force bool) (*dto.ConsolidationResponse, error) {
@@ -151,6 +152,39 @@ func (m *mockRankingStore) InvalidateCache(contestID string) {}
 
 func (m *mockRankingStore) GetLiveLeaderboard(ctx context.Context, contestID string, page int, mcqCutoff int64) (*dto.GetLeaderboardResponse, error) {
 	return m.GetLeaderboard(ctx, contestID, page)
+}
+
+func (m *mockRankingStore) GetLeaderboardFreezeStatus(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (m *mockRankingStore) GetFrozenLeaderboard(context.Context, string, int) (*dto.GetLeaderboardResponse, error) {
+	return nil, nil
+}
+
+func (m *mockRankingStore) SetLeaderboardFrozen(context.Context, string, bool, *int64) error {
+	return m.setFrozenErr
+}
+
+func TestSetLeaderboardFreezeStatusConflict(t *testing.T) {
+	storage := &stores.Storage{
+		Contests: submissionContestStore{contest: models.Contest{ID: "cid", StartTime: 1, EndTime: time.Now().Add(-time.Minute).UnixMilli()}},
+		Rankings: &mockRankingStore{setFrozenErr: common.ErrLeaderboardFreezeInProgress},
+	}
+	controller := NewContestController(services.NewContestService(storage, nil), nil)
+	recorder := httptest.NewRecorder()
+	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodPut, "/admin/contest/cid/leaderboard-freeze", nil), recorder)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("cid")
+	frozen := true
+	ctx.Set(common.VALIDATED_REQUEST_BODY, &dto.SetLeaderboardFreezeRequest{Frozen: &frozen})
+
+	if err := controller.SetLeaderboardFreezeStatus(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusConflict || !strings.Contains(recorder.Body.String(), common.ErrLeaderboardFreezeInProgress.Error()) {
+		t.Fatalf("HTTP %d %s, want 409 with the retry message", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestHandleConsolidateContest(t *testing.T) {

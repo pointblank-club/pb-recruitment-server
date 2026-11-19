@@ -52,6 +52,9 @@ var (
 	ErrBrowserSessionAttemptUsed   = errors.New("browser session startup was already confirmed; retry with a new attempt")
 )
 
+var ErrLeaderboardFreezeUnavailable = errors.New("leaderboard freeze is unavailable until migration 000049 is applied")
+var ErrLeaderboardFreezeInProgress = errors.New("leaderboard freeze change in progress, try again")
+
 type BrowserSessionStaleError struct{ Generation int }
 
 func (e *BrowserSessionStaleError) Error() string { return "stale browser session reset generation" }

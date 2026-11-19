@@ -8,6 +8,7 @@ import (
 	"app/internal/stores"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -298,15 +299,39 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	if contest.GetRunningStatus() == models.ContestRunningUpcoming {
 		return nil, common.ErrContestNotStarted
 	}
-	var res *dto.GetLeaderboardResponse
-	if !isAdmin && contest.GetRunningStatus() == models.ContestRunningOpen {
-		cutoff := mcqLeaderboardCutoff(contest.StartTime, time.Now().UnixMilli())
-		res, err = cs.stores.Rankings.GetLiveLeaderboard(ctx, contestID, page, cutoff)
-	} else {
-		res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+	// Public viewers see the frozen snapshot while one exists; admins always see live results.
+	frozenPage := func() (*dto.GetLeaderboardResponse, error) {
+		if isAdmin {
+			return nil, nil
+		}
+		res, err := cs.stores.Rankings.GetFrozenLeaderboard(ctx, contestID, page)
+		if errors.Is(err, common.ErrLeaderboardFreezeUnavailable) {
+			return nil, nil
+		}
+		return res, err
 	}
+	res, err := frozenPage()
 	if err != nil {
 		return nil, err
+	}
+	if res == nil {
+		if !isAdmin && contest.GetRunningStatus() == models.ContestRunningOpen {
+			cutoff := mcqLeaderboardCutoff(contest.StartTime, time.Now().UnixMilli())
+			res, err = cs.stores.Rankings.GetLiveLeaderboard(ctx, contestID, page, cutoff)
+		} else {
+			res, err = cs.stores.Rankings.GetLeaderboard(ctx, contestID, page)
+		}
+		if err != nil {
+			return nil, err
+		}
+		// A freeze committed during the live read must not expose newer scores.
+		frozen, err := frozenPage()
+		if err != nil {
+			return nil, err
+		}
+		if frozen != nil {
+			res = frozen
+		}
 	}
 	if !isAdmin {
 		sanitizedEntries := make([]dto.LeaderboardEntry, len(res.Entries))
@@ -319,6 +344,37 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 		return &resCopy, nil
 	}
 	return res, nil
+}
+
+func (cs *ContestService) GetLeaderboardFreezeStatus(ctx context.Context, contestID string) (*dto.LeaderboardFreezeStatus, error) {
+	if _, err := cs.stores.Contests.GetContest(ctx, contestID); err != nil {
+		return nil, err
+	}
+	frozen, err := cs.stores.Rankings.GetLeaderboardFreezeStatus(ctx, contestID)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.LeaderboardFreezeStatus{Frozen: frozen}, nil
+}
+
+func (cs *ContestService) SetLeaderboardFrozen(ctx context.Context, contestID string, frozen bool) (*dto.LeaderboardFreezeStatus, error) {
+	contest, err := cs.stores.Contests.GetContest(ctx, contestID)
+	if err != nil {
+		return nil, err
+	}
+	if frozen && contest.GetRunningStatus() == models.ContestRunningUpcoming {
+		return nil, common.ErrContestNotStarted
+	}
+
+	var cutoff *int64
+	if frozen && contest.GetRunningStatus() == models.ContestRunningOpen {
+		value := mcqLeaderboardCutoff(contest.StartTime, time.Now().UnixMilli())
+		cutoff = &value
+	}
+	if err := cs.stores.Rankings.SetLeaderboardFrozen(ctx, contestID, frozen, cutoff); err != nil {
+		return nil, err
+	}
+	return &dto.LeaderboardFreezeStatus{Frozen: frozen}, nil
 }
 
 func mcqLeaderboardCutoff(start, now int64) int64 {
