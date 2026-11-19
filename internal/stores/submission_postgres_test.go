@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -455,126 +456,47 @@ func TestSubmissionExecutionDenominatorAndCompletedCount(t *testing.T) {
 }
 
 func TestHistoricalCodeExecutionBackfillPostgres(t *testing.T) {
-	db := postgresTestDB(t)
+	db := postgresTestDBBefore(t, "000048")
 	ctx := context.Background()
+	seed := `
+		INSERT INTO users(id,name,email,usn,current_year,department) VALUES
+			('u1','U1','u1@x','u1',1,'CS'),('u2','U2','u2@x','u2',1,'CS');
+		INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES('c','C','',1,2,1,2);
+		INSERT INTO problems(id,contest_id,name,score,type) VALUES('p','c','P',10,'code'),('q','c','Q',100,'code');
+		INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at,language) VALUES
+			('partial','u1','c','p','code','wrong_answer',1,'py'),
+			('solved','u1','c','q','code','accepted',2,'py'),
+			('judge_err','u2','c','p','code','wrong_answer',3,'py');
+		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
+			SELECT gen_random_uuid(),'partial',i,CASE WHEN i<3 THEN 'accepted' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
+		INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at)
+			SELECT gen_random_uuid(),'judge_err',i,CASE WHEN i<3 THEN 'accepted' WHEN i=3 THEN 'judge_error' ELSE 'wrong_answer' END,1 FROM generate_series(0,4) i;
+		INSERT INTO rankings(contest_id,user_id,score,rank) VALUES('c','u1',100,1),('c','u2',0,2);`
+	if _, err := db.ExecContext(ctx, seed); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../migrations/000048_code_partial_scoring.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatal(err)
+	}
 
-	user := uuid.NewString()
-	contest := uuid.NewString()
-	problem := uuid.NewString()
-	subID := uuid.NewString()
-
-	if _, err := db.ExecContext(ctx, `INSERT INTO users(id,name,email,usn,current_year,department) VALUES($1,'Backfill User',$2,$1,1,'CS')`, user, user+"@example.test"); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UnixMilli()
-	if _, err := db.ExecContext(ctx, `INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time) VALUES($1,'Backfill Contest','',1,$2,$3,$2)`, contest, now+3_600_000, now-3_600_000); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO problems(id, contest_id, name, score, type) VALUES($1, $2, 'Backfill Problem', 10, 'code')`, problem, contest); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO rankings(contest_id, user_id, score, rank, hidden, disqualified) VALUES($1,$2,0.00,0,false,false)`, contest, user); err != nil {
-		t.Fatal(err)
-	}
-
-	// Historical submission: 3/5 passed, but status is wrong_answer and score is 0.00
-	if _, err := db.ExecContext(ctx, `INSERT INTO submissions(id, user_id, contest_id, problem_id, type, status, created_at, score, language) VALUES($1,$2,$3,$4,'code','wrong_answer',100,0.00,'python')`, subID, user, contest, problem); err != nil {
-		t.Fatal(err)
-	}
-
-	for i := 0; i < 5; i++ {
-		execStatus := "wrong_answer"
-		if i < 3 {
-			execStatus = "accepted"
-		}
-		if _, err := db.ExecContext(ctx, `INSERT INTO submission_executions(id, submission_id, test_case_index, status, created_at) VALUES($1,$2,$3,$4,100)`, uuid.NewString(), subID, i, execStatus); err != nil {
-			t.Fatal(err)
+	for id, want := range map[string]float64{"partial": 2.50, "solved": 100, "judge_err": 0} {
+		var got float64
+		if err := db.QueryRowContext(ctx, `SELECT score FROM submissions WHERE id=$1`, id).Scan(&got); err != nil || got != want {
+			t.Errorf("submission %s score = %.2f (err %v), want %.2f", id, got, err, want)
 		}
 	}
-
-	// Execute the backfill logic from migration 000048
-	const backfillSQL = `
-		WITH exec_counts AS (
-			SELECT 
-				submission_id,
-				count(*)::int AS total,
-				count(*) FILTER (WHERE status = 'accepted')::int AS passed
-			FROM submission_executions
-			GROUP BY submission_id
-			UNION ALL
-			SELECT 
-				submission_id,
-				count(*)::int AS total,
-				count(*) FILTER (WHERE status = 'pass')::int AS passed
-			FROM test_case_results
-			WHERE submission_id NOT IN (SELECT submission_id FROM submission_executions)
-			GROUP BY submission_id
-		),
-		combined_counts AS (
-			SELECT submission_id, MAX(total) AS total, MAX(passed) AS passed
-			FROM exec_counts
-			GROUP BY submission_id
-		),
-		scored_submissions AS (
-			SELECT 
-				s.id,
-				p.score AS problem_score,
-				ec.passed,
-				ec.total,
-				ec.total / 2 AS half,
-				ec.total - (ec.total / 2) - 1 AS intermediate_steps,
-				ec.passed - (ec.total / 2) AS passed_above_half
-			FROM submissions s
-			JOIN problems p ON p.id = s.problem_id AND p.contest_id = s.contest_id
-			JOIN combined_counts ec ON ec.submission_id = s.id
-			WHERE s.type = 'code'
-			  AND s.status <> 'accepted'
-			  AND s.status <> 'pending'
-			  AND s.status <> 'judge_error'
-			  AND ec.total > 0
-			  AND ec.passed > (ec.total / 2)
-			  AND ec.passed < ec.total
-		)
-		UPDATE submissions s
-		SET score = CASE
-			WHEN ss.intermediate_steps <= 0 THEN 0.00
-			ELSE (
-				(
-					2 * (ss.passed_above_half * ROUND(ss.problem_score * 100)::bigint) + (2 * ss.intermediate_steps)
-				) / (4 * ss.intermediate_steps)
-			)::numeric(20, 2) / 100.00
-		END
-		FROM scored_submissions ss
-		WHERE s.id = ss.id;
-
-		UPDATE rankings r
-		SET score = COALESCE((
-			SELECT SUM(ps.max_score)
-			FROM (
-				SELECT sub.problem_id, MAX(sub.score) AS max_score
-				FROM submissions sub
-				WHERE sub.contest_id = r.contest_id
-				  AND sub.user_id = r.user_id
-				GROUP BY sub.problem_id
-			) ps
-		), 0.00);
-	`
-	if _, err := db.ExecContext(ctx, backfillSQL); err != nil {
-		t.Fatalf("backfill SQL execution failed: %v", err)
-	}
-
-	var subScore, rankScore float64
-	if err := db.QueryRowContext(ctx, `SELECT score FROM submissions WHERE id=$1`, subID).Scan(&subScore); err != nil {
-		t.Fatalf("query submission score: %v", err)
-	}
-	if subScore != 2.50 {
-		t.Errorf("expected submission score 2.50, got %.2f", subScore)
-	}
-
-	if err := db.QueryRowContext(ctx, `SELECT score FROM rankings WHERE contest_id=$1 AND user_id=$2`, contest, user).Scan(&rankScore); err != nil {
-		t.Fatalf("query ranking score: %v", err)
-	}
-	if rankScore != 2.50 {
-		t.Errorf("expected ranking score 2.50, got %.2f", rankScore)
+	for user, want := range map[string]float64{"u1": 102.50, "u2": 0} {
+		var got float64
+		var rank int
+		if err := db.QueryRowContext(ctx, `SELECT score,rank FROM rankings WHERE user_id=$1`, user).Scan(&got, &rank); err != nil || got != want {
+			t.Errorf("ranking %s score = %.2f (err %v), want %.2f", user, got, err, want)
+		}
+		if wantRank := map[string]int{"u1": 1, "u2": 2}[user]; rank != wantRank {
+			t.Errorf("ranking %s rank = %d, want %d (migration must not rerank)", user, rank, wantRank)
+		}
 	}
 }

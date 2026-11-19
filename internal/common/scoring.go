@@ -24,7 +24,7 @@ func CalculateCodePartialScore(passed, total int, maxScore float64) float64 {
 		return 0.0
 	}
 	if passed >= total {
-		return RoundTo2Decimals(maxScore)
+		return maxScore
 	}
 
 	half := total / 2
@@ -32,10 +32,7 @@ func CalculateCodePartialScore(passed, total int, maxScore float64) float64 {
 		return 0.0
 	}
 
-	intermediateSteps := total - half - 1
-	if intermediateSteps <= 0 {
-		return 0.0
-	}
+	intermediateSteps := total - half - 1 // >= 1 because half < passed < total
 
 	passedAboveHalf := passed - half
 	// Calculate rounded cents using exact integer/rational arithmetic to avoid IEEE-754 binary fraction drift

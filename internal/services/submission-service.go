@@ -67,9 +67,6 @@ func (ss *SubmissionService) GetSubmissionDetailsByID(ctx context.Context, id st
 		}
 	}
 	maskMCQVerdict(&sub.Submission)
-	if sub.Type == models.MCQ && sub.ContestEndTime >= time.Now().UnixMilli() {
-		sub.TestCasesPassed = 0
-	}
 	return sub, nil
 }
 
@@ -89,10 +86,6 @@ func (ss *SubmissionService) GetSubmissionTestCaseCounts(ctx context.Context, su
 		return 0, 0, nil
 	}
 	return ss.stores.Submissions.GetSubmissionTestCaseCounts(ctx, sub.ID, sub.Type, sub.ContestEndTime, sub.Status)
-}
-
-func (ss *SubmissionService) GetTestCaseResultsBySubmissionID(ctx context.Context, submissionID string) ([]models.TestCaseResult, error) {
-	return ss.stores.Submissions.GetTestCaseResultsBySubmissionID(ctx, submissionID)
 }
 
 func (ss *SubmissionService) ListAdminSubmissions(ctx context.Context, contestID, userID, problemID, verdict, submissionType string, page, pageSize int) ([]dto.AdminSubmissionItem, int, error) {

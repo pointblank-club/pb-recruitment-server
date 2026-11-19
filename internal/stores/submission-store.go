@@ -165,25 +165,11 @@ func (s *SubmissionStore) GetSubmissionTestCaseCounts(ctx context.Context, submi
 		return passed, total, nil
 	}
 
+	// Every code submission has one execution row per test case (indexed by submission_id).
 	const q = `
-		WITH se AS (
-			SELECT 
-				COUNT(*)::int AS total,
-				COUNT(*) FILTER (WHERE status = 'accepted')::int AS passed
-			FROM submission_executions
-			WHERE submission_id = $1
-		),
-		tcr AS (
-			SELECT 
-				COUNT(*)::int AS total,
-				COUNT(*) FILTER (WHERE status::text IN ('pass', 'accepted'))::int AS passed
-			FROM test_case_results
-			WHERE submission_id = $1
-		)
-		SELECT 
-			CASE WHEN se.total > 0 THEN se.passed ELSE tcr.passed END,
-			CASE WHEN se.total > 0 THEN se.total ELSE tcr.total END
-		FROM se, tcr;
+		SELECT COUNT(*) FILTER (WHERE status = 'accepted')::int, COUNT(*)::int
+		FROM submission_executions
+		WHERE submission_id = $1
 	`
 	var passed, total int
 	if err := s.db.QueryRowContext(ctx, q, submissionID).Scan(&passed, &total); err != nil {

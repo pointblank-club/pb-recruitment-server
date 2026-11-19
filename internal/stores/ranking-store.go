@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -483,7 +482,7 @@ type participantSummary struct {
 }
 
 func isTied(a, b participantSummary) bool {
-	return math.Abs(a.TotalScore-b.TotalScore) < 1e-6 &&
+	return a.TotalScore == b.TotalScore && // totals are rounded to cents, so equal totals are identical floats
 		a.ProblemsSolved == b.ProblemsSolved &&
 		a.LastSubmissionTime == b.LastSubmissionTime &&
 		a.TotalAttempts == b.TotalAttempts
@@ -662,10 +661,8 @@ func (s *RankingStore) gradeContestMCQsTx(ctx context.Context, tx *sql.Tx, conte
 		UPDATE submissions s
 		SET status = t.status::submission_status,
 		    score = CASE WHEN t.status = 'accepted' THEN p.score ELSE 0.0 END
-		FROM unnest($1::text[], $2::text[]) AS t(id, status)
-		JOIN submissions sub ON sub.id = t.id
-		JOIN problems p ON p.id = sub.problem_id AND p.contest_id = sub.contest_id
-		WHERE s.id = t.id
+		FROM unnest($1::text[], $2::text[]) AS t(id, status), problems p
+		WHERE s.id = t.id AND p.id = s.problem_id AND p.contest_id = s.contest_id
 	`
 	if _, err := tx.ExecContext(ctx, batchUpdateMCQ, pq.Array(subIDs), pq.Array(statuses)); err != nil {
 		return 0, fmt.Errorf("batch update MCQ submissions: %w", err)
@@ -805,15 +802,12 @@ func (s *RankingStore) computeAndSaveRanksTx(ctx context.Context, tx *sql.Tx, co
 				data.earliestAccepted[pid] = createdAt
 			}
 		}
-		if subScore > 0 || status == string(models.Accepted) {
-			effectiveScore := subScore
-			if status == string(models.Accepted) && effectiveScore < float64(problemScores[pid]) {
-				effectiveScore = float64(problemScores[pid])
-			}
-			prevScore := data.maxProblemScore[pid]
-			if effectiveScore > prevScore {
-				data.maxProblemScore[pid] = effectiveScore
-			}
+		// Accepted uses the current problem score, matching the live leaderboard.
+		if status == string(models.Accepted) {
+			subScore = float64(problemScores[pid])
+		}
+		if subScore > data.maxProblemScore[pid] {
+			data.maxProblemScore[pid] = subScore
 		}
 	}
 	if err := sRows.Err(); err != nil {

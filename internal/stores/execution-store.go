@@ -199,19 +199,22 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 			return err
 		}
 		verdict := aggregateFailure(children)
-		passedCount := 0
+		passedCount, judgeErrored := 0, false
 		for _, c := range children {
-			if c.status == "accepted" {
+			switch c.status {
+			case "accepted":
 				passedCount++
+			case string(models.JudgeError):
+				judgeErrored = true
 			}
 		}
-		totalCount := len(children)
 		if accepted {
 			verdict = "accepted"
 		}
-		subScore := common.CalculateCodePartialScore(passedCount, totalCount, problemScore)
-		if verdict == string(models.JudgeError) {
-			subScore = 0.0
+		subScore := 0.0
+		// Any infrastructure failure voids partial credit, so a judge error never beats a cleaner run.
+		if !judgeErrored {
+			subScore = common.CalculateCodePartialScore(passedCount, len(children), problemScore)
 		}
 		_, err = tx.ExecContext(ctx, `UPDATE submissions SET status=$2,runtime=$3,memory=$4,score=$5 WHERE id=$1 AND status='pending'`, subID, verdict, totalRuntime, totalMemory, subScore)
 		if err != nil {
@@ -226,10 +229,11 @@ func (s *ExecutionStore) ProcessFinal(ctx context.Context, r FinalExecutionResul
 		if err != nil {
 			return err
 		}
+		// Accepted uses the current problem score, matching the leaderboard and consolidation.
 		_, err = tx.ExecContext(ctx, `UPDATE rankings SET score=COALESCE((
 			SELECT SUM(max_p_score) FROM (
-				SELECT MAX(s.score) AS max_p_score
-				FROM submissions s
+				SELECT MAX(CASE WHEN s.status='accepted' THEN p.score ELSE s.score END) AS max_p_score
+				FROM submissions s JOIN problems p ON p.id=s.problem_id AND p.contest_id=s.contest_id
 				WHERE s.contest_id=$1 AND s.user_id=$2
 				GROUP BY s.problem_id
 			) sub

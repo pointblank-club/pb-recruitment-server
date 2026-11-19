@@ -40,6 +40,8 @@ Each coding problem has a configured score (`Score`) and a set of $N$ test cases
     of the problem score. Across all intermediate test cases, candidates can earn up to 50% of the total problem score.
   - **Full Solve ($K = N$)**: Passing all $N$ test cases awards the remaining 50%, for **100% of the problem score**.
   - **Precision**: Scores support decimal precision rounded to **2 decimal places** (e.g. `1.25`, `12.50`).
+  - **Judge Errors**: A submission with any test case ending in `judge_error` earns **0 points**, regardless of how many other test cases passed.
+  - **Score Edits**: Accepted submissions always use the problem's current score; partial scores keep the score in effect when they were judged.
   - **Edge-Cases**:
     - $N = 2$: Passing 1 test case awards 0%; passing 2 test cases awards 100% (all-or-nothing).
     - $N = 3$: Passing 1 awards 0%; passing 2 awards 50%; passing 3 awards 100%.
