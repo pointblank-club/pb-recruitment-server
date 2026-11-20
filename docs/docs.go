@@ -2865,6 +2865,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "428": {
+                        "description": "Registration needs a connected Yandex account (code yandex_not_connected)",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -3466,6 +3475,208 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/yandex/connection": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Whether the authenticated candidate has connected their own Yandex account for the backup contest, and whether registration requires it. token_state needs_reauth means the candidate must connect again. yandex_login can be empty; show yandex_email instead.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Yandex"
+                ],
+                "summary": "Get the candidate's backup Yandex connection",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.YandexConnectionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/yandex/connection/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Exchanges the code Yandex returned, reads the Yandex account it belongs to, and saves it with encrypted tokens. Connecting again replaces the previous account. One Yandex account can belong to only one candidate.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Yandex"
+                ],
+                "summary": "Finish connecting a Yandex account",
+                "parameters": [
+                    {
+                        "description": "Code and state from the Yandex redirect",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.CompleteYandexConnectionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.CompleteYandexConnectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "invalid_state or invalid_code",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "user_not_found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "yandex_account_taken",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "yandex_unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "yandex_not_configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/yandex/connection/start": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Records the candidate's consent and returns the Yandex page to send them to. Yandex redirects back to the website's /yandex/callback with code and state, which the website posts to /yandex/connection/complete. The state is signed and bound to the authenticated candidate.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Yandex"
+                ],
+                "summary": "Start connecting a Yandex account",
+                "parameters": [
+                    {
+                        "description": "Consent and the contest to return to",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.StartYandexConnectionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.StartYandexConnectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "consent_required or invalid_contest",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "yandex_not_configured",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3905,6 +4116,56 @@ const docTemplate = `{
                 },
                 "tab_switch_count": {
                     "type": "integer"
+                }
+            }
+        },
+        "app_internal_models_dto.CompleteYandexConnectionRequest": {
+            "type": "object",
+            "required": [
+                "code",
+                "state"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "maxLength": 512
+                },
+                "state": {
+                    "type": "string",
+                    "maxLength": 2048
+                }
+            }
+        },
+        "app_internal_models_dto.CompleteYandexConnectionResponse": {
+            "type": "object",
+            "properties": {
+                "connected": {
+                    "type": "boolean"
+                },
+                "connected_at": {
+                    "type": "integer"
+                },
+                "contest_id": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "token_state": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "needs_reauth"
+                    ]
+                },
+                "yandex_email": {
+                    "type": "string"
+                },
+                "yandex_login": {
+                    "type": "string"
                 }
             }
         },
@@ -4661,6 +4922,28 @@ const docTemplate = `{
                 }
             }
         },
+        "app_internal_models_dto.StartYandexConnectionRequest": {
+            "type": "object",
+            "properties": {
+                "consent": {
+                    "description": "Consent must be true: the candidate ticked the agreement to have their solutions\nsubmitted to the backup contest from their Yandex account.",
+                    "type": "boolean"
+                },
+                "contest_id": {
+                    "description": "ContestID is where the website returns the candidate afterwards. Optional.",
+                    "type": "string",
+                    "maxLength": 64
+                }
+            }
+        },
+        "app_internal_models_dto.StartYandexConnectionResponse": {
+            "type": "object",
+            "properties": {
+                "authorize_url": {
+                    "type": "string"
+                }
+            }
+        },
         "app_internal_models_dto.SubmitSubmissionRequest": {
             "type": "object",
             "required": [
@@ -4851,6 +5134,36 @@ const docTemplate = `{
                 },
                 "start_time": {
                     "type": "integer"
+                }
+            }
+        },
+        "app_internal_models_dto.YandexConnectionResponse": {
+            "type": "object",
+            "properties": {
+                "connected": {
+                    "type": "boolean"
+                },
+                "connected_at": {
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "required": {
+                    "type": "boolean"
+                },
+                "token_state": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "needs_reauth"
+                    ]
+                },
+                "yandex_email": {
+                    "type": "string"
+                },
+                "yandex_login": {
+                    "type": "string"
                 }
             }
         },

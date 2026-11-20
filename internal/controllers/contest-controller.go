@@ -168,6 +168,7 @@ func (cc *ContestController) ReviewDolosPair(ctx echo.Context) error {
 // @Failure      403 {object} map[string]string "Registration closed, cannot unregister after start, or invalid student year"
 // @Failure      404 {object} map[string]string "Contest or user not found"
 // @Failure      409 {object} map[string]string "User already registered"
+// @Failure      428 {object} map[string]string "Registration needs a connected Yandex account (code yandex_not_connected)"
 // @Failure      500 {object} map[string]string "Internal server error"
 // @Router       /contests/{id}/registration [post]
 func (cc *ContestController) ModifyRegistration(ctx echo.Context) error {
@@ -176,6 +177,12 @@ func (cc *ContestController) ModifyRegistration(ctx echo.Context) error {
 	reqBody := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.ModifyRegistrationRequest)
 
 	if err := cc.contestService.ModifyRegistration(ctx.Request().Context(), contestID, userID, reqBody.Action); err != nil {
+		if errors.Is(err, common.ErrYandexNotConnected) {
+			return ctx.JSON(http.StatusPreconditionRequired, map[string]string{
+				"error": err.Error(),
+				"code":  "yandex_not_connected",
+			})
+		}
 		if errors.Is(err, common.ContestRegistrationClosedError) ||
 			errors.Is(err, common.InvalidYearError) ||
 			errors.Is(err, common.ErrCannotUnregisterAfterStart) {

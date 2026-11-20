@@ -56,7 +56,7 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000049`: submission cooldowns
+- The current schema requires migrations through `000050`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
@@ -67,8 +67,9 @@ make swagger
   removal of per-question time/memory settings (`000042`), session endings (`000043`),
   MCQ verdict history (`000044`), leaderboard batches (`000045`), coding-only
   resource settings (`000046`), SEB sessions (`000047`), partial code scoring
-  (`000048`), and public leaderboard freeze snapshots (`000049`).
-  Stop old API writers and drain in-flight preparation, apply through `000049`, then
+  (`000048`), public leaderboard freeze snapshots (`000049`), and candidates' Yandex
+  accounts for the backup contest (`000050`).
+  Stop old API writers and drain in-flight preparation, apply through `000050`, then
   start the new API with the same `SUBMISSION_MAX_PENDING` on every replica. Do not mix
   old and new writers. See [rollout and rollback requirements](SECURITY_LIMITS.md#code-submission-admission-and-retries).
   `make migrate-up`
@@ -265,6 +266,45 @@ Existing verdicts first publish at the next boundary after
 the history migration. Submission times retain their existing one-second precision.
 Batch aggregate changes can still reveal MCQ correctness, even while individual
 submission verdicts are masked.
+
+## Backup contest on Yandex
+
+[recruitment-backup](https://github.com/ShreyashSri/recruitment-backup) runs the same
+contest on Yandex Contest and copies every submission there, so the contest can
+continue if this platform fails. Each candidate connects their own Yandex account
+before registering; this server stores it, and the backup service does the rest.
+
+- `GET /yandex/connection` reports whether the candidate is connected, whether
+  registration requires it (`required`), and `token_state` (`needs_reauth` means
+  connect again). `enabled` is false until the settings below are present.
+- `POST /yandex/connection/start` takes `{"consent": true, "contest_id": "..."}` and
+  returns the Yandex `authorize_url`. Yandex sends the candidate back to the website's
+  `/yandex/callback` with `code` and `state`.
+- `POST /yandex/connection/complete` takes that `code` and `state`, exchanges the
+  code, reads the Yandex uid, login and email, and saves them with the encrypted tokens
+  in `yandex_accounts` (migration `000050`). The state is signed and bound to the
+  logged-in candidate, so nobody can attach their Yandex account to someone else. One
+  Yandex account can belong to one candidate (409 `yandex_account_taken`); connecting
+  again replaces the candidate's previous account.
+- With `REQUIRE_YANDEX_CONNECT=true`, registering without a connected account returns
+  428 with code `yandex_not_connected`. Unregistering never touches the account.
+
+Settings (the connect step stays off until the first four are all set; a partial or
+invalid setup, or `REQUIRE_YANDEX_CONNECT=true` without them, stops the server at start):
+
+| Setting | Meaning |
+|---|---|
+| `YANDEX_OAUTH_CLIENT_ID`, `YANDEX_OAUTH_CLIENT_SECRET` | The candidate OAuth app on Yandex ID, scopes `contest:submit`, `login:info`, `login:email`. The backup service uses the same app |
+| `YANDEX_OAUTH_REDIRECT_URI` | The website's callback, e.g. `https://recruitment.pointblank.club/yandex/callback`; register it on the app |
+| `YANDEX_TOKEN_KEY` | 32 random bytes, standard base64 (`openssl rand -base64 32`). Must equal the backup's `BACKUP_ENCRYPTION_KEY`; also signs the OAuth state |
+| `REQUIRE_YANDEX_CONNECT` | `true` to refuse registration without a connected account |
+| `YANDEX_OAUTH_AUTHORIZE_URL`, `YANDEX_OAUTH_URL`, `YANDEX_LOGIN_INFO_URL` | Optional overrides of the Yandex endpoints |
+
+Times in `yandex_accounts` are Unix milliseconds and tokens use the backup's sealed
+format, so keep the table and sealing in step with recruitment-backup
+(`TestYandexAccountsMatchRecruitmentBackupPostgres`, `TestSealFormatMatchesRecruitmentBackup`).
+Deploy this server and its migration first, then the website, then the backup
+service. Delete the `yandex_accounts` rows after recruitment, as promised to candidates.
 
 ## PostgreSQL tests
 

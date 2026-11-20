@@ -6,11 +6,13 @@ import (
 	"app/internal/models/dto"
 	"app/internal/s3"
 	"app/internal/stores"
+	"app/internal/yandex"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -23,12 +25,16 @@ import (
 type ContestService struct {
 	stores *stores.Storage
 	s3     *s3.S3
+	// requireYandex refuses registration until the candidate has connected their Yandex
+	// account for the backup contest (REQUIRE_YANDEX_CONNECT).
+	requireYandex bool
 }
 
 func NewContestService(stores *stores.Storage, s3Client *s3.S3) *ContestService {
 	return &ContestService{
-		stores: stores,
-		s3:     s3Client,
+		stores:        stores,
+		s3:            s3Client,
+		requireYandex: yandex.ConnectRequired(os.Getenv),
 	}
 }
 
@@ -77,6 +83,16 @@ func (cs *ContestService) ModifyRegistration(ctx context.Context, contestID stri
 		if !slices.Contains(contest.EligibleTo, user.CurrentYear) {
 			log.Errorf("user %s is not eligible to contest %s", userID, contestID)
 			return common.InvalidYearError
+		}
+
+		if cs.requireYandex {
+			connected, err := cs.stores.YandexAccounts.HasYandexAccount(ctx, userID)
+			if err != nil {
+				return err
+			}
+			if !connected {
+				return common.ErrYandexNotConnected
+			}
 		}
 
 		return cs.stores.Contests.RegisterUser(ctx, contestID, userID)
