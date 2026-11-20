@@ -224,8 +224,8 @@ func TestGetLeaderboard(t *testing.T) {
 		})
 	}
 
-	t.Run("redacts problem scores for non-admin", func(t *testing.T) {
-		scores := []dto.ProblemScore{{ProblemID: "p1", Score: 10}}
+	t.Run("preserves DSA scores and redacts MCQ scores for non-admin", func(t *testing.T) {
+		scores := []dto.ProblemScore{{ProblemID: "mcq", Type: "mcq", Score: 10}, {ProblemID: "dsa", Type: "code", Score: 5}}
 		storage := &stores.Storage{
 			Contests: problemContestTestStore{start: now - 60_000, end: now + 60_000},
 			Rankings: serviceRankingTestStore{leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
@@ -240,8 +240,11 @@ func TestGetLeaderboard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if res.Entries[0].ProblemScores != nil {
-			t.Fatalf("expected problem scores to be nil for non-admin, got %v", res.Entries[0].ProblemScores)
+		if len(res.Entries[0].ProblemScores) != 1 || res.Entries[0].ProblemScores[0].ProblemID != "dsa" {
+			t.Fatalf("expected only DSA scores for non-admin, got %v", res.Entries[0].ProblemScores)
+		}
+		if scores[0].ProblemID != "mcq" || scores[1].ProblemID != "dsa" {
+			t.Fatal("public filtering modified the cached admin breakdown")
 		}
 	})
 

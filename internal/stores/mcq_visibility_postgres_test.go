@@ -252,7 +252,7 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 					wantScore, wantRank, wantSolved, wantTime = 30, 1, 2, correctAt*1000
 				case mcqOnly:
 					wantScore, wantRank, wantSolved, wantTime = 20, 2, 1, mcqOnlyAt*1000
-					wantBreakdowns = 1
+					wantBreakdowns = 2
 				}
 				if viewer != user && !ended {
 					switch entry.UserID {
@@ -269,8 +269,17 @@ func TestMCQVerdictVisibilityPostgres(t *testing.T) {
 				if entry.TotalScore != float64(wantScore) || entry.Rank != wantRank || entry.ProblemsSolved != wantSolved || entry.LastSubmissionTime != wantTime {
 					t.Fatalf("stage=%s viewer=%q entry=%+v, want score/rank/solves/time=%d/%d/%d/%d", stage, viewer, entry, wantScore, wantRank, wantSolved, wantTime)
 				}
-				if viewer != user && len(entry.ProblemScores) != 0 {
-					t.Fatal("non-admin breakdown leaked")
+				wantDSA := 1
+				if entry.UserID == mcqOnly {
+					wantDSA = 0
+				}
+				if entry.DSASolved == nil || entry.MCQSolved == nil || *entry.DSASolved != wantDSA || *entry.MCQSolved != wantSolved-wantDSA {
+					t.Fatalf("stage=%s viewer=%q incorrect split solve counts: %+v", stage, viewer, entry)
+				}
+				if viewer != user {
+					if len(entry.ProblemScores) != 1 || entry.ProblemScores[0].Type != "code" {
+						t.Fatalf("expected only DSA breakdown for non-admin: %+v", entry.ProblemScores)
+					}
 				}
 				if viewer == user && len(entry.ProblemScores) != wantBreakdowns {
 					t.Fatal("admin breakdown missing")

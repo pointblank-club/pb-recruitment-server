@@ -93,8 +93,16 @@ func TestLeaderboardFreezeSnapshotUnderConcurrentScoringPostgres(t *testing.T) {
 			break
 		}
 		for _, e := range lb.Entries {
-			if seen[e.UserID] || e.ProblemScores != nil || e.TotalScore != float64(100*e.ProblemsSolved) {
-				t.Fatalf("duplicate, breakdown leak, or inconsistent entry: %+v", e)
+			if seen[e.UserID] || len(e.ProblemScores) != len(problems) || e.TotalScore != float64(100*e.ProblemsSolved) {
+				t.Fatalf("duplicate, missing DSA breakdown, or inconsistent entry: %+v", e)
+			}
+			if e.DSASolved == nil || e.MCQSolved == nil || *e.DSASolved != e.ProblemsSolved || *e.MCQSolved != 0 {
+				t.Fatalf("inconsistent frozen split counts: %+v", e)
+			}
+			for _, ps := range e.ProblemScores {
+				if ps.Type != "code" {
+					t.Fatalf("non-DSA breakdown leaked: %+v", ps)
+				}
 			}
 			if e.Rank < prevRank || e.TotalScore > prevScore {
 				t.Fatalf("ordering broke at %+v (previous rank %d, score %v)", e, prevRank, prevScore)

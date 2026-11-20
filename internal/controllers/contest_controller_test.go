@@ -734,12 +734,12 @@ func TestGetLeaderboardController(t *testing.T) {
 		}
 	})
 
-	t.Run("omits problem scores for non-admin and includes for admin", func(t *testing.T) {
+	t.Run("shows DSA scores to everyone and MCQ scores only to admins", func(t *testing.T) {
 		rankStore := &mockRankingStore{
 			leaderboardFunc: func(_ context.Context, _ string, _ int) (*dto.GetLeaderboardResponse, error) {
 				return &dto.GetLeaderboardResponse{
 					Entries: []dto.LeaderboardEntry{
-						{UserID: "u1", ProblemScores: []dto.ProblemScore{{ProblemID: "p1", Score: 10}}},
+						{UserID: "u1", ProblemScores: []dto.ProblemScore{{ProblemID: "private-mcq", Type: "mcq", Score: 10}, {ProblemID: "public-dsa", Type: "code", Score: 5}}},
 					},
 					TotalCount: 1,
 					TotalPages: 1,
@@ -764,8 +764,8 @@ func TestGetLeaderboardController(t *testing.T) {
 		if err := ctrlNonAdmin.GetLeaderboard(ctxNonAdmin); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(recNonAdmin.Body.String(), "problem_scores") {
-			t.Fatalf("expected problem_scores to be omitted for non-admin, got: %s", recNonAdmin.Body.String())
+		if !strings.Contains(recNonAdmin.Body.String(), "public-dsa") || strings.Contains(recNonAdmin.Body.String(), "private-mcq") {
+			t.Fatalf("expected only DSA scores for non-admin, got: %s", recNonAdmin.Body.String())
 		}
 
 		// Admin request
@@ -784,8 +784,8 @@ func TestGetLeaderboardController(t *testing.T) {
 		if err := ctrlAdmin.GetLeaderboard(ctxAdmin); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(recAdmin.Body.String(), "problem_scores") {
-			t.Fatalf("expected problem_scores to be included for admin, got: %s", recAdmin.Body.String())
+		if !strings.Contains(recAdmin.Body.String(), "public-dsa") || !strings.Contains(recAdmin.Body.String(), "private-mcq") {
+			t.Fatalf("expected DSA and MCQ scores for admin, got: %s", recAdmin.Body.String())
 		}
 	})
 }

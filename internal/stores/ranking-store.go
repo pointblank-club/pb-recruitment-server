@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,6 +93,14 @@ func cloneLeaderboardResponse(res *dto.GetLeaderboardResponse) *dto.GetLeaderboa
 	clone.Entries = make([]dto.LeaderboardEntry, len(res.Entries))
 	for i, e := range res.Entries {
 		entryCopy := e
+		if e.DSASolved != nil {
+			count := *e.DSASolved
+			entryCopy.DSASolved = &count
+		}
+		if e.MCQSolved != nil {
+			count := *e.MCQSolved
+			entryCopy.MCQSolved = &count
+		}
 		if e.ProblemScores != nil {
 			entryCopy.ProblemScores = make([]dto.ProblemScore, len(e.ProblemScores))
 			copy(entryCopy.ProblemScores, e.ProblemScores)
@@ -354,12 +363,11 @@ func (s *RankingStore) getLeaderboardUsing(ctx context.Context, queryer rankingQ
 	}
 
 	for i := range entries {
-		scores, ok := problemScores[entries[i].UserID]
-		if !ok {
-			continue
-		}
+		scores := problemScores[entries[i].UserID]
 		entries[i].ProblemScores = scores
-		entries[i].ProblemsSolved, entries[i].LastSubmissionTime = summarizeSolves(scores)
+		solved, dsa, mcq, last := summarizeSolves(scores)
+		entries[i].ProblemsSolved, entries[i].LastSubmissionTime = solved, last
+		entries[i].DSASolved, entries[i].MCQSolved = &dsa, &mcq
 	}
 
 	resp := &dto.GetLeaderboardResponse{
@@ -517,7 +525,7 @@ func (s *RankingStore) SetLeaderboardFrozen(ctx context.Context, contestID strin
 		return fmt.Errorf("capture leaderboard snapshot: %w", err)
 	}
 	for i := range board.Entries {
-		board.Entries[i].ProblemScores = nil
+		board.Entries[i].ProblemScores = slices.DeleteFunc(slices.Clone(board.Entries[i].ProblemScores), func(ps dto.ProblemScore) bool { return ps.Type != "code" })
 	}
 	snapshot, err := json.Marshal(board.Entries)
 	if err != nil {
@@ -552,17 +560,23 @@ func freezeTableError(action string, err error) error {
 // A problem counts as solved only when it has an accepted submission, so a
 // zero-point problem is not mistaken for one. lastSolve is 0 when nothing was
 // solved.
-func summarizeSolves(scores []dto.ProblemScore) (solved int, lastSolve int64) {
+func summarizeSolves(scores []dto.ProblemScore) (solved, dsa, mcq int, lastSolve int64) {
 	for _, ps := range scores {
 		if ps.SolvedAt == nil {
 			continue
 		}
 		solved++
+		switch ps.Type {
+		case "code":
+			dsa++
+		case "mcq":
+			mcq++
+		}
 		if *ps.SolvedAt > lastSolve {
 			lastSolve = *ps.SolvedAt
 		}
 	}
-	return solved, lastSolve
+	return solved, dsa, mcq, lastSolve
 }
 
 // Attempts counts all submissions for display; the final-ranking penalty excludes judge errors.
@@ -590,10 +604,11 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 	}
 
 	query := fmt.Sprintf(`
+		WITH scores AS (
 		SELECT
 			sub.user_id,
 			sub.problem_id,
-			p.name,
+			p.name AS problem_name,
 			p.type::text AS problem_type,
 			p.score AS max_score,
 			COUNT(sub.id) AS attempts,
@@ -606,8 +621,28 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 		  %s
 		GROUP BY sub.user_id, sub.problem_id, p.name, p.type, p.score
 		%s
-        ORDER BY 1, 3
-	`, strings.Join(placeholders, ", "), typeFilter, batchQuery)
+		UNION ALL
+		SELECT users.user_id, p.id, p.name, 'code', p.score, 0, 0, NULL
+		FROM unnest(ARRAY[%s]::text[]) AS users(user_id)
+		CROSS JOIN problems p
+		WHERE p.contest_id = $1 AND p.type = 'code'
+		  AND NOT EXISTS (SELECT 1 FROM submissions sub WHERE sub.user_id = users.user_id AND sub.problem_id = p.id AND sub.contest_id = $1)
+		)
+		SELECT scores.*, cases.passed, cases.total
+		FROM scores
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) FILTER (WHERE e.status = 'accepted')::int AS passed, COUNT(*)::int AS total
+			FROM submission_executions e
+			WHERE e.submission_id = (
+				SELECT sub.id FROM submissions sub
+				WHERE sub.user_id = scores.user_id AND sub.problem_id = scores.problem_id AND sub.contest_id = $1
+				ORDER BY CASE WHEN sub.status = 'accepted' THEN scores.max_score ELSE sub.score END DESC,
+				         (sub.status = 'accepted') DESC, sub.created_at DESC, sub.submission_seq DESC
+				LIMIT 1
+			)
+		) cases ON scores.problem_type = 'code'
+		ORDER BY scores.user_id, scores.problem_name, scores.problem_id
+	`, strings.Join(placeholders, ", "), typeFilter, batchQuery, strings.Join(placeholders, ", "))
 
 	rows, err := queryer.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -620,6 +655,7 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 		var userID string
 		var ps dto.ProblemScore
 		var solvedAt sql.NullInt64
+		var passed, total sql.NullInt64
 
 		if err := rows.Scan(
 			&userID,
@@ -630,6 +666,8 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 			&ps.Attempts,
 			&ps.Score,
 			&solvedAt,
+			&passed,
+			&total,
 		); err != nil {
 			log.Printf("ranking-store: problem score row scan failed: %v", err)
 			return nil, fmt.Errorf("scan problem score row: %w", err)
@@ -640,6 +678,10 @@ func (s *RankingStore) getProblemScores(ctx context.Context, queryer rankingQuer
 			ps.SolvedAt = &ts
 		}
 
+		if passed.Valid && total.Valid {
+			passedCount, totalCount := int(passed.Int64), int(total.Int64)
+			ps.TestCasesPassed, ps.TotalTestCases = &passedCount, &totalCount
+		}
 		result[userID] = append(result[userID], ps)
 	}
 	if err := rows.Err(); err != nil {

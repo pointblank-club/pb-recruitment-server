@@ -42,7 +42,7 @@ func TestSummarizeSolves(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			solved, last := summarizeSolves(tc.scores)
+			solved, _, _, last := summarizeSolves(tc.scores)
 			if solved != tc.wantSolve {
 				t.Errorf("solved = %d, want %d", solved, tc.wantSolve)
 			}
@@ -50,6 +50,21 @@ func TestSummarizeSolves(t *testing.T) {
 				t.Errorf("lastSolve = %d, want %d", last, tc.wantLast)
 			}
 		})
+	}
+}
+
+func TestSummarizeSplitSolves(t *testing.T) {
+	scores := []dto.ProblemScore{
+		{Type: "code", SolvedAt: ts(1000)}, // Accepted zero-point questions count.
+		{Type: "code", Score: 25, MaxScore: 100},
+		{Type: "code", MaxScore: 0},
+		{Type: "mcq", SolvedAt: ts(2000)},
+		{Type: "mcq", SolvedAt: ts(3000)},
+		{Type: "mcq", MaxScore: 10},
+	}
+	solved, dsa, mcq, last := summarizeSolves(scores)
+	if solved != 3 || dsa != 1 || mcq != 2 || last != 3000 {
+		t.Fatalf("solves=%d, dsa=%d, mcq=%d, last=%d", solved, dsa, mcq, last)
 	}
 }
 
