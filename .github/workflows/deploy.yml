@@ -4,13 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      force_migration_version:
-        description: >-
-          Only after a failed migration left the database "dirty": the last good
-          version to force before migrating (e.g. 50). Leave empty normally.
-        required: false
-        default: ""
 
 env:
   AWS_REGION: ap-south-1
@@ -78,41 +71,6 @@ jobs:
       # sih-infra): the API image just built supplies the migration files,
       # the official migrate image applies what is pending. The step fails
       # the deploy if a migration fails, before any new task starts.
-      # Manual recovery from a dirty migration: runs the same migrate task with
-      # its final `up` replaced by `force <version>`, then the normal step below
-      # re-applies everything after that version. The command is never printed
-      # because it may carry the database URL.
-      - name: Force migration version
-        if: github.event_name == 'workflow_dispatch' && inputs.force_migration_version != ''
-        env:
-          FORCE_VERSION: ${{ inputs.force_migration_version }}
-        run: |
-          [[ "$FORCE_VERSION" =~ ^[0-9]+$ ]] || { echo "force_migration_version must be a number"; exit 1; }
-          CMD=$(aws ecs describe-task-definition --task-definition pb-recruitment-migrate \
-            --query 'taskDefinition.containerDefinitions[?name==`migrate`].command | [0]' --output json)
-          echo "$CMD" | jq -e 'type == "array" and length > 0' >/dev/null \
-            || { echo "the migrate container has no command to override"; exit 1; }
-          NEW=$(echo "$CMD" | jq -c --arg v "$FORCE_VERSION" '
-            if (.[-1] == "up") then .[:-1] + ["force", $v]
-            else .[:-1] + [(.[-1] | sub(" up\\s*$"; " force " + $v))] end')
-          [ "$NEW" != "$CMD" ] || { echo "could not find a trailing 'up' in the migrate command"; exit 1; }
-          echo "::add-mask::$NEW"
-          NET=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
-            --query 'services[0].networkConfiguration.awsvpcConfiguration' --output json)
-          SUBNETS=$(echo "$NET" | jq -r '.subnets | join(",")'); SG=$(echo "$NET" | jq -r '.securityGroups[0]')
-          OVERRIDES=$(jq -nc --argjson c "$NEW" '{containerOverrides:[{name:"migrate",command:$c}]}')
-          TASK=$(aws ecs run-task --cluster "$ECS_CLUSTER" --task-definition pb-recruitment-migrate --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}" \
-            --overrides "$OVERRIDES" --query 'tasks[0].taskArn' --output text)
-          echo "force task $TASK"
-          aws ecs wait tasks-stopped --cluster "$ECS_CLUSTER" --tasks "$TASK"
-          CODE=$(aws ecs describe-tasks --cluster "$ECS_CLUSTER" --tasks "$TASK" \
-            --query 'tasks[0].containers[?name==`migrate`].exitCode | [0]' --output text)
-          ID=${TASK##*/}
-          aws logs get-log-events --log-group-name /pb-recruitment/api --log-stream-name "migrate/migrate/$ID" \
-            --query 'events[].message' --output text || true
-          test "$CODE" = "0" || { echo "force failed (exit $CODE)"; exit 1; }
-
       - name: Apply database migrations
         run: |
           NET=$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" \
