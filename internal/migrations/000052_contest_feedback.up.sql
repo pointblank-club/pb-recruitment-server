@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS contest_feedback (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    contest_id VARCHAR(255) NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+    user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    platform_smoothness INT NOT NULL CHECK (platform_smoothness BETWEEN 1 AND 5),
+    atmosphere_rating INT CHECK (atmosphere_rating BETWEEN 1 AND 5),
+    difficulty_rating INT CHECK (difficulty_rating BETWEEN 1 AND 5),
+    responsiveness_rating INT CHECK (responsiveness_rating BETWEEN 1 AND 5),
+    time_rating INT CHECK (time_rating BETWEEN 1 AND 5),
+    thoughts_during_event TEXT,
+    thoughts_other TEXT,
+    final_feedback TEXT,
+    logistics_clarity TEXT,
+    logistics_punctuality TEXT,
+    logistics_venue TEXT,
+    best_thing TEXT,
+    recommend_likelihood TEXT,
+    convinced_reasons TEXT[],
+    convinced_other TEXT,
+    suggestions TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT uq_contest_user_feedback UNIQUE (contest_id, user_id)
+);

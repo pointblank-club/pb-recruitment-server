@@ -1328,3 +1328,92 @@ func (cc *ContestController) HandleConsolidateContest(ctx echo.Context) error {
 
 	return ctx.JSON(http.StatusOK, res)
 }
+
+// GetFeedbackStatus godoc
+// @Summary      Get feedback eligibility status
+// @Description  Checks whether candidate can submit feedback for this contest
+// @Tags         Contests
+// @Security     BearerAuth
+// @Param        id path string true "Contest ID"
+// @Success      200 {object} dto.FeedbackStatusResponse
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Not registered"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /contests/{id}/feedback/status [get]
+func (cc *ContestController) GetFeedbackStatus(ctx echo.Context) error {
+	contestID := ctx.Param("id")
+	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
+	if userID == "" {
+		return ctx.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	status, err := cc.contestService.GetFeedbackStatus(ctx.Request().Context(), contestID, userID)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.UserNotRegisteredError) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("get feedback status failed: %v", err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to check feedback status"})
+	}
+
+	return ctx.JSON(http.StatusOK, status)
+}
+
+// SubmitFeedback godoc
+// @Summary      Submit contest feedback
+// @Description  Submits candidate feedback after contest session ends
+// @Tags         Contests
+// @Security     BearerAuth
+// @Param        id path string true "Contest ID"
+// @Param        body body dto.SubmitFeedbackRequest true "Feedback payload"
+// @Success      201 {object} map[string]string
+// @Failure      400 {object} map[string]string "Validation error"
+// @Failure      401 {object} map[string]string "Unauthorized"
+// @Failure      403 {object} map[string]string "Contest session not ended or not registered"
+// @Failure      404 {object} map[string]string "Contest not found"
+// @Failure      409 {object} map[string]string "Feedback already submitted"
+// @Failure      500 {object} map[string]string "Internal server error"
+// @Router       /contests/{id}/feedback [post]
+func (cc *ContestController) SubmitFeedback(ctx echo.Context) error {
+	contestID := ctx.Param("id")
+	userID, _ := ctx.Get(common.AUTH_USER_ID).(string)
+	if userID == "" {
+		return ctx.JSON(http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	}
+
+	var req dto.SubmitFeedbackRequest
+	if reqBody, ok := ctx.Get(common.VALIDATED_REQUEST_BODY).(*dto.SubmitFeedbackRequest); ok && reqBody != nil {
+		req = *reqBody
+	} else {
+		if err := ctx.Bind(&req); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		}
+		req.Trim()
+		if err := middleware.NewValidator().Validate(&req); err != nil {
+			return ctx.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		}
+	}
+
+	err := cc.contestService.SubmitFeedback(ctx.Request().Context(), contestID, userID, &req)
+	if err != nil {
+		if errors.Is(err, common.ContestNotFoundError) {
+			return ctx.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.UserNotRegisteredError) || errors.Is(err, common.ErrContestSessionNotEnded) {
+			return ctx.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
+		if errors.Is(err, common.ErrFeedbackAlreadySubmitted) {
+			return ctx.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+		}
+		log.Errorf("submit feedback failed: %v", err)
+		return ctx.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to submit feedback"})
+	}
+
+	return ctx.JSON(http.StatusCreated, map[string]string{
+		"message": "feedback submitted successfully",
+	})
+}

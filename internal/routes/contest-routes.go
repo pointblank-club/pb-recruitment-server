@@ -97,4 +97,20 @@ func AddContestRoutes(
 		middleware.RequireFirebaseAuth(authClient),
 		middleware.LimitRequests(limiter, "registration", 60, 60),
 	)
+
+	// Get feedback eligibility status
+	e.GET("/contests/:id/feedback/status",
+		contestController.GetFeedbackStatus,
+		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitReads(limiter),
+	)
+
+	// Submit candidate contest feedback (only allowed once session has ended)
+	e.POST("/contests/:id/feedback",
+		contestController.SubmitFeedback,
+		echomdw.BodyLimit("16K"),
+		middleware.RequireFirebaseAuth(authClient),
+		middleware.LimitRequests(limiter, "registration", 60, 60),
+		middleware.ValidateRequest(new(dto.SubmitFeedbackRequest)),
+	)
 }

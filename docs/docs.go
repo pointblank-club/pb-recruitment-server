@@ -2542,6 +2542,170 @@ const docTemplate = `{
                 }
             }
         },
+        "/contests/{id}/feedback": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Submits candidate feedback after contest session ends",
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Submit contest feedback",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Feedback payload",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.SubmitFeedbackRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Contest session not ended or not registered",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Feedback already submitted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/contests/{id}/feedback/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Checks whether candidate can submit feedback for this contest",
+                "tags": [
+                    "Contests"
+                ],
+                "summary": "Get feedback eligibility status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Contest ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/app_internal_models_dto.FeedbackStatusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Not registered",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Contest not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/contests/{id}/leaderboard": {
             "get": {
                 "description": "Get ranked participants with pagination. Public coding results update immediately; MCQ scores, solves, and ranks update in five-minute batches from contest start. Admins may freeze the public ranking display while scoring continues. Admins always see current results; public viewers see all results after contest end once any freeze is released. Problem breakdowns are admin-only.",
@@ -4373,6 +4537,20 @@ const docTemplate = `{
                 }
             }
         },
+        "app_internal_models_dto.FeedbackStatusResponse": {
+            "type": "object",
+            "properties": {
+                "can_submit": {
+                    "type": "boolean"
+                },
+                "has_submitted": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "app_internal_models_dto.GetContestResponse": {
             "type": "object",
             "properties": {
@@ -4941,6 +5119,97 @@ const docTemplate = `{
             "properties": {
                 "authorize_url": {
                     "type": "string"
+                }
+            }
+        },
+        "app_internal_models_dto.SubmitFeedbackRequest": {
+            "type": "object",
+            "required": [
+                "atmosphere_rating",
+                "convinced_reasons",
+                "difficulty_rating",
+                "logistics_clarity",
+                "logistics_punctuality",
+                "logistics_venue",
+                "platform_smoothness",
+                "recommend_likelihood",
+                "responsiveness_rating",
+                "thoughts_during_event",
+                "time_rating"
+            ],
+            "properties": {
+                "atmosphere_rating": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
+                },
+                "best_thing": {
+                    "type": "string",
+                    "maxLength": 2000
+                },
+                "convinced_other": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "convinced_reasons": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "difficulty_rating": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
+                },
+                "final_feedback": {
+                    "type": "string",
+                    "maxLength": 5000
+                },
+                "logistics_clarity": {
+                    "type": "string",
+                    "maxLength": 200
+                },
+                "logistics_punctuality": {
+                    "type": "string",
+                    "maxLength": 200
+                },
+                "logistics_venue": {
+                    "type": "string",
+                    "maxLength": 200
+                },
+                "platform_smoothness": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
+                },
+                "recommend_likelihood": {
+                    "type": "string",
+                    "maxLength": 200
+                },
+                "responsiveness_rating": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
+                },
+                "suggestions": {
+                    "type": "string",
+                    "maxLength": 5000
+                },
+                "thoughts_during_event": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "thoughts_other": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
+                "time_rating": {
+                    "type": "integer",
+                    "maximum": 5,
+                    "minimum": 1
                 }
             }
         },
