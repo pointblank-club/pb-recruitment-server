@@ -138,3 +138,152 @@ func TestYandexAccountsMatchRecruitmentBackupPostgres(t *testing.T) {
 		t.Fatalf("backup registrar uid: %d, %v", uid, err)
 	}
 }
+
+// Migration 000051 creates recruitment-backup's own tables. These are the statements it
+// runs on them (store/participants.go, store/contest.go and store/mirrors.go there),
+// joined with this server's real tables. They must keep working against these migrations.
+func TestBackupTablesMatchRecruitmentBackupPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	exec := func(q string, args ...any) sql.Result {
+		t.Helper()
+		res, err := db.Exec(q, args...)
+		if err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+		return res
+	}
+	const contest, problem, user, submission = "c-backup", "p-backup", "u-1", "s-1"
+	exec(`INSERT INTO contests(id,name,description,registration_start_time,registration_end_time,start_time,end_time)
+		VALUES($1,'Backup','',1,2,3,9000000000000)`, contest)
+	exec(`INSERT INTO problems(id,contest_id,name,score,type) VALUES($1,$2,'A',100,'code')`, problem, contest)
+	insertYandexTestUser(t, db, user, "1DS24CS001")
+	exec(`INSERT INTO contest_registrations(contest_id,user_id,registered_at) VALUES($1,$2,10)`, contest, user)
+	if err := stores.NewYandexAccountStore(db).SaveYandexAccount(context.Background(), &models.YandexAccount{UserID: user,
+		Email: "u-1@college.example", YandexUID: 1130000000000001, YandexLogin: "", AccessToken: "v1:a1",
+		ConsentedAt: 1, ConnectedAt: 1}, 1); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO submissions(id,user_id,contest_id,problem_id,type,language,status,created_at)
+		VALUES($1,$2,$3,$4,'code','cpp','pending',20)`, submission, user, contest, problem)
+
+	// Registrar: candidates registered here with a connected account and no Yandex participant.
+	var pendingUser, pendingLogin string
+	var pendingUID int64
+	if err := db.QueryRow(`
+		SELECT cr.user_id, a.yandex_uid, a.yandex_login
+		FROM contest_registrations cr
+		JOIN yandex_accounts a ON a.user_id = cr.user_id
+		LEFT JOIN yandex_participants p ON p.contest_id = cr.contest_id AND p.user_id = cr.user_id
+		WHERE cr.contest_id = $1
+		  AND (p.user_id IS NULL OR p.participant_id IS NULL OR p.yandex_uid <> a.yandex_uid)
+		ORDER BY (p.last_error IS NOT NULL), cr.registered_at
+		LIMIT $2`, contest, 50).Scan(&pendingUser, &pendingUID, &pendingLogin); err != nil {
+		t.Fatalf("backup pending registrations: %v", err)
+	}
+	if pendingUser != user || pendingUID != 1130000000000001 || pendingLogin != "" {
+		t.Fatalf("pending registration %s %d %q", pendingUser, pendingUID, pendingLogin)
+	}
+	exec(`
+		INSERT INTO yandex_participants AS p
+		    (contest_id, user_id, yandex_uid, yandex_login, participant_id, registered_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
+		ON CONFLICT (contest_id, user_id) DO UPDATE SET
+		    started_at = CASE WHEN p.yandex_uid = EXCLUDED.yandex_uid AND p.participant_id = EXCLUDED.participant_id
+		                      THEN p.started_at END,
+		    yandex_uid = EXCLUDED.yandex_uid,
+		    yandex_login = EXCLUDED.yandex_login,
+		    participant_id = EXCLUDED.participant_id,
+		    registered_at = EXCLUDED.registered_at,
+		    last_error = NULL`, contest, user, int64(1130000000000001), "", int64(4242), int64(30))
+	if res := exec(`
+		UPDATE yandex_participants SET started_at = $4, last_error = $5
+		WHERE contest_id = $1 AND user_id = $2 AND participant_id = $3 AND started_at IS NULL`,
+		contest, user, int64(4242), int64(40), nil); rowsAffected(t, res) != 1 {
+		t.Fatal("backup start did not update the participant")
+	}
+
+	// Enqueue and claim: the send queue joins submissions, participants and accounts.
+	if res := exec(`
+		INSERT INTO submission_mirrors (submission_id, contest_id, user_id, state, queued_at, next_attempt_at)
+		SELECT s.id, s.contest_id, s.user_id, 'queued', $2, $2
+		FROM submissions s
+		JOIN yandex_participants p ON p.contest_id = s.contest_id AND p.user_id = s.user_id
+		WHERE s.contest_id = $1 AND s.type IN ('code', 'mcq')
+		  AND NOT EXISTS (SELECT 1 FROM submission_mirrors sm WHERE sm.submission_id = s.id)
+		ORDER BY s.created_at
+		LIMIT $3
+		ON CONFLICT (submission_id) DO NOTHING`, contest, int64(50), 500); rowsAffected(t, res) != 1 {
+		t.Fatal("backup enqueue did not queue the submission")
+	}
+	var claimedID, claimedUser, problemID, kind, language, token string
+	var claimedAt, firstAttempt, createdAt int64
+	var attempts int
+	var choices any
+	if err := db.QueryRow(`
+		WITH picked AS (
+		    SELECT sm.submission_id
+		    FROM submission_mirrors sm
+		    JOIN yandex_participants p ON p.contest_id = sm.contest_id AND p.user_id = sm.user_id
+		    JOIN yandex_accounts a ON a.user_id = sm.user_id
+		    JOIN submissions s ON s.id = sm.submission_id
+		    WHERE sm.state IN ('queued', 'failed')
+		      AND sm.next_attempt_at <= $1
+		      AND p.participant_id IS NOT NULL
+		      AND p.started_at IS NOT NULL
+		      AND p.yandex_uid = a.yandex_uid
+		      AND a.token_state = 'active'
+		      AND NOT EXISTS (
+		          SELECT 1 FROM submission_mirrors prev
+		          JOIN submissions ps ON ps.id = prev.submission_id
+		          WHERE prev.contest_id = sm.contest_id AND prev.user_id = sm.user_id
+		            AND prev.state IN ('queued', 'failed', 'sending', 'uncertain')
+		            AND (ps.created_at, ps.id) < (s.created_at, s.id))
+		    ORDER BY s.created_at
+		    LIMIT $2
+		    FOR UPDATE OF sm SKIP LOCKED
+		)
+		UPDATE submission_mirrors sm
+		SET state = 'sending',
+		    attempts = sm.attempts + 1,
+		    claimed_at = $1,
+		    first_attempted_at = COALESCE(sm.first_attempted_at, $1)
+		FROM picked, submissions s, yandex_accounts a
+		WHERE sm.submission_id = picked.submission_id
+		  AND s.id = sm.submission_id
+		  AND a.user_id = sm.user_id
+		RETURNING sm.submission_id, sm.user_id, sm.claimed_at, sm.attempts,
+		          s.problem_id, s.type::text, COALESCE(s.language, ''), COALESCE(s.choices, '{}'),
+		          a.access_token, sm.first_attempted_at, s.created_at`, int64(60), 50).Scan(
+		&claimedID, &claimedUser, &claimedAt, &attempts, &problemID, &kind, &language, &choices, &token, &firstAttempt, &createdAt); err != nil {
+		t.Fatalf("backup claim: %v", err)
+	}
+	if claimedID != submission || attempts != 1 || kind != "code" || language != "cpp" || token != "v1:a1" || createdAt != 20 {
+		t.Fatalf("claimed %s %d %s %s %s %d", claimedID, attempts, kind, language, token, createdAt)
+	}
+	exec(`UPDATE submission_mirrors SET state = 'sent', yandex_submission_id = $2, sent_at = $3 WHERE submission_id = $1`,
+		submission, int64(777), int64(70))
+
+	// Constraints the backup relies on: one mirror per Yandex run, mirrors only for known
+	// participants, and only the states it uses.
+	exec(`INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at) VALUES('s-2',$1,$2,$3,'code','pending',21)`,
+		user, contest, problem)
+	exec(`INSERT INTO submission_mirrors (submission_id, contest_id, user_id, queued_at, next_attempt_at) VALUES('s-2',$1,$2,1,1)`, contest, user)
+	for name, q := range map[string]string{
+		"duplicate Yandex run": `UPDATE submission_mirrors SET yandex_submission_id = 777 WHERE submission_id = 's-2'`,
+		"unknown participant":  `INSERT INTO submission_mirrors (submission_id, contest_id, user_id, queued_at, next_attempt_at) VALUES('s-3','c-backup','nobody',1,1)`,
+		"unknown mirror state": `UPDATE submission_mirrors SET state = 'lost' WHERE submission_id = 's-2'`,
+	} {
+		if _, err := db.Exec(q); err == nil {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+}
+
+func rowsAffected(t *testing.T, res sql.Result) int64 {
+	t.Helper()
+	n, err := res.RowsAffected()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
