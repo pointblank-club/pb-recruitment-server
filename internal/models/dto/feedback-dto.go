@@ -14,15 +14,15 @@ type SubmitFeedbackRequest struct {
 	TimeRating           int      `json:"time_rating" validate:"required,min=1,max=5"`
 	ThoughtsDuringEvent  string   `json:"thoughts_during_event" validate:"required,max=1000"`
 	ThoughtsOther        string   `json:"thoughts_other,omitempty" validate:"max=1000"`
-	FinalFeedback        string   `json:"final_feedback" validate:"required,max=5000"`
+	FinalFeedback        string   `json:"final_feedback" validate:"max=5000"`
 	LogisticsClarity     string   `json:"logistics_clarity" validate:"required,max=200"`
 	LogisticsPunctuality string   `json:"logistics_punctuality" validate:"required,max=200"`
 	LogisticsVenue       string   `json:"logistics_venue" validate:"required,max=200"`
-	BestThing            string   `json:"best_thing" validate:"required,max=2000"`
+	BestThing            string   `json:"best_thing" validate:"max=2000"`
 	RecommendLikelihood  string   `json:"recommend_likelihood" validate:"required,max=200"`
 	ConvincedReasons     []string `json:"convinced_reasons" validate:"required,min=1,unique,dive,required,max=200"`
 	ConvincedOther       string   `json:"convinced_other,omitempty" validate:"max=1000"`
-	Suggestions          string   `json:"suggestions" validate:"required,max=5000"`
+	Suggestions          string   `json:"suggestions" validate:"max=5000"`
 }
 
 func (req *SubmitFeedbackRequest) Trim() {

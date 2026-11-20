@@ -970,6 +970,45 @@ func TestFeedbackEndpointProtection(t *testing.T) {
 		}
 	})
 
+	t.Run("allows submission with 201 when text area questions (8, 11, 12) are empty or omitted", func(t *testing.T) {
+		storage := &stores.Storage{
+			Contests: submissionContestStore{
+				contest:        models.Contest{ID: "c1", StartTime: now - 7200000, EndTime: now - 100000},
+				registered:     true,
+				isSessionEnded: false,
+			},
+		}
+		ctrl := NewContestController(services.NewContestService(storage, nil), nil)
+		e := echo.New()
+		bodyWithoutTextAreas := `{
+			"platform_smoothness": 5,
+			"atmosphere_rating": 4,
+			"difficulty_rating": 3,
+			"responsiveness_rating": 4,
+			"time_rating": 5,
+			"thoughts_during_event": "Fun test",
+			"logistics_clarity": "Clear",
+			"logistics_punctuality": "On time",
+			"logistics_venue": "Good venue",
+			"recommend_likelihood": "Highly likely",
+			"convinced_reasons": ["Good problems", "Great platform"]
+		}`
+		req := httptest.NewRequest(http.MethodPost, "/contests/c1/feedback", strings.NewReader(bodyWithoutTextAreas))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		ctx := e.NewContext(req, rec)
+		ctx.SetParamNames("id")
+		ctx.SetParamValues("c1")
+		ctx.Set(common.AUTH_USER_ID, "u1")
+
+		if err := ctrl.SubmitFeedback(ctx); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("expected HTTP 201 Created, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("allows submission with 201 when contest deadline has passed", func(t *testing.T) {
 		storage := &stores.Storage{
 			Contests: submissionContestStore{
