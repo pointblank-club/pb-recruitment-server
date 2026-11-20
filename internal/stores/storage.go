@@ -82,11 +82,6 @@ type Storage struct {
 	Admins interface {
 		IsAdmin(ctx context.Context, userID string) (bool, error)
 	}
-	YandexAccounts interface {
-		GetYandexAccount(ctx context.Context, userID string) (*models.YandexAccount, error)
-		HasYandexAccount(ctx context.Context, userID string) (bool, error)
-		SaveYandexAccount(ctx context.Context, a *models.YandexAccount, now int64) error
-	}
 }
 
 func NewStorage(db *sql.DB) *Storage {
@@ -99,7 +94,5 @@ func NewStorage(db *sql.DB) *Storage {
 		Rankings:    NewRankingStore(db),
 		Problems:    NewProblemStore(db),
 		Admins:      NewAdminStore(db),
-
-		YandexAccounts: NewYandexAccountStore(db),
 	}
 }
