@@ -5,10 +5,13 @@
 --
 -- They have no foreign keys to the API's tables, so deleting a user, contest or submission
 -- here never removes backup data. All times are Unix milliseconds.
+--
+-- IF NOT EXISTS: production already had these tables (created by hand before this
+-- migration existed), so the first deploy failed on CREATE TABLE. The definitions match.
 
 -- One row per candidate per contest: the Yandex account it was registered with and how far
 -- registration and start got. Connecting a different Yandex account registers it again.
-CREATE TABLE yandex_participants (
+CREATE TABLE IF NOT EXISTS yandex_participants (
     contest_id     TEXT NOT NULL,
     user_id        TEXT NOT NULL,
     yandex_uid     BIGINT NOT NULL,
@@ -21,11 +24,11 @@ CREATE TABLE yandex_participants (
     PRIMARY KEY (contest_id, user_id)
 );
 
-CREATE INDEX yandex_participants_pending_idx ON yandex_participants (contest_id)
+CREATE INDEX IF NOT EXISTS yandex_participants_pending_idx ON yandex_participants (contest_id)
     WHERE participant_id IS NULL;
 
 -- One row per code submission or MCQ answer copied to Yandex; this table is the send queue.
-CREATE TABLE submission_mirrors (
+CREATE TABLE IF NOT EXISTS submission_mirrors (
     submission_id        TEXT PRIMARY KEY,
     contest_id           TEXT NOT NULL,
     user_id              TEXT NOT NULL,
@@ -42,11 +45,11 @@ CREATE TABLE submission_mirrors (
     FOREIGN KEY (contest_id, user_id) REFERENCES yandex_participants (contest_id, user_id)
 );
 
-CREATE UNIQUE INDEX submission_mirrors_yandex_id_idx ON submission_mirrors (yandex_submission_id)
+CREATE UNIQUE INDEX IF NOT EXISTS submission_mirrors_yandex_id_idx ON submission_mirrors (yandex_submission_id)
     WHERE yandex_submission_id IS NOT NULL;
-CREATE INDEX submission_mirrors_ready_idx ON submission_mirrors (next_attempt_at)
+CREATE INDEX IF NOT EXISTS submission_mirrors_ready_idx ON submission_mirrors (next_attempt_at)
     WHERE state IN ('queued', 'failed');
-CREATE INDEX submission_mirrors_unresolved_idx ON submission_mirrors (claimed_at)
+CREATE INDEX IF NOT EXISTS submission_mirrors_unresolved_idx ON submission_mirrors (claimed_at)
     WHERE state IN ('sending', 'uncertain');
-CREATE INDEX submission_mirrors_open_by_user_idx ON submission_mirrors (contest_id, user_id)
+CREATE INDEX IF NOT EXISTS submission_mirrors_open_by_user_idx ON submission_mirrors (contest_id, user_id)
     WHERE state IN ('queued', 'failed', 'sending', 'uncertain');
