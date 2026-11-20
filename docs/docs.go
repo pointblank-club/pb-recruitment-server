@@ -5126,17 +5126,14 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "atmosphere_rating",
-                "best_thing",
                 "convinced_reasons",
                 "difficulty_rating",
-                "final_feedback",
                 "logistics_clarity",
                 "logistics_punctuality",
                 "logistics_venue",
                 "platform_smoothness",
                 "recommend_likelihood",
                 "responsiveness_rating",
-                "suggestions",
                 "thoughts_during_event",
                 "time_rating"
             ],
