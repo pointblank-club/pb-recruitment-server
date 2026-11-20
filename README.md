@@ -56,7 +56,7 @@ make swagger
 - Add `DB_ADDR` to `.env`
 - Run these commands from the backend directory. Include `$HOME/go/bin` in `PATH`
   if `migrate` was installed with `go install`.
-- The current schema requires migrations through `000050`: submission cooldowns
+- The current schema requires migrations through `000051`: submission cooldowns
   (`000027`), saved final ranks (`000028`), internal compiler diagnostics (`000029`),
   Judge0 recovery state (`000030`), ordered recovery claims (`000031`), a single recovery deadline
   (`000032`), Dolos plagiarism detection (`000033`), the per-user problem
@@ -67,9 +67,10 @@ make swagger
   removal of per-question time/memory settings (`000042`), session endings (`000043`),
   MCQ verdict history (`000044`), leaderboard batches (`000045`), coding-only
   resource settings (`000046`), SEB sessions (`000047`), partial code scoring
-  (`000048`), public leaderboard freeze snapshots (`000049`), and candidates' Yandex
-  accounts for the backup contest (`000050`).
-  Stop old API writers and drain in-flight preparation, apply through `000050`, then
+  (`000048`), public leaderboard freeze snapshots (`000049`), candidates' Yandex
+  accounts for the backup contest (`000050`), and recruitment-backup's working tables
+  (`000051`).
+  Stop old API writers and drain in-flight preparation, apply through `000051`, then
   start the new API with the same `SUBMISSION_MAX_PENDING` on every replica. Do not mix
   old and new writers. See [rollout and rollback requirements](SECURITY_LIMITS.md#code-submission-admission-and-retries).
   `make migrate-up`
@@ -300,10 +301,15 @@ invalid setup, or `REQUIRE_YANDEX_CONNECT=true` without them, stops the server a
 | `REQUIRE_YANDEX_CONNECT` | `true` to refuse registration without a connected account |
 | `YANDEX_OAUTH_AUTHORIZE_URL`, `YANDEX_OAUTH_URL`, `YANDEX_LOGIN_INFO_URL` | Optional overrides of the Yandex endpoints |
 
+Migration `000051` also creates the backup service's own working tables,
+`yandex_participants` and `submission_mirrors`, so this server's deploy sets up the
+whole database and the backup service runs no migrations of its own. The API never
+reads or writes them, and they have no foreign keys to its tables.
+
 Times in `yandex_accounts` are Unix milliseconds and tokens use the backup's sealed
-format, so keep the table and sealing in step with recruitment-backup
+format, so keep these tables and the sealing in step with recruitment-backup
 (`TestYandexAccountsMatchRecruitmentBackupPostgres`, `TestSealFormatMatchesRecruitmentBackup`).
-Deploy this server and its migration first, then the website, then the backup
+Deploy this server and its migrations first, then the website, then the backup
 service. Delete the `yandex_accounts` rows after recruitment, as promised to candidates.
 
 ## PostgreSQL tests
