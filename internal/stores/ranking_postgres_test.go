@@ -795,3 +795,110 @@ func TestPartialAttemptFinishTimeTieBreakerPostgres(t *testing.T) {
 		t.Errorf("consolidated leaderboard: expected User B rank 2, got user %s rank %d", consLB.Entries[1].UserID, consLB.Entries[1].Rank)
 	}
 }
+
+func TestLeaderboardDSABreakdownPostgres(t *testing.T) {
+	db := postgresTestDB(t)
+	ctx := context.Background()
+	contest, users, problems := seedFreezeContest(t, db, 2)
+	if _, err := db.Exec(`DELETE FROM submissions WHERE contest_id=$1`, contest); err != nil {
+		t.Fatal(err)
+	}
+	// Solved, partial, failed, and untouched questions. A later worse submission
+	// must not replace the partial submission's test-case counts.
+	for _, sub := range []struct {
+		problem       int
+		status        string
+		score         float64
+		passed, total int
+		created       int64
+	}{
+		{0, "accepted", 100, 4, 4, 100},
+		{1, "tle", 37.5, 3, 8, 110},
+		{1, "wrong_answer", 12.5, 1, 8, 120},
+		{2, "failed_to_process", 0, 0, 0, 130},
+	} {
+		id := uuid.NewString()
+		if _, err := db.Exec(`INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,score,created_at) VALUES($1,$2,$3,$4,'code',$5,$6,$7)`, id, users[0], contest, problems[sub.problem], sub.status, sub.score, sub.created); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < sub.total; i++ {
+			status := "wrong_answer"
+			if i < sub.passed {
+				status = "accepted"
+			}
+			if _, err := db.Exec(`INSERT INTO submission_executions(id,submission_id,test_case_index,status,created_at) VALUES($1,$2,$3,$4,100)`, uuid.NewString(), id, i, status); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	mcq := uuid.NewString()
+	if err := stores.NewProblemStore(db).CreateProblem(ctx, &models.Problem{ID: mcq, ContestID: contest, Name: "Private MCQ", Type: models.MCQ, Score: 10, Answer: []int{1}, Options: []string{"a", "b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO submissions(id,user_id,contest_id,problem_id,type,status,created_at,score,choices) VALUES($1,$2,$3,$4,'mcq','accepted',100,10,ARRAY[1])`, uuid.NewString(), users[0], contest, mcq); err != nil {
+		t.Fatal(err)
+	}
+	store := stores.NewRankingStore(db)
+	store.SetCacheTTL(0)
+	if _, err := store.ConsolidateContest(ctx, contest, false, false); err != nil {
+		t.Fatal(err)
+	}
+	board, err := store.GetLeaderboard(ctx, contest, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBoard := func(board *dto.GetLeaderboardResponse, frozen bool) {
+		t.Helper()
+		if len(board.Entries) != 2 {
+			t.Fatalf("entries=%+v", board.Entries)
+		}
+		for _, entry := range board.Entries {
+			wantDSA, wantMCQ := 0, 0
+			if entry.UserID == users[0] {
+				wantDSA, wantMCQ = 1, 1
+			}
+			if entry.DSASolved == nil || entry.MCQSolved == nil || *entry.DSASolved != wantDSA || *entry.MCQSolved != wantMCQ {
+				t.Fatalf("split counts=%+v", entry)
+			}
+			seen := map[string]dto.ProblemScore{}
+			for _, ps := range entry.ProblemScores {
+				if frozen && ps.Type != "code" {
+					t.Fatalf("frozen MCQ detail leaked: %+v", ps)
+				}
+				seen[ps.ProblemID] = ps
+			}
+			for _, id := range problems {
+				if _, ok := seen[id]; !ok {
+					t.Fatalf("missing DSA %s: %+v", id, entry)
+				}
+			}
+			if entry.UserID != users[0] {
+				for _, ps := range seen {
+					if ps.Attempts != 0 || ps.Score != 0 || ps.SolvedAt != nil {
+						t.Fatalf("untouched participant=%+v", ps)
+					}
+				}
+				continue
+			}
+			partial := seen[problems[1]]
+			if partial.Score != 37.5 || partial.Attempts != 2 || partial.SolvedAt != nil || partial.TestCasesPassed == nil || *partial.TestCasesPassed != 3 || partial.TotalTestCases == nil || *partial.TotalTestCases != 8 {
+				t.Fatalf("best partial=%+v", partial)
+			}
+			if seen[problems[0]].SolvedAt == nil || seen[problems[2]].Attempts != 1 || seen[problems[3]].Attempts != 0 {
+				t.Fatalf("DSA results=%+v", seen)
+			}
+		}
+	}
+	assertBoard(board, false)
+	if err := store.SetLeaderboardFrozen(ctx, contest, true, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE submissions SET score=99 WHERE contest_id=$1 AND problem_id=$2`, contest, problems[1]); err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := store.GetFrozenLeaderboard(ctx, contest, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBoard(frozen, true)
+}

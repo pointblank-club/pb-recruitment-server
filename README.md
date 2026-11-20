@@ -243,7 +243,13 @@ verdicts finalized before the latest interval boundary. Delayed grading and regr
 boundary; previously published MCQ verdicts remain in effect until then. Admins
 see all results immediately, and the public leaderboard shows all results as soon
 as the contest ends. Incorrect or pending
-answers do not count as solves. Per-problem breakdowns remain admin-only.
+answers do not count as solves. The leaderboard includes separate `dsa_solved`
+and `mcq_solved` counts. Public per-problem breakdowns include DSA questions,
+including those not attempted; MCQ breakdowns remain admin-only. DSA test-case
+counts come from the submission earning the displayed score, rather than the
+latest attempt. Public freezes save these counts and DSA breakdowns together
+with the rankings. Snapshots created before this update omit the split counts
+and breakdowns until an admin unfreezes the leaderboard.
 MCQ verdict history is stored in PostgreSQL so publication is consistent across
 replicas and restarts. The first public request for a cutoff atomically freezes
 its MCQ problem totals in PostgreSQL; subsequent pages and replicas reuse them,

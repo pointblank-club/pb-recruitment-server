@@ -4295,7 +4295,14 @@ const docTemplate = `{
         "app_internal_models_dto.LeaderboardEntry": {
             "type": "object",
             "properties": {
+                "dsa_solved": {
+                    "description": "Older frozen snapshots omit the split counts.",
+                    "type": "integer"
+                },
                 "last_submission_time": {
+                    "type": "integer"
+                },
+                "mcq_solved": {
                     "type": "integer"
                 },
                 "problem_scores": {
@@ -4495,6 +4502,12 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "solved_at": {
+                    "type": "integer"
+                },
+                "test_cases_passed": {
+                    "type": "integer"
+                },
+                "total_test_cases": {
                     "type": "integer"
                 },
                 "type": {

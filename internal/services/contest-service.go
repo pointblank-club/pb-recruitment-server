@@ -336,7 +336,7 @@ func (cs *ContestService) GetLeaderboard(ctx context.Context, contestID string, 
 	if !isAdmin {
 		sanitizedEntries := make([]dto.LeaderboardEntry, len(res.Entries))
 		for i, entry := range res.Entries {
-			entry.ProblemScores = nil
+			entry.ProblemScores = slices.DeleteFunc(slices.Clone(entry.ProblemScores), func(ps dto.ProblemScore) bool { return ps.Type != "code" })
 			sanitizedEntries[i] = entry
 		}
 		resCopy := *res
